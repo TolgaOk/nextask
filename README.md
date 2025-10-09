@@ -2,6 +2,8 @@
 
 Redis-based task distribution for ML experiments.
 
+> ⚠️ **Warning**: This is a vibe coding project. While it includes comprehensive tests and follows best practices, it was developed rapidly and may have rough edges. Use in production at your own risk.
+
 ## Installation
 
 ```bash
