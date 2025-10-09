@@ -1,0 +1,49 @@
+[project]
+name = "nextask"
+version = "0.1.0"
+description = "Redis-based task distribution for ML experiments"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "redis>=5.0.0",
+    "click>=8.1.0",
+    "rich>=13.0.0",
+]
+
+[project.scripts]
+nextask = "nextask.cli:cli"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "N",   # pep8-naming
+    "UP",  # pyupgrade
+    "B",   # flake8-bugbear
+    "C4",  # flake8-comprehensions
+    "SIM", # flake8-simplify
+]
+ignore = []
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.4.2",
+    "pytest-timeout>=2.4.0",
+    "redis>=6.4.0",
+    "ruff>=0.14.0",
+]
+
