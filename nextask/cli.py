@@ -15,7 +15,7 @@ from rich.panel import Panel
 from rich.json import JSON
 from rich import box
 
-from nextask import RunStatus, TaskQueue
+from nextask import RecordStatus, TaskQueue
 
 console = Console()
 
@@ -49,7 +49,7 @@ def get_queue(ctx) -> TaskQueue:
 
 @cli.command()
 @click.argument("path")
-@click.option("--data", default="{}", help="JSON data for the task")
+@click.option("--data", default="{}", help="JSON data for the record")
 @click.option(
     "--status",
     type=click.Choice(["pending", "running", "completed", "failed"]),
@@ -58,10 +58,10 @@ def get_queue(ctx) -> TaskQueue:
 )
 @click.pass_context
 def add(ctx, path, data, status):
-    """Add a new task to the queue.
+    """Add a new record to the queue.
     
     Example:
-        nextask add /experiments/run1 --data '{"lr": 0.001, "epochs": 100}'
+        nextask add /experiments/exp001 --data '{"lr": 0.001, "epochs": 100}'
     """
     queue = get_queue(ctx)
     
@@ -72,19 +72,18 @@ def add(ctx, path, data, status):
         sys.exit(1)
     
     try:
-        run = queue.create_run(path, data=data_dict, status=status)
+        record = queue.create_record(path, data=data_dict, status=status)
         
-        # Create a panel with the task info
-        info = f"[cyan]Path:[/cyan] {run.path}\n"
-        info += f"[cyan]Status:[/cyan] {_status_style(run.status.value)}"
+        info = f"[cyan]Path:[/cyan] {record.path}\n"
+        info += f"[cyan]Status:[/cyan] {_status_style(record.status.value)}"
         
-        console.print(Panel(info, title="✓ Task Created", border_style="green"))
+        console.print(Panel(info, title="✓ Record Created", border_style="green"))
         
-        if run.data:
+        if record.data:
             console.print("\n[cyan]Data:[/cyan]")
-            console.print(JSON.from_data(run.data))
+            console.print(JSON.from_data(record.data))
     except Exception as e:
-        console.print(f"[red]✗ Error creating task:[/red] {e}")
+        console.print(f"[red]✗ Error creating record:[/red] {e}")
         sys.exit(1)
 
 
@@ -99,7 +98,7 @@ def add(ctx, path, data, status):
 @click.option("--json", "output_json", is_flag=True, help="Output as JSON")
 @click.pass_context
 def list(ctx, prefix, status, limit, output_json):
-    """List tasks with optional filters.
+    """List records with optional filters.
     
     Example:
         nextask list --prefix /experiments --status pending --limit 10
@@ -107,18 +106,16 @@ def list(ctx, prefix, status, limit, output_json):
     queue = get_queue(ctx)
     
     try:
-        runs = queue.get_runs(prefix)
+        records = queue.list_records(prefix)
         
-        # Filter by status if specified
         if status:
-            runs = [r for r in runs if r.status.value == status]
+            records = [r for r in records if r.status.value == status]
         
-        # Apply limit
         if limit:
-            runs = runs[:limit]
+            records = records[:limit]
         
-        if not runs:
-            console.print("[yellow]No tasks found.[/yellow]")
+        if not records:
+            console.print("[yellow]No records found.[/yellow]")
             return
         
         if output_json:
@@ -130,31 +127,30 @@ def list(ctx, prefix, status, limit, output_json):
                     "created_at": r.created_at,
                     "updated_at": r.updated_at,
                 }
-                for r in runs
+                for r in records
             ]
             console.print(json.dumps(output, indent=2))
         else:
-            # Create a beautiful table
-            table = Table(title=f"Tasks (found {len(runs)})", box=box.ROUNDED)
+            table = Table(title=f"Records (found {len(records)})", box=box.ROUNDED)
             table.add_column("Status", style="cyan", width=12)
             table.add_column("Path", style="white")
             table.add_column("Created", style="dim")
             table.add_column("Data", style="dim")
             
-            for run in runs:
-                status_display = _status_style(run.status.value)
-                data_display = json.dumps(run.data)[:50] + "..." if len(json.dumps(run.data)) > 50 else json.dumps(run.data)
+            for record in records:
+                status_display = _status_style(record.status.value)
+                data_display = json.dumps(record.data)[:50] + "..." if len(json.dumps(record.data)) > 50 else json.dumps(record.data)
                 
                 table.add_row(
                     status_display,
-                    run.path,
-                    _format_timestamp(run.created_at),
-                    data_display if run.data else "",
+                    record.path,
+                    _format_timestamp(record.created_at),
+                    data_display if record.data else "",
                 )
             
             console.print(table)
     except Exception as e:
-        console.print(f"[red]✗ Error listing tasks:[/red] {e}")
+        console.print(f"[red]✗ Error listing records:[/red] {e}")
         sys.exit(1)
 
 
@@ -162,40 +158,37 @@ def list(ctx, prefix, status, limit, output_json):
 @click.argument("path")
 @click.pass_context
 def show(ctx, path):
-    """Show detailed information about a specific task.
+    """Show detailed information about a specific record.
     
     Example:
-        nextask show /experiments/run1
+        nextask show /experiments/exp001
     """
     queue = get_queue(ctx)
     
     try:
-        run = queue.get_run(path)
-        if not run:
-            console.print(f"[red]✗ Task not found:[/red] {path}")
+        record = queue.get_record(path)
+        if not record:
+            console.print(f"[red]✗ Record not found:[/red] {path}")
             sys.exit(1)
         
-        # Create a simple, clean info table
-        table = Table(title="Task", box=box.ROUNDED, show_header=False)
+        table = Table(title="Record", box=box.ROUNDED, show_header=False)
         table.add_column("Property", style="cyan", width=15, vertical="top")
         table.add_column("Value", style="white")
         
-        # Basic info
-        table.add_row("Path", run.path)
-        table.add_row("Status", _status_style(run.status.value))
-        table.add_row("Created", _format_timestamp(run.created_at))
-        table.add_row("Updated", _format_timestamp(run.updated_at))
-        table.add_row("Duration", f"{run.duration:.2f}s")
-        table.add_row("Age", f"{run.age:.2f}s")
+        table.add_row("Path", record.path)
+        table.add_row("Status", _status_style(record.status.value))
+        table.add_row("Created", _format_timestamp(record.created_at))
+        table.add_row("Updated", _format_timestamp(record.updated_at))
+        table.add_row("Duration", f"{record.duration:.2f}s")
+        table.add_row("Age", f"{record.age:.2f}s")
         
-        # Add data if present
-        if run.data:
-            json_str = json.dumps(run.data, indent=2)
+        if record.data:
+            json_str = json.dumps(record.data, indent=2)
             table.add_row("[bold]Data[/bold]", json_str)
         
         console.print(table)
     except Exception as e:
-        console.print(f"[red]✗ Error showing task:[/red] {e}")
+        console.print(f"[red]✗ Error showing record:[/red] {e}")
         sys.exit(1)
 
 
@@ -209,11 +202,11 @@ def show(ctx, path):
 @click.option("--data", help="Update data (JSON, will merge)")
 @click.pass_context
 def update(ctx, path, status, data):
-    """Update a task's status or data.
+    """Update a record's status or data.
     
     Example:
-        nextask update /experiments/run1 --status completed
-        nextask update /experiments/run1 --data '{"accuracy": 0.95}'
+        nextask update /experiments/exp001 --status completed
+        nextask update /experiments/exp001 --data '{"accuracy": 0.95}'
     """
     queue = get_queue(ctx)
     
@@ -222,29 +215,26 @@ def update(ctx, path, status, data):
         sys.exit(1)
     
     try:
-        # Check if task exists
-        run = queue.get_run(path)
-        if not run:
-            console.print(f"[red]✗ Task not found:[/red] {path}")
+        record = queue.get_record(path)
+        if not record:
+            console.print(f"[red]✗ Record not found:[/red] {path}")
             sys.exit(1)
         
-        # Update status
         if status:
             queue.set_status(path, status)
             console.print(f"[green]✓[/green] Updated status to: {_status_style(status)}")
         
-        # Update data
         if data:
             try:
                 data_dict = json.loads(data)
-                queue.set_data(path, data_dict)
+                queue.update_data(path, data_dict)
                 console.print(f"[green]✓[/green] Updated data:")
                 console.print(JSON.from_data(data_dict, indent=2))
             except json.JSONDecodeError as e:
                 console.print(f"[red]✗ Invalid JSON data:[/red] {e}")
                 sys.exit(1)
     except Exception as e:
-        console.print(f"[red]✗ Error updating task:[/red] {e}")
+        console.print(f"[red]✗ Error updating record:[/red] {e}")
         sys.exit(1)
 
 
@@ -260,36 +250,33 @@ def stats(ctx, prefix):
     queue = get_queue(ctx)
     
     try:
-        runs = queue.get_runs(prefix)
+        records = queue.list_records(prefix)
         
-        if not runs:
-            console.print(f"[yellow]No tasks found for prefix: {prefix}[/yellow]")
+        if not records:
+            console.print(f"[yellow]No records found for prefix: {prefix}[/yellow]")
             return
         
-        # Calculate statistics
         status_counts = {"pending": 0, "running": 0, "completed": 0, "failed": 0}
         total_duration = 0
         
-        for run in runs:
-            status_counts[run.status.value] = status_counts.get(run.status.value, 0) + 1
-            total_duration += run.duration
+        for record in records:
+            status_counts[record.status.value] = status_counts.get(record.status.value, 0) + 1
+            total_duration += record.duration
         
-        avg_duration = total_duration / len(runs) if runs else 0
+        avg_duration = total_duration / len(records) if records else 0
         
-        # Create stats table
         table = Table(title=f"Queue Statistics (prefix: {prefix})", box=box.ROUNDED)
         table.add_column("Metric", style="cyan")
         table.add_column("Value", style="white", justify="right")
         
-        table.add_row("Total tasks", str(len(runs)))
+        table.add_row("Total records", str(len(records)))
         table.add_row("Pending", f"[yellow]{status_counts['pending']}[/yellow]")
         table.add_row("Running", f"[blue]{status_counts['running']}[/blue]")
         table.add_row("Completed", f"[green]{status_counts['completed']}[/green]")
         table.add_row("Failed", f"[red]{status_counts['failed']}[/red]")
-        table.add_row("", "")  # Separator
+        table.add_row("", "")
         table.add_row("Avg duration", f"{avg_duration:.2f}s")
         
-        # Calculate completion rate
         finished = status_counts['completed'] + status_counts['failed']
         if finished > 0:
             success_rate = (status_counts['completed'] / finished) * 100
@@ -303,17 +290,17 @@ def stats(ctx, prefix):
 
 
 @cli.command()
-@click.option("--prefix", help="Clear tasks with prefix")
+@click.option("--prefix", help="Clear records with prefix")
 @click.option(
     "--status",
     type=click.Choice(["pending", "running", "completed", "failed"]),
-    help="Clear tasks with status",
+    help="Clear records with status",
 )
-@click.option("--all", "clear_all", is_flag=True, help="Clear all tasks")
+@click.option("--all", "clear_all", is_flag=True, help="Clear all records")
 @click.option("--yes", is_flag=True, help="Skip confirmation")
 @click.pass_context
 def clear(ctx, prefix, status, clear_all, yes):
-    """Clear tasks from the queue (with confirmation).
+    """Clear records from the queue (with confirmation).
     
     Example:
         nextask clear --status failed
@@ -322,42 +309,39 @@ def clear(ctx, prefix, status, clear_all, yes):
     queue = get_queue(ctx)
     
     try:
-        # Get tasks to clear
         if clear_all:
-            runs = queue.get_runs("/")
-            msg = "all tasks"
+            records = queue.list_records("/")
+            msg = "all records"
         elif prefix:
-            runs = queue.get_runs(prefix)
-            msg = f"tasks with prefix '{prefix}'"
+            records = queue.list_records(prefix)
+            msg = f"records with prefix '{prefix}'"
         elif status:
-            runs = queue.get_runs("/")
-            runs = [r for r in runs if r.status.value == status]
-            msg = f"tasks with status '{status}'"
+            records = queue.list_records("/")
+            records = [r for r in records if r.status.value == status]
+            msg = f"records with status '{status}'"
         else:
             console.print("[red]✗ Must specify --prefix, --status, or --all[/red]")
             sys.exit(1)
         
-        if not runs:
-            console.print("[yellow]No tasks to clear.[/yellow]")
+        if not records:
+            console.print("[yellow]No records to clear.[/yellow]")
             return
         
-        # Confirm deletion
         if not yes:
-            console.print(f"[yellow]⚠  About to delete {len(runs)} {msg}[/yellow]")
+            console.print(f"[yellow]⚠  About to delete {len(records)} {msg}[/yellow]")
             if not click.confirm("Continue?"):
                 console.print("[dim]Cancelled.[/dim]")
                 return
         
-        # Delete tasks
-        for run in runs:
-            key = f"run:{run.path}"
+        for record in records:
+            key = f"record:{record.path}"
             queue.redis.delete(key)
-            queue.redis.srem("runs:index", run.path)
-            queue.redis.zrem(f"status:{run.status.value}", run.path)
+            queue.redis.srem("records:index", record.path)
+            queue.redis.zrem(f"status:{record.status.value}", record.path)
         
-        console.print(f"[green]✓ Cleared {len(runs)} task(s)[/green]")
+        console.print(f"[green]✓ Cleared {len(records)} record(s)[/green]")
     except Exception as e:
-        console.print(f"[red]✗ Error clearing tasks:[/red] {e}")
+        console.print(f"[red]✗ Error clearing records:[/red] {e}")
         sys.exit(1)
 
 

@@ -1,6 +1,10 @@
 """nextask: Redis-based task distribution for ML experiments."""
 
-from nextask.models import Run, RunStatus
+from nextask.models import Record, RecordStatus
 from nextask.queue import TaskQueue
 
-__all__ = ["TaskQueue", "Run", "RunStatus"]
+# Backward compatibility aliases
+Run = Record
+RunStatus = RecordStatus
+
+__all__ = ["TaskQueue", "Record", "RecordStatus", "Run", "RunStatus"]

@@ -7,19 +7,27 @@ from typing import Any, Optional, Union
 import redis
 
 from nextask.lua.loader import load_lua_script
-from nextask.models import Run, RunStatus, validate_json_serializable
+from nextask.models import (
+    DEFAULT_PRIMITIVE_TYPES,
+    Record,
+    RecordStatus,
+    validate_json_serializable,
+)
 
 
 class TaskQueue:
     """Redis-based task queue with hierarchical path organization.
 
-    Manages distributed ML experiment runs with status tracking and
-    hierarchical path-based filtering. Uses atomic Lua scripts for
-    distributed-safe operations.
+    Manages distributed records with status tracking and hierarchical
+    path-based filtering. Uses atomic Lua scripts for distributed-safe
+    operations.
 
     Attributes:
         redis: Redis client connection.
+        primitive_types: Tuple of types allowed in append_data. Can be customized via subclassing.
     """
+
+    primitive_types = DEFAULT_PRIMITIVE_TYPES
 
     def __init__(
         self,
@@ -68,49 +76,49 @@ class TaskQueue:
         """Convert user-facing path to Redis key.
 
         Args:
-            path: User path like /runs/ppo/exp-001.
+            path: User path like /experiments/exp-001.
 
         Returns:
-            Redis key like run:/runs/ppo/exp-001.
+            Redis key like record:/experiments/exp-001.
         """
-        return f"run:{path}"
+        return f"record:{path}"
 
     def _key_to_path(self, key: str) -> str:
         """Convert Redis key to user-facing path.
 
         Args:
-            key: Redis key like run:/runs/ppo/exp-001.
+            key: Redis key like record:/experiments/exp-001.
 
         Returns:
-            User path like /runs/ppo/exp-001.
+            User path like /experiments/exp-001.
         """
-        return key.removeprefix("run:")
+        return key.removeprefix("record:")
 
-    def create_run(
+    def create_record(
         self,
         path: str,
         data: Optional[dict[str, Any]] = None,
-        status: Union[RunStatus, str] = RunStatus.PENDING,
-    ) -> Run:
-        """Create a new run at the specified path.
+        status: Union[RecordStatus, str] = RecordStatus.PENDING,
+    ) -> Record:
+        """Create a new record at the specified path.
 
         Args:
-            path: Hierarchical path for the run (e.g., /runs/ppo/2025-05-18/exp-001).
-            data: Optional dictionary of run parameters and data (must be JSON serializable).
-            status: Initial status (default: RunStatus.PENDING).
+            path: Hierarchical path for the record (e.g., /experiments/2025-05-18/exp-001).
+            data: Optional dictionary of record parameters and data (must be JSON serializable).
+            status: Initial status (default: RecordStatus.PENDING).
 
         Returns:
-            Created Run object with path, status, data, and timestamps.
+            Created Record object with path, status, data, and timestamps.
 
         Raises:
             TypeError: If data is not JSON serializable.
         """
         data = validate_json_serializable(data) if data is not None else {}
-        status_value = status.value if isinstance(status, RunStatus) else status
+        status_value = status.value if isinstance(status, RecordStatus) else status
         key = self._path_to_key(path)
         now = time.time()
 
-        run_data = {
+        record_data = {
             "path": path,
             "status": status_value,
             "data": json.dumps(data),
@@ -119,66 +127,66 @@ class TaskQueue:
         }
 
         pipe = self.redis.pipeline()
-        pipe.hset(key, mapping=run_data)
-        pipe.sadd("runs:index", path)
+        pipe.hset(key, mapping=record_data)
+        pipe.sadd("records:index", path)
         pipe.zadd(f"status:{status_value}", {path: now})
         pipe.execute()
 
-        return self._deserialize_run(run_data)
+        return self._deserialize_record(record_data)
 
-    def get_run(self, path: str) -> Optional[Run]:
-        """Get a single run by exact path.
+    def get_record(self, path: str) -> Optional[Record]:
+        """Get a single record by exact path.
 
         Args:
-            path: Exact run path.
+            path: Exact record path.
 
         Returns:
-            Run object or None if not found.
+            Record object or None if not found.
         """
         key = self._path_to_key(path)
-        run_data = self.redis.hgetall(key)
+        record_data = self.redis.hgetall(key)
 
-        if not run_data:
+        if not record_data:
             return None
 
-        return self._deserialize_run(run_data)
+        return self._deserialize_record(record_data)
 
-    def get_runs(self, prefix: str = "/") -> list[Run]:
-        """Get all runs matching the path prefix.
+    def list_records(self, prefix: str = "/") -> list[Record]:
+        """Get all records matching the path prefix.
 
         Args:
-            prefix: Path prefix to filter runs (default: / for all runs).
+            prefix: Path prefix to filter records (default: / for all records).
 
         Returns:
-            List of Run objects matching the prefix.
+            List of Record objects matching the prefix.
         """
-        all_paths = self.redis.smembers("runs:index")
+        all_paths = self.redis.smembers("records:index")
         matching_paths = [p for p in all_paths if p.startswith(prefix)]
 
-        runs = []
+        records = []
         for path in matching_paths:
-            run = self.get_run(path)
-            if run:
-                runs.append(run)
+            record = self.get_record(path)
+            if record:
+                records.append(record)
 
-        return sorted(runs, key=lambda r: r.created_at)
+        return sorted(records, key=lambda r: r.created_at)
 
-    def set_status(self, path: str, status: Union[RunStatus, str]) -> None:
-        """Update the status of a run.
+    def set_status(self, path: str, status: Union[RecordStatus, str]) -> None:
+        """Update the status of a record.
 
         Args:
-            path: Run path.
-            status: New status (RunStatus enum or string: pending/running/completed/failed).
+            path: Record path.
+            status: New status (RecordStatus enum or string: pending/running/completed/failed).
 
         Raises:
-            ValueError: If run not found.
+            ValueError: If record not found.
         """
-        run = self.get_run(path)
-        if not run:
-            raise ValueError(f"Run not found: {path}")
+        record = self.get_record(path)
+        if not record:
+            raise ValueError(f"Record not found: {path}")
 
-        status_value = status.value if isinstance(status, RunStatus) else status
-        old_status = run.status.value
+        status_value = status.value if isinstance(status, RecordStatus) else status
+        old_status = record.status.value
         key = self._path_to_key(path)
         now = time.time()
 
@@ -190,35 +198,35 @@ class TaskQueue:
         pipe.execute()
 
     def get_status(self, path: str) -> Optional[str]:
-        """Get the status of a run.
+        """Get the status of a record.
 
         Args:
-            path: Run path.
+            path: Record path.
 
         Returns:
-            Status string or None if run not found.
+            Status string or None if record not found.
         """
         key = self._path_to_key(path)
         return self.redis.hget(key, "status")
 
-    def set_data(self, path: str, data: dict[str, Any]) -> None:
-        """Update run data (merges with existing data).
+    def update_data(self, path: str, data: dict[str, Any]) -> None:
+        """Update record data (merges with existing data).
 
         Args:
-            path: Run path.
-            data: Dictionary of data to merge with existing run data (must be JSON serializable).
+            path: Record path.
+            data: Dictionary of data to merge with existing record data (must be JSON serializable).
 
         Raises:
-            ValueError: If run not found.
+            ValueError: If record not found.
             TypeError: If data is not JSON serializable.
         """
         data = validate_json_serializable(data)
 
-        run = self.get_run(path)
-        if not run:
-            raise ValueError(f"Run not found: {path}")
+        record = self.get_record(path)
+        if not record:
+            raise ValueError(f"Record not found: {path}")
 
-        existing_data = run.data
+        existing_data = record.data
         merged_data = {**existing_data, **data}
 
         key = self._path_to_key(path)
@@ -230,13 +238,13 @@ class TaskQueue:
         pipe.execute()
 
     def get_data(self, path: str) -> Optional[dict[str, Any]]:
-        """Get run data.
+        """Get record data, including any appended list data.
 
         Args:
-            path: Run path.
+            path: Record path.
 
         Returns:
-            Data dictionary or None if run not found.
+            Data dictionary or None if record not found.
         """
         key = self._path_to_key(path)
         data_str = self.redis.hget(key, "data")
@@ -244,23 +252,74 @@ class TaskQueue:
         if data_str is None:
             return None
 
-        return json.loads(data_str)
+        data = json.loads(data_str)
 
-    def _deserialize_run(self, run_data: dict[str, str]) -> Run:
-        """Convert Redis hash data to Run object.
+        list_keys = self.redis.smembers(f"{key}:lists")
+        for list_key in list_keys:
+            list_values = self.redis.lrange(f"{key}:list:{list_key}", 0, -1)
+            data[list_key] = [json.loads(v) for v in list_values]
+
+        return data
+
+    def append_data(self, path: str, key: str, value: Any) -> None:
+        """Append a primitive value to a list at the specified key.
+
+        Optimized for high-frequency calls with O(1) append operations using Redis Lists.
+        Values must be primitive types. First value establishes the type for the list.
 
         Args:
-            run_data: Raw Redis hash data.
+            path: Record path.
+            key: Data key to append to.
+            value: Primitive value to append (must match primitive_types).
+
+        Raises:
+            ValueError: If record not found.
+            TypeError: If value is not primitive or type mismatch with existing list.
+        """
+        if not isinstance(value, self.primitive_types):
+            raise TypeError(
+                f"Value must be primitive type, got {type(value).__name__}"
+            )
+
+        value_str = json.dumps(value)
+        value_type = type(value).__name__
+        now = time.time()
+        record_key = self._path_to_key(path)
+
+        pipe = self.redis.pipeline()
+        pipe.exists(record_key)
+        pipe.get(f"{record_key}:list:{key}:type")
+        exists, existing_type = pipe.execute()
+
+        if not exists:
+            raise ValueError(f"Record not found: {path}")
+
+        if existing_type and existing_type != value_type:
+            raise TypeError(f"Type mismatch: expected {existing_type}, got {value_type}")
+
+        pipe = self.redis.pipeline()
+        pipe.rpush(f"{record_key}:list:{key}", value_str)
+        pipe.hset(record_key, "updated_at", str(now))
+        if not existing_type:
+            pipe.set(f"{record_key}:list:{key}:type", value_type)
+            pipe.sadd(f"{record_key}:lists", key)
+        pipe.execute()
+
+    def _deserialize_record(self, record_data: dict[str, str]) -> Record:
+        """Convert Redis hash data to Record object.
+
+        Args:
+            record_data: Raw Redis hash data.
 
         Returns:
-            Deserialized Run object with proper types.
+            Deserialized Record object with proper types.
         """
-        return Run(
-            path=run_data["path"],
-            status=RunStatus(run_data["status"]),
-            data=json.loads(run_data["data"]),
-            created_at=float(run_data["created_at"]),
-            updated_at=float(run_data["updated_at"]),
+        return Record(
+            path=record_data["path"],
+            status=RecordStatus(record_data["status"]),
+            data=json.loads(record_data["data"]),
+            created_at=float(record_data["created_at"]),
+            updated_at=float(record_data["updated_at"]),
         )
 
     def __call__(
@@ -268,40 +327,35 @@ class TaskQueue:
     ) -> "TaskIterator":
         """Make TaskQueue callable to return an iterator (Pythonic API).
 
-        Returns an iterator that atomically claims and yields runs one at a time.
-        Each yielded run is already marked as RUNNING. Perfect for worker loops.
+        Returns an iterator that atomically claims and yields records one at a time.
+        Each yielded record is already marked as RUNNING. Perfect for worker loops.
 
         Args:
-            prefix: Path prefix to filter runs (default: / for all runs).
-            wait: If True, wait for new runs when queue is empty (default: True).
+            prefix: Path prefix to filter records (default: / for all records).
+            wait: If True, wait for new records when queue is empty (default: True).
             wait_interval: Seconds to wait between checks when queue is empty (default: 5.0).
 
         Returns:
-            TaskIterator that yields Run objects.
+            TaskIterator that yields Record objects.
 
         Example:
-            # Infinite worker loop
-            for run in queue(prefix="/runs/ppo"):
-                process(run)
-                queue.set_status(run.path, RunStatus.COMPLETED)
-
-            # One-time batch processing (no waiting)
-            for run in queue(wait=False):
-                process(run)
+            for record in queue(prefix="/experiments"):
+                process(record)
+                queue.set_status(record.path, RecordStatus.COMPLETED)
         """
         return TaskIterator(self, prefix=prefix, wait=wait, wait_interval=wait_interval)
 
 
 class TaskIterator:
-    """Iterator for atomically claiming and processing runs.
+    """Iterator for atomically claiming and processing records.
 
     Implements the iterator protocol for TaskQueue, enabling Pythonic
-    for-loop iteration over unfinished runs.
+    for-loop iteration over unfinished records.
 
     Attributes:
-        queue: TaskQueue instance to claim runs from.
-        prefix: Path prefix to filter runs.
-        wait: Whether to wait for new runs when queue is empty.
+        queue: TaskQueue instance to claim records from.
+        prefix: Path prefix to filter records.
+        wait: Whether to wait for new records when queue is empty.
         wait_interval: Seconds to wait between checks.
     """
 
@@ -316,8 +370,8 @@ class TaskIterator:
 
         Args:
             queue: TaskQueue instance.
-            prefix: Path prefix to filter runs.
-            wait: If True, wait for new runs when empty.
+            prefix: Path prefix to filter records.
+            wait: If True, wait for new records when empty.
             wait_interval: Seconds to wait between checks.
         """
         self.queue = queue
@@ -329,20 +383,20 @@ class TaskIterator:
         """Return self as iterator."""
         return self
 
-    def __next__(self) -> Run:
-        """Atomically claim and return the next unfinished run.
+    def __next__(self) -> Record:
+        """Atomically claim and return the next unfinished record.
 
         This operation is atomic and safe for distributed environments.
-        The run is automatically marked as RUNNING when claimed, preventing
-        race conditions where multiple workers might pick the same run.
+        The record is automatically marked as RUNNING when claimed, preventing
+        race conditions where multiple workers might pick the same record.
 
-        Prioritizes pending runs first, then failed runs, ordered by timestamp.
+        Prioritizes pending records first, then failed records, ordered by timestamp.
 
         Returns:
-            Next available Run object with status set to RUNNING.
+            Next available Record object with status set to RUNNING.
 
         Raises:
-            StopIteration: If no runs available and wait=False.
+            StopIteration: If no records available and wait=False.
             RuntimeError: If the Lua script execution fails.
         """
         while True:
@@ -351,18 +405,18 @@ class TaskIterator:
             try:
                 claimed_path = self.queue._lua_scripts["claim_next"](
                     keys=[],
-                    args=[self.prefix, str(now), RunStatus.RUNNING.value],
+                    args=[self.prefix, str(now), RecordStatus.RUNNING.value],
                 )
             except redis.RedisError as e:
-                raise RuntimeError(f"Failed to claim run: {e}") from e
+                raise RuntimeError(f"Failed to claim record: {e}") from e
 
             if claimed_path:
-                run = self.queue.get_run(claimed_path)
-                if not run:
+                record = self.queue.get_record(claimed_path)
+                if not record:
                     raise RuntimeError(
-                        f"Claimed run {claimed_path} not found - data inconsistency detected"
+                        f"Claimed record {claimed_path} not found - data inconsistency detected"
                     )
-                return run
+                return record
 
             if not self.wait:
                 raise StopIteration

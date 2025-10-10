@@ -6,13 +6,16 @@ from enum import Enum
 from typing import Any
 
 
-class RunStatus(str, Enum):
-    """Run execution status."""
+class RecordStatus(str, Enum):
+    """Record execution status."""
 
     PENDING = "pending"
     RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"
+
+
+DEFAULT_PRIMITIVE_TYPES = (int, float, str, bool, type(None))
 
 
 def validate_json_serializable(data: dict[str, Any]) -> dict[str, Any]:
@@ -35,52 +38,52 @@ def validate_json_serializable(data: dict[str, Any]) -> dict[str, Any]:
 
 
 @dataclass
-class Run:
-    """Represents a single ML experiment run.
+class Record:
+    """Represents a single record in the task queue.
 
     Attributes:
-        path: Hierarchical path identifying the run.
+        path: Hierarchical path identifying the record.
         status: Current execution status.
-        data: Run parameters and results (must be JSON serializable).
+        data: Record parameters and results (must be JSON serializable).
         created_at: Unix timestamp of creation.
         updated_at: Unix timestamp of last update.
     """
 
     path: str
-    status: RunStatus
+    status: RecordStatus
     data: dict[str, Any]
     created_at: float
     updated_at: float
 
     @property
     def is_pending(self) -> bool:
-        """Check if run is pending."""
-        return self.status == RunStatus.PENDING
+        """Check if record is pending."""
+        return self.status == RecordStatus.PENDING
 
     @property
     def is_running(self) -> bool:
-        """Check if run is currently running."""
-        return self.status == RunStatus.RUNNING
+        """Check if record is currently running."""
+        return self.status == RecordStatus.RUNNING
 
     @property
     def is_completed(self) -> bool:
-        """Check if run completed successfully."""
-        return self.status == RunStatus.COMPLETED
+        """Check if record completed successfully."""
+        return self.status == RecordStatus.COMPLETED
 
     @property
     def is_failed(self) -> bool:
-        """Check if run failed."""
-        return self.status == RunStatus.FAILED
+        """Check if record failed."""
+        return self.status == RecordStatus.FAILED
 
     @property
     def is_finished(self) -> bool:
-        """Check if run is finished (completed successfully)."""
-        return self.status == RunStatus.COMPLETED
+        """Check if record is finished (completed successfully)."""
+        return self.status == RecordStatus.COMPLETED
 
     @property
     def is_unfinished(self) -> bool:
-        """Check if run is unfinished (pending or failed, needs processing)."""
-        return self.status in (RunStatus.PENDING, RunStatus.FAILED)
+        """Check if record is unfinished (pending or failed, needs processing)."""
+        return self.status in (RecordStatus.PENDING, RecordStatus.FAILED)
 
     @property
     def duration(self) -> float:
@@ -89,7 +92,7 @@ class Run:
 
     @property
     def age(self) -> float:
-        """Get age of the run from creation to now in seconds."""
+        """Get age of the record from creation to now in seconds."""
         import time
 
         return time.time() - self.created_at
