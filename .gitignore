@@ -25,4 +25,4 @@ ENV/
 .ruff_cache/
 .DS_Store
 runs_config.json
-
+.agent/

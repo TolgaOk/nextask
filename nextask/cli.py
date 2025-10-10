@@ -77,11 +77,10 @@ def add(ctx, path, data, status):
         info = f"[cyan]Path:[/cyan] {record.path}\n"
         info += f"[cyan]Status:[/cyan] {_status_style(record.status.value)}"
         
-        console.print(Panel(info, title="✓ Record Created", border_style="green"))
-        
         if record.data:
-            console.print("\n[cyan]Data:[/cyan]")
-            console.print(JSON.from_data(record.data))
+            info += f"\n[cyan]Data:[/cyan] {json.dumps(record.data, indent=2)}"
+        
+        console.print(Panel(info, title="✓ Record Created", border_style="green"))
     except Exception as e:
         console.print(f"[red]✗ Error creating record:[/red] {e}")
         sys.exit(1)
