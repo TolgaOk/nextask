@@ -2,8 +2,6 @@ package db
 
 import (
 	"time"
-
-	"github.com/google/uuid"
 )
 
 type TaskStatus string
@@ -17,17 +15,24 @@ const (
 )
 
 type Task struct {
-	ID         uuid.UUID
-	Command    string
-	Status     TaskStatus
-	SourceRef  *string
-	InitType   *string
-	InitConfig *string
-	Labels     map[string]string
-	Tags       map[string]string
-	WorkerID   *string
-	ExitCode   *int
-	CreatedAt  time.Time
-	StartedAt  *time.Time
-	FinishedAt *time.Time
+	ID           string
+	Command      string
+	Status       TaskStatus
+	SourceRemote *string
+	SourceRef    *string
+	SourceCommit *string
+	Tags         map[string]string
+	WorkerID     *string
+	ExitCode     *int
+	CreatedAt    time.Time
+	StartedAt    *time.Time
+	FinishedAt   *time.Time
+}
+
+type TaskLog struct {
+	ID        int
+	TaskID    string
+	Stream    string
+	Data      string
+	CreatedAt time.Time
 }
