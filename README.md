@@ -200,6 +200,27 @@ nextask cancel <uuid> --db-url "..."
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
+## Snapshots
+
+Snapshots are stored in a bare git repository (the source remote):
+
+```
+source.git/refs/nextask/
+├── vbshx9d0  → commit (snapshot 1)
+├── abc12345  → commit (snapshot 2)
+└── xyz98765  → commit (snapshot 3)
+```
+
+Unlike branches, snapshots are **standalone refs** - each points to a single commit capturing the code state at enqueue time. They share git's object store (deduplication) but aren't a linear chain.
+
+```bash
+# List all snapshots
+git ls-remote ~/.nextask/source.git 'refs/nextask/*'
+
+# Inspect a snapshot
+git -C ~/.nextask/source.git show <commit>
+```
+
 ## Source Backends
 
 ### Local (MVP)
