@@ -7,10 +7,13 @@ import (
 
 	gonanoid "github.com/matoous/go-nanoid/v2"
 	"github.com/nextask/nextask/internal/db"
+	"github.com/nextask/nextask/internal/source"
 	"github.com/spf13/cobra"
 )
 
 var tags []string
+var snapshot bool
+var remote string
 
 var enqueueCmd = &cobra.Command{
 	Use:   "enqueue COMMAND",
@@ -39,6 +42,25 @@ var enqueueCmd = &cobra.Command{
 			return fmt.Errorf("failed to generate ID: %w", err)
 		}
 
+		// Validate snapshot flags
+		if snapshot && remote == "" {
+			return fmt.Errorf("--remote is required when using --snapshot")
+		}
+
+		// Get source snapshot
+		// TODO: get remote from config when available
+		result, err := source.CreateSnapshot(".", id)
+		if err != nil {
+			return fmt.Errorf("failed to create snapshot: %w", err)
+		}
+
+		// Push snapshot if requested
+		if snapshot {
+			if err := source.PushSnapshot(".", remote, result); err != nil {
+				return fmt.Errorf("failed to push snapshot: %w", err)
+			}
+		}
+
 		ctx := context.Background()
 
 		pool, err := db.Connect(ctx, dbURL)
@@ -48,10 +70,17 @@ var enqueueCmd = &cobra.Command{
 		defer pool.Close()
 
 		task := &db.Task{
-			ID:      id,
-			Command: command,
-			Status:  db.StatusPending,
-			Tags:    parsedTags,
+			ID:           id,
+			Command:      command,
+			Status:       db.StatusPending,
+			Tags:         parsedTags,
+			SourceCommit: &result.Commit,
+		}
+
+		// Set source remote/ref only if snapshot was pushed
+		if snapshot {
+			task.SourceRemote = &remote
+			task.SourceRef = &result.Ref
 		}
 
 		if err := db.CreateTask(ctx, pool, task); err != nil {
@@ -65,5 +94,7 @@ var enqueueCmd = &cobra.Command{
 
 func init() {
 	enqueueCmd.Flags().StringSliceVar(&tags, "tag", nil, "Tags (key=value, can specify multiple)")
+	enqueueCmd.Flags().BoolVar(&snapshot, "snapshot", false, "Create and push source snapshot")
+	enqueueCmd.Flags().StringVar(&remote, "remote", "", "Git remote for snapshot (required if --snapshot)")
 	rootCmd.AddCommand(enqueueCmd)
 }

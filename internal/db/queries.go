@@ -19,9 +19,9 @@ func CreateTask(ctx context.Context, pool *pgxpool.Pool, task *Task) error {
 	}
 
 	_, err = pool.Exec(ctx, `
-		INSERT INTO tasks (id, command, status, tags)
-		VALUES ($1, $2, $3, $4)
-	`, task.ID, task.Command, task.Status, tagsJSON)
+		INSERT INTO tasks (id, command, status, tags, source_remote, source_ref, source_commit)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
+	`, task.ID, task.Command, task.Status, tagsJSON, task.SourceRemote, task.SourceRef, task.SourceCommit)
 
 	return err
 }
