@@ -51,12 +51,14 @@ var enqueueCmd = &cobra.Command{
 		// TODO: get remote from config when available
 		result, err := source.CreateSnapshot(".", id)
 		if err != nil {
+			cmd.SilenceUsage = true
 			return fmt.Errorf("failed to create snapshot: %w", err)
 		}
 
 		// Push snapshot if requested
 		if snapshot {
 			if err := source.PushSnapshot(".", remote, result); err != nil {
+				cmd.SilenceUsage = true
 				return fmt.Errorf("failed to push snapshot: %w", err)
 			}
 		}
@@ -65,6 +67,7 @@ var enqueueCmd = &cobra.Command{
 
 		pool, err := db.Connect(ctx, dbURL)
 		if err != nil {
+			cmd.SilenceUsage = true
 			return err
 		}
 		defer pool.Close()
@@ -84,6 +87,7 @@ var enqueueCmd = &cobra.Command{
 		}
 
 		if err := db.CreateTask(ctx, pool, task); err != nil {
+			cmd.SilenceUsage = true
 			return fmt.Errorf("failed to enqueue task: %w", err)
 		}
 
@@ -95,6 +99,6 @@ var enqueueCmd = &cobra.Command{
 func init() {
 	enqueueCmd.Flags().StringSliceVar(&tags, "tag", nil, "Tags (key=value, can specify multiple)")
 	enqueueCmd.Flags().BoolVar(&snapshot, "snapshot", false, "Create and push source snapshot")
-	enqueueCmd.Flags().StringVar(&remote, "remote", "", "Git remote for snapshot (required if --snapshot)")
+	enqueueCmd.Flags().StringVar(&remote, "remote", "", "Git remote name or path for snapshot (required if --snapshot)")
 	rootCmd.AddCommand(enqueueCmd)
 }

@@ -57,13 +57,14 @@ func CreateSnapshot(repoPath, taskID string) (*SnapshotResult, error) {
 }
 
 func createSnapshotCommit(repoPath, taskID string) (string, error) {
-	// Create temporary index file
+	// Create temp file path for index (git will create it)
 	tmpIndex, err := os.CreateTemp("", "nextask-index-*")
 	if err != nil {
 		return "", fmt.Errorf("failed to create temp index: %w", err)
 	}
 	tmpIndexPath := tmpIndex.Name()
 	tmpIndex.Close()
+	os.Remove(tmpIndexPath) // Delete so git creates fresh index
 	defer os.Remove(tmpIndexPath)
 
 	runGit := func(useTempIndex bool, args ...string) (string, error) {
@@ -97,6 +98,9 @@ func createSnapshotCommit(repoPath, taskID string) (string, error) {
 	// 3. Get HEAD commit as parent
 	headCommit, err := runGit(false, "rev-parse", "HEAD")
 	if err != nil {
+		if strings.Contains(err.Error(), "unknown revision") {
+			return "", fmt.Errorf("repository has no commits - at least one commit is required")
+		}
 		return "", fmt.Errorf("failed to get HEAD: %w", err)
 	}
 
