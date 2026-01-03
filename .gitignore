@@ -47,6 +47,9 @@ ENV/
 .DS_Store
 Thumbs.db
 
+# Agent
+.agent/
+
 # Local config
 nextask.toml
 .env
