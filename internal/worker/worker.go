@@ -9,7 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	gonanoid "github.com/matoous/go-nanoid/v2"
-	"github.com/nextask/nextask/internal/db"
+	"github.com/TolgaOk/nextask/internal/db"
 )
 
 type Worker struct {

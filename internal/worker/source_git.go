@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/nextask/nextask/internal/source"
+	"github.com/TolgaOk/nextask/internal/source"
 )
 
 type GitSourceConfig struct {

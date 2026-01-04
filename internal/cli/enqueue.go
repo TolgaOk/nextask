@@ -8,9 +8,9 @@ import (
 	"strings"
 
 	gonanoid "github.com/matoous/go-nanoid/v2"
-	"github.com/nextask/nextask/internal/db"
-	"github.com/nextask/nextask/internal/source"
-	"github.com/nextask/nextask/internal/worker"
+	"github.com/TolgaOk/nextask/internal/db"
+	"github.com/TolgaOk/nextask/internal/source"
+	"github.com/TolgaOk/nextask/internal/worker"
 	"github.com/spf13/cobra"
 )
 

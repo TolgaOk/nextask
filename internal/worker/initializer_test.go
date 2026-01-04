@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/nextask/nextask/internal/db"
+	"github.com/TolgaOk/nextask/internal/db"
 )
 
 func getTestDBURL(t *testing.T) string {

@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/nextask/nextask/internal/db"
-	"github.com/nextask/nextask/internal/source"
+	"github.com/TolgaOk/nextask/internal/db"
+	"github.com/TolgaOk/nextask/internal/source"
 )
 
 func TestGetSource_Noop(t *testing.T) {

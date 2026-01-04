@@ -8,7 +8,7 @@ import (
 
 	sq "github.com/Masterminds/squirrel"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/nextask/nextask/internal/db/migrations"
+	"github.com/TolgaOk/nextask/internal/db/migrations"
 )
 
 var psql = sq.StatementBuilder.PlaceholderFormat(sq.Dollar)

@@ -9,7 +9,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/lipgloss/table"
-	"github.com/nextask/nextask/internal/db"
+	"github.com/TolgaOk/nextask/internal/db"
 	"github.com/spf13/cobra"
 	str2duration "github.com/xhit/go-str2duration/v2"
 )

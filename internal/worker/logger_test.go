@@ -6,7 +6,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/nextask/nextask/internal/db"
+	"github.com/TolgaOk/nextask/internal/db"
 )
 
 func TestDBLogger_LogsStdout(t *testing.T) {

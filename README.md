@@ -7,13 +7,13 @@ Tasks are stored and managed in *PostgreSQL* with full stdout/stderr capture fro
 ## Installation
 
 ```bash
-go install github.com/nextask/nextask/cmd/nextask@latest
+go install github.com/TolgaOk/nextask/cmd/nextask@latest
 ```
 
 Or build from source:
 
 ```bash
-git clone https://github.com/nextask/nextask
+git clone https://github.com/TolgaOk/nextask
 cd nextask
 go build -o nextask ./cmd/nextask
 ```

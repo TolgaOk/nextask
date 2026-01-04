@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/nextask/nextask/internal/db"
+	"github.com/TolgaOk/nextask/internal/db"
 )
 
 type Executor struct {

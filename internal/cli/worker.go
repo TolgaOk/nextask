@@ -7,7 +7,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/nextask/nextask/internal/worker"
+	"github.com/TolgaOk/nextask/internal/worker"
 	"github.com/spf13/cobra"
 )
 

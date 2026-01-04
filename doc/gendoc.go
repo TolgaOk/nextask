@@ -8,7 +8,7 @@ import (
 	"os"
 	"regexp"
 
-	"github.com/nextask/nextask/internal/cli"
+	"github.com/TolgaOk/nextask/internal/cli"
 	"github.com/spf13/cobra"
 	"github.com/spf13/cobra/doc"
 )

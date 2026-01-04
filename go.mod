@@ -1,4 +1,4 @@
-module github.com/nextask/nextask
+module github.com/TolgaOk/nextask
 
 go 1.25.5
 
