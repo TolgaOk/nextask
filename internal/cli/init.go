@@ -56,17 +56,14 @@ var initSourceCmd = &cobra.Command{
 			path = filepath.Join(home, ".nextask", "source.git")
 		}
 
-		// Create parent directory if needed
 		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 			return fmt.Errorf("failed to create directory: %w", err)
 		}
 
-		// Check if already exists
 		if _, err := os.Stat(path); err == nil {
 			return fmt.Errorf("remote already exists: %s", path)
 		}
 
-		// Create bare repository
 		_, err := git.PlainInit(path, true)
 		if err != nil {
 			return fmt.Errorf("failed to initialize remote: %w", err)

@@ -8,12 +8,14 @@ import (
 	"github.com/TolgaOk/nextask/internal/source"
 )
 
+// GitSourceConfig specifies parameters for fetching source from a git repository.
 type GitSourceConfig struct {
 	Remote string `json:"remote"`
 	Ref    string `json:"ref"`
 	Commit string `json:"commit,omitempty"`
 }
 
+// GitSource fetches source code from a git repository.
 type GitSource struct{}
 
 func (GitSource) Type() string { return "git" }

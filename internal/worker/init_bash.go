@@ -8,10 +8,12 @@ import (
 	"os/exec"
 )
 
+// BashInitConfig specifies a shell script to run for initialization.
 type BashInitConfig struct {
 	Script string `json:"script"`
 }
 
+// BashInitializer runs a shell script to set up the task environment.
 type BashInitializer struct{}
 
 func (BashInitializer) Type() string { return "bash" }

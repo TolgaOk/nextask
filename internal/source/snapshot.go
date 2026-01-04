@@ -1,3 +1,4 @@
+// Package source provides git-based source code snapshotting for task reproducibility.
 package source
 
 import (
@@ -9,11 +10,14 @@ import (
 	"github.com/go-git/go-git/v5"
 )
 
+// SnapshotResult contains the commit hash and ref of a created snapshot.
 type SnapshotResult struct {
-	Commit string // Full commit SHA
-	Ref    string // refs/nextask/<taskID>
+	Commit string
+	Ref    string
 }
 
+// CreateSnapshot creates a git commit capturing the current working tree state,
+// including uncommitted changes, without modifying the repository's HEAD.
 func CreateSnapshot(repoPath, taskID string) (*SnapshotResult, error) {
 	repo, err := git.PlainOpen(repoPath)
 	if err != nil {
@@ -32,7 +36,6 @@ func CreateSnapshot(repoPath, taskID string) (*SnapshotResult, error) {
 		return nil, fmt.Errorf("failed to get status: %w", err)
 	}
 
-	// If clean, use HEAD commit directly
 	if status.IsClean() {
 		head, err := repo.Head()
 		if err != nil {
@@ -44,7 +47,6 @@ func CreateSnapshot(repoPath, taskID string) (*SnapshotResult, error) {
 		}, nil
 	}
 
-	// Create snapshot commit using git CLI with temporary index
 	commitHash, err := createSnapshotCommit(repoPath, taskID)
 	if err != nil {
 		return nil, err
@@ -57,14 +59,13 @@ func CreateSnapshot(repoPath, taskID string) (*SnapshotResult, error) {
 }
 
 func createSnapshotCommit(repoPath, taskID string) (string, error) {
-	// Create temp file path for index (git will create it)
 	tmpIndex, err := os.CreateTemp("", "nextask-index-*")
 	if err != nil {
 		return "", fmt.Errorf("failed to create temp index: %w", err)
 	}
 	tmpIndexPath := tmpIndex.Name()
 	tmpIndex.Close()
-	os.Remove(tmpIndexPath) // Delete so git creates fresh index
+	os.Remove(tmpIndexPath)
 	defer os.Remove(tmpIndexPath)
 
 	runGit := func(useTempIndex bool, args ...string) (string, error) {
@@ -83,19 +84,16 @@ func createSnapshotCommit(repoPath, taskID string) (string, error) {
 		return strings.TrimSpace(string(out)), nil
 	}
 
-	// 1. Add all files to temp index (respects .gitignore)
 	_, err = runGit(true, "add", "-A")
 	if err != nil {
 		return "", fmt.Errorf("failed to add files: %w", err)
 	}
 
-	// 2. Write tree from temp index
 	treeHash, err := runGit(true, "write-tree")
 	if err != nil {
 		return "", fmt.Errorf("failed to write tree: %w", err)
 	}
 
-	// 3. Get HEAD commit as parent
 	headCommit, err := runGit(false, "rev-parse", "HEAD")
 	if err != nil {
 		if strings.Contains(err.Error(), "unknown revision") {
@@ -104,7 +102,6 @@ func createSnapshotCommit(repoPath, taskID string) (string, error) {
 		return "", fmt.Errorf("failed to get HEAD: %w", err)
 	}
 
-	// 4. Get author info from HEAD commit
 	// TODO: use nextask config when available
 	author, err := runGit(false, "log", "-1", "--format=%an")
 	if err != nil {
@@ -115,7 +112,6 @@ func createSnapshotCommit(repoPath, taskID string) (string, error) {
 		return "", fmt.Errorf("failed to get email: %w", err)
 	}
 
-	// 5. Create commit object (writes to .git/objects only, does NOT update HEAD)
 	cmd := exec.Command("git", "commit-tree", treeHash, "-p", headCommit, "-m", "nextask: "+taskID)
 	cmd.Dir = repoPath
 	cmd.Env = append(os.Environ(),
@@ -135,9 +131,8 @@ func createSnapshotCommit(repoPath, taskID string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
+// PushSnapshot pushes a snapshot commit to a remote repository.
 func PushSnapshot(repoPath, remoteName string, result *SnapshotResult) error {
-	// Push commit to remote at refs/nextask/<taskID>
-	// Format: git push <remote> <commit>:<ref>
 	refSpec := result.Commit + ":" + result.Ref
 
 	cmd := exec.Command("git", "push", remoteName, refSpec)
@@ -152,6 +147,7 @@ func PushSnapshot(repoPath, remoteName string, result *SnapshotResult) error {
 	return nil
 }
 
+// FetchSnapshot clones a repository and checks out a specific snapshot ref.
 func FetchSnapshot(remote, ref, taskDir string) (commit string, err error) {
 	defer func() {
 		if err != nil {

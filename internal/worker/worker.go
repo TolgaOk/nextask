@@ -1,3 +1,4 @@
+// Package worker implements task execution with source fetching and log capture.
 package worker
 
 import (
@@ -12,6 +13,7 @@ import (
 	"github.com/TolgaOk/nextask/internal/db"
 )
 
+// Worker processes tasks from the queue.
 type Worker struct {
 	ID         string
 	Info       *db.WorkerInfo
@@ -21,6 +23,7 @@ type Worker struct {
 	Once       bool
 }
 
+// Config contains worker configuration options.
 type Config struct {
 	DBURL   string
 	Workdir string
@@ -28,6 +31,7 @@ type Config struct {
 	Once    bool
 }
 
+// New creates a worker with the given configuration.
 func New(ctx context.Context, cfg Config) (*Worker, error) {
 	pool, err := db.Connect(ctx, cfg.DBURL)
 	if err != nil {
@@ -71,11 +75,13 @@ func New(ctx context.Context, cfg Config) (*Worker, error) {
 	}, nil
 }
 
+// Close releases database connections.
 func (w *Worker) Close(ctx context.Context) {
 	w.ListenConn.Close(ctx)
 	w.Pool.Close()
 }
 
+// Run starts the worker loop, processing tasks until context is cancelled.
 func (w *Worker) Run(ctx context.Context) error {
 	fmt.Printf("Worker %s started\n", w.ID)
 
@@ -103,7 +109,6 @@ func (w *Worker) Run(ctx context.Context) error {
 			return nil
 		}
 
-		// Block until notification (no polling)
 		if _, err := w.ListenConn.WaitForNotification(ctx); err != nil {
 			if ctx.Err() != nil {
 				return nil

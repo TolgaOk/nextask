@@ -11,11 +11,13 @@ import (
 	"github.com/TolgaOk/nextask/internal/db"
 )
 
+// Executor handles task execution including source fetching and command running.
 type Executor struct {
 	Pool    *pgxpool.Pool
 	Workdir string
 }
 
+// Execute runs a task and returns its exit code.
 func (e *Executor) Execute(ctx context.Context, task *db.Task) int {
 	taskDir := filepath.Join(e.Workdir, task.ID)
 	log := NewDBLogger(ctx, e.Pool, task.ID)

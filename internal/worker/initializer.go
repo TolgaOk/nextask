@@ -6,11 +6,13 @@ import (
 	"fmt"
 )
 
+// Initializer defines the interface for setting up the task environment.
 type Initializer interface {
 	Type() string
 	Run(ctx context.Context, config json.RawMessage, taskDir string, log Logger) error
 }
 
+// GetInitializer returns an Initializer implementation for the given type.
 func GetInitializer(initType string) (Initializer, error) {
 	switch initType {
 	case "noop":
@@ -22,6 +24,7 @@ func GetInitializer(initType string) (Initializer, error) {
 	}
 }
 
+// NoopInitializer performs no initialization.
 type NoopInitializer struct{}
 
 func (NoopInitializer) Type() string { return "noop" }

@@ -38,7 +38,6 @@ var listCmd = &cobra.Command{
 		}
 		defer pool.Close()
 
-		// Parse tags
 		parsedTags := make(map[string]string)
 		for _, tag := range listTags {
 			parts := strings.SplitN(tag, "=", 2)
@@ -48,7 +47,6 @@ var listCmd = &cobra.Command{
 			parsedTags[parts[0]] = parts[1]
 		}
 
-		// Parse since
 		var since time.Time
 		if listSince != "" {
 			dur, err := str2duration.ParseDuration(listSince)
@@ -76,10 +74,8 @@ var listCmd = &cobra.Command{
 			return nil
 		}
 
-		// Build table rows
 		rows := [][]string{}
 		for _, t := range tasks {
-			// Format tags
 			var tagParts []string
 			for k, v := range t.Tags {
 				tagParts = append(tagParts, fmt.Sprintf("%s=%s", k, v))
@@ -95,7 +91,6 @@ var listCmd = &cobra.Command{
 			})
 		}
 
-		// Style definitions
 		headerStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("15"))
 		rowStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
 

@@ -1,3 +1,4 @@
+// Package cli implements the nextask command-line interface.
 package cli
 
 import (
@@ -8,10 +9,12 @@ import (
 
 var dbURL string
 
+// SetVersion configures the version string displayed by --version.
 func SetVersion(v string) {
 	RootCmd.Version = v
 }
 
+// RootCmd is the base command for the nextask CLI.
 var RootCmd = &cobra.Command{
 	Use:   "nextask",
 	Short: "Distributed task queue providing full reproducibility with non-intrusive source snapshotting",
@@ -22,6 +25,7 @@ During enqueue, nextask can snapshot the working repository—including unstaged
 a remote git server, preserving the exact source code for execution by available workers.`,
 }
 
+// Execute runs the root command.
 func Execute() {
 	if err := RootCmd.Execute(); err != nil {
 		os.Exit(1)

@@ -1,3 +1,4 @@
+// Package db provides PostgreSQL persistence for tasks and logs.
 package db
 
 import (
@@ -5,6 +6,7 @@ import (
 	"time"
 )
 
+// TaskStatus represents the execution state of a task.
 type TaskStatus string
 
 const (
@@ -15,12 +17,14 @@ const (
 	StatusCancelled TaskStatus = "cancelled"
 )
 
+// WorkerInfo contains metadata about the worker processing a task.
 type WorkerInfo struct {
 	Hostname string `json:"hostname"`
 	OS       string `json:"os"`
 	PID      int    `json:"pid"`
 }
 
+// Task represents a queued command with its execution state and metadata.
 type Task struct {
 	ID           string
 	Command      string
@@ -38,6 +42,7 @@ type Task struct {
 	FinishedAt   *time.Time
 }
 
+// TaskLog represents a captured stdout/stderr line from task execution.
 type TaskLog struct {
 	ID        int
 	TaskID    string

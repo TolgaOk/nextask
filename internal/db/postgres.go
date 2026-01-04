@@ -8,6 +8,7 @@ import (
 	"github.com/TolgaOk/nextask/internal/db/migrations"
 )
 
+// Connect establishes a connection pool to the PostgreSQL database.
 func Connect(ctx context.Context, dbURL string) (*pgxpool.Pool, error) {
 	pool, err := pgxpool.New(ctx, dbURL)
 	if err != nil {
@@ -19,6 +20,7 @@ func Connect(ctx context.Context, dbURL string) (*pgxpool.Pool, error) {
 	return pool, nil
 }
 
+// Migrate runs database migrations to create required tables.
 func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 	migrationFiles := []string{"001_init.sql"}
 	for _, file := range migrationFiles {

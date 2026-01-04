@@ -13,6 +13,7 @@ import (
 
 var psql = sq.StatementBuilder.PlaceholderFormat(sq.Dollar)
 
+// CreateTask inserts a new task into the queue.
 func CreateTask(ctx context.Context, pool *pgxpool.Pool, task *Task) error {
 	tagsJSON, err := json.Marshal(task.Tags)
 	if err != nil {
@@ -28,6 +29,7 @@ func CreateTask(ctx context.Context, pool *pgxpool.Pool, task *Task) error {
 	return err
 }
 
+// ListFilter specifies criteria for filtering tasks.
 type ListFilter struct {
 	Statuses []string
 	Tags     map[string]string
@@ -36,6 +38,7 @@ type ListFilter struct {
 	Limit    uint64
 }
 
+// ListTasks retrieves tasks matching the given filter criteria.
 func ListTasks(ctx context.Context, pool *pgxpool.Pool, filter ListFilter) ([]Task, error) {
 	query := psql.Select("id", "command", "status", "tags", "created_at").
 		From("tasks").
@@ -118,6 +121,7 @@ func scanTask(row scannable) (*Task, error) {
 	return &t, nil
 }
 
+// ClaimTask atomically claims the next pending task for a worker.
 func ClaimTask(ctx context.Context, pool *pgxpool.Pool, workerID string, workerInfo *WorkerInfo) (*Task, error) {
 	workerInfoJSON, err := json.Marshal(workerInfo)
 	if err != nil {
@@ -133,6 +137,7 @@ func ClaimTask(ctx context.Context, pool *pgxpool.Pool, workerID string, workerI
 	return scanTask(row)
 }
 
+// CompleteTask marks a task as completed or failed with its exit code.
 func CompleteTask(ctx context.Context, pool *pgxpool.Pool, taskID string, status TaskStatus, exitCode int) error {
 	sql, err := migrations.FS.ReadFile("complete_task.sql")
 	if err != nil {
@@ -142,6 +147,7 @@ func CompleteTask(ctx context.Context, pool *pgxpool.Pool, taskID string, status
 	return err
 }
 
+// InsertLog stores a log line from task execution.
 func InsertLog(ctx context.Context, pool *pgxpool.Pool, taskID, stream, data string) error {
 	sql, err := migrations.FS.ReadFile("insert_log.sql")
 	if err != nil {

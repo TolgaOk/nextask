@@ -29,7 +29,6 @@ var enqueueCmd = &cobra.Command{
 
 		command := args[0]
 
-		// Parse tags
 		parsedTags := make(map[string]string)
 		for _, tag := range tags {
 			parts := strings.SplitN(tag, "=", 2)
@@ -39,13 +38,11 @@ var enqueueCmd = &cobra.Command{
 			parsedTags[parts[0]] = parts[1]
 		}
 
-		// Generate short ID
 		id, err := gonanoid.Generate("0123456789abcdefghijklmnopqrstuvwxyz", 8)
 		if err != nil {
 			return fmt.Errorf("failed to generate ID: %w", err)
 		}
 
-		// Validate snapshot flags
 		if snapshot && remote == "" {
 			return fmt.Errorf("--remote is required when using --snapshot")
 		}
@@ -59,7 +56,6 @@ var enqueueCmd = &cobra.Command{
 			InitType:   "noop",
 		}
 
-		// Create and push source snapshot if requested
 		if snapshot {
 			result, err := source.CreateSnapshot(".", id)
 			if err != nil {
@@ -94,7 +90,6 @@ var enqueueCmd = &cobra.Command{
 			return fmt.Errorf("failed to enqueue task: %w", err)
 		}
 
-		// Notify waiting workers (non-fatal if fails)
 		if _, err := pool.Exec(ctx, "NOTIFY new_task"); err != nil {
 			fmt.Fprintf(os.Stderr, "warning: notify failed: %v\n", err)
 		}
