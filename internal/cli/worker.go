@@ -57,5 +57,5 @@ func init() {
 	workerCmd.Flags().StringVar(&workdir, "workdir", "/tmp/nextask", "Base directory for task execution")
 	workerCmd.Flags().StringVar(&workerName, "name", "", "Worker identifier (default: random)")
 	workerCmd.Flags().BoolVar(&once, "once", false, "Run single task and exit")
-	rootCmd.AddCommand(workerCmd)
+	RootCmd.AddCommand(workerCmd)
 }

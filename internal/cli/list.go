@@ -122,5 +122,5 @@ func init() {
 	listCmd.Flags().StringSliceVar(&listCommands, "command", nil, "Substring match in command (repeatable)")
 	listCmd.Flags().StringVar(&listSince, "since", "", "Tasks created after (e.g., 1h, 24h, 7d)")
 	listCmd.Flags().IntVar(&listLimit, "limit", 50, "Max results")
-	rootCmd.AddCommand(listCmd)
+	RootCmd.AddCommand(listCmd)
 }

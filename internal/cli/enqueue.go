@@ -108,5 +108,5 @@ func init() {
 	enqueueCmd.Flags().StringSliceVar(&tags, "tag", nil, "Tags (key=value, can specify multiple)")
 	enqueueCmd.Flags().BoolVar(&snapshot, "snapshot", false, "Create and push source snapshot")
 	enqueueCmd.Flags().StringVar(&remote, "remote", "", "Git remote name or path for snapshot (required if --snapshot)")
-	rootCmd.AddCommand(enqueueCmd)
+	RootCmd.AddCommand(enqueueCmd)
 }

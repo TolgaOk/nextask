@@ -82,5 +82,5 @@ func init() {
 
 	initCmd.AddCommand(initDBCmd)
 	initCmd.AddCommand(initSourceCmd)
-	rootCmd.AddCommand(initCmd)
+	RootCmd.AddCommand(initCmd)
 }

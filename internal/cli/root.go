@@ -8,18 +8,22 @@ import (
 
 var dbURL string
 
-var rootCmd = &cobra.Command{
+var RootCmd = &cobra.Command{
 	Use:   "nextask",
-	Short: "Distributed task queue for ML experiments",
-	Long:  `A non-intrusive, distributed task queue for ML experiments with full reproducibility.`,
+	Short: "Distributed task queue providing full reproducibility with non-intrusive source snapshotting",
+	Long: `Distributed task queue providing full reproducibility with non-intrusive source snapshotting.
+
+Tasks are stored and managed in PostgreSQL with full stdout/stderr capture from workers.
+During enqueue, nextask can snapshot the working repository—including unstaged changes—to
+a remote git server, preserving the exact source code for execution by available workers.`,
 }
 
 func Execute() {
-	if err := rootCmd.Execute(); err != nil {
+	if err := RootCmd.Execute(); err != nil {
 		os.Exit(1)
 	}
 }
 
 func init() {
-	rootCmd.PersistentFlags().StringVar(&dbURL, "db-url", "", "PostgreSQL connection URL")
+	RootCmd.PersistentFlags().StringVar(&dbURL, "db-url", "", "PostgreSQL connection URL")
 }
