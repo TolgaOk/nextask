@@ -4,8 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
+
+	"github.com/nextask/nextask/internal/db"
+	"github.com/nextask/nextask/internal/source"
 )
 
 func TestGetSource_Noop(t *testing.T) {
@@ -85,10 +89,114 @@ func TestGitSource_Fetch_MissingRef(t *testing.T) {
 	}
 }
 
-type testLogger struct {
-	logs []string
+// Integration tests with DB
+
+func TestExecutor_NoopSource_Integration(t *testing.T) {
+	pool := setupTestDB(t)
+	defer pool.Close()
+	ctx := context.Background()
+
+	workdir := t.TempDir()
+	task := &db.Task{
+		ID:         "src001",
+		Command:    "echo hello",
+		Status:     db.StatusPending,
+		SourceType: "noop",
+		InitType:   "noop",
+		Tags:       map[string]string{},
+	}
+	db.CreateTask(ctx, pool, task)
+
+	executor := &Executor{Pool: pool, Workdir: workdir}
+	exitCode := executor.Execute(ctx, task)
+
+	if exitCode != 0 {
+		t.Errorf("exitCode = %d, want 0", exitCode)
+	}
+
+	if _, err := os.Stat(filepath.Join(workdir, task.ID)); os.IsNotExist(err) {
+		t.Error("task directory not created")
+	}
 }
 
-func (l *testLogger) Log(stream, data string) {
-	l.logs = append(l.logs, stream+": "+data)
+func TestExecutor_GitSource_Integration(t *testing.T) {
+	pool := setupTestDB(t)
+	defer pool.Close()
+	ctx := context.Background()
+
+	// Create source repo with a file
+	sourceRepo := t.TempDir()
+	exec.Command("git", "init", sourceRepo).Run()
+	exec.Command("git", "-C", sourceRepo, "config", "user.email", "test@test.com").Run()
+	exec.Command("git", "-C", sourceRepo, "config", "user.name", "Test").Run()
+	os.WriteFile(filepath.Join(sourceRepo, "hello.txt"), []byte("hello from git"), 0644)
+	exec.Command("git", "-C", sourceRepo, "add", ".").Run()
+	exec.Command("git", "-C", sourceRepo, "commit", "-m", "init").Run()
+
+	// Create snapshot and push to bare repo
+	bareRepo := t.TempDir()
+	exec.Command("git", "init", "--bare", bareRepo).Run()
+
+	result, err := source.CreateSnapshot(sourceRepo, "test123")
+	if err != nil {
+		t.Fatalf("CreateSnapshot() error = %v", err)
+	}
+	if err := source.PushSnapshot(sourceRepo, bareRepo, result); err != nil {
+		t.Fatalf("PushSnapshot() error = %v", err)
+	}
+
+	sourceConfig, _ := json.Marshal(GitSourceConfig{
+		Remote: bareRepo,
+		Ref:    result.Ref,
+		Commit: result.Commit,
+	})
+	task := &db.Task{
+		ID:           "git001",
+		Command:      "cat hello.txt",
+		Status:       db.StatusPending,
+		SourceType:   "git",
+		SourceConfig: sourceConfig,
+		InitType:     "noop",
+		Tags:         map[string]string{},
+	}
+	db.CreateTask(ctx, pool, task)
+
+	workdir := t.TempDir()
+	executor := &Executor{Pool: pool, Workdir: workdir}
+	exitCode := executor.Execute(ctx, task)
+
+	if exitCode != 0 {
+		t.Errorf("exitCode = %d, want 0", exitCode)
+	}
+
+	content, err := os.ReadFile(filepath.Join(workdir, task.ID, "hello.txt"))
+	if err != nil {
+		t.Fatalf("failed to read hello.txt: %v", err)
+	}
+	if string(content) != "hello from git" {
+		t.Errorf("content = %s, want 'hello from git'", content)
+	}
+}
+
+func TestExecutor_UnknownSourceType_Integration(t *testing.T) {
+	pool := setupTestDB(t)
+	defer pool.Close()
+	ctx := context.Background()
+
+	task := &db.Task{
+		ID:         "unknsrc",
+		Command:    "echo test",
+		Status:     db.StatusPending,
+		SourceType: "unknown",
+		InitType:   "noop",
+		Tags:       map[string]string{},
+	}
+	db.CreateTask(ctx, pool, task)
+
+	executor := &Executor{Pool: pool, Workdir: t.TempDir()}
+	exitCode := executor.Execute(ctx, task)
+
+	if exitCode != 1 {
+		t.Errorf("exitCode = %d, want 1", exitCode)
+	}
 }
