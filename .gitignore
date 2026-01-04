@@ -39,3 +39,4 @@ nextask.toml
 # Build
 bin/
 nextask
+!nextask/
