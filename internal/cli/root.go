@@ -8,6 +8,10 @@ import (
 
 var dbURL string
 
+func SetVersion(v string) {
+	RootCmd.Version = v
+}
+
 var RootCmd = &cobra.Command{
 	Use:   "nextask",
 	Short: "Distributed task queue providing full reproducibility with non-intrusive source snapshotting",
