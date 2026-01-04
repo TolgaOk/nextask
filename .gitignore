@@ -1,5 +1,4 @@
 # Go
-nextask
 *.exe
 *.exe~
 *.dll
@@ -11,35 +10,10 @@ go.work
 go.work.sum
 vendor/
 
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-.Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-.venv/
-venv/
-ENV/
-.pytest_cache/
-.ruff_cache/
-
 # IDE
 .idea/
 .vscode/
+.cursor/
 *.swp
 *.swo
 
@@ -49,6 +23,14 @@ Thumbs.db
 
 # Agent
 .agent/
+.claude/
+.aider*
+.codex/
+.continue/
+.codeium/
+.copilot/
+.gemini/
+CLAUDE.md
 
 # Local config
 nextask.toml
@@ -56,3 +38,4 @@ nextask.toml
 
 # Build
 bin/
+nextask
