@@ -151,3 +151,47 @@ func PushSnapshot(repoPath, remoteName string, result *SnapshotResult) error {
 
 	return nil
 }
+
+func FetchSnapshot(remote, ref, taskDir string) (commit string, err error) {
+	defer func() {
+		if err != nil {
+			os.RemoveAll(taskDir)
+		}
+	}()
+
+	runGit := func(args ...string) (string, error) {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = taskDir
+		out, err := cmd.Output()
+		if err != nil {
+			if exitErr, ok := err.(*exec.ExitError); ok {
+				return "", fmt.Errorf("git %s: %s", args[0], string(exitErr.Stderr))
+			}
+			return "", err
+		}
+		return strings.TrimSpace(string(out)), nil
+	}
+
+	cmd := exec.Command("git", "clone", remote, taskDir)
+	if err = cmd.Run(); err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			return "", fmt.Errorf("git clone: %s", string(exitErr.Stderr))
+		}
+		return "", fmt.Errorf("failed to clone: %w", err)
+	}
+
+	if _, err = runGit("fetch", "origin", ref); err != nil {
+		return "", fmt.Errorf("failed to fetch ref: %w", err)
+	}
+
+	if _, err = runGit("checkout", "FETCH_HEAD"); err != nil {
+		return "", fmt.Errorf("failed to checkout: %w", err)
+	}
+
+	commit, err = runGit("rev-parse", "HEAD")
+	if err != nil {
+		return "", fmt.Errorf("failed to get commit: %w", err)
+	}
+
+	return commit, nil
+}

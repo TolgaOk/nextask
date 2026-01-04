@@ -415,3 +415,84 @@ func findSubstring(s, substr string) bool {
 	}
 	return false
 }
+
+func TestFetchSnapshot_Basic(t *testing.T) {
+	repoPath, remotePath, cleanup := setupTestRepoWithRemote(t)
+	defer cleanup()
+
+	// Create and push a snapshot
+	newFile := filepath.Join(repoPath, "newfile.txt")
+	if err := os.WriteFile(newFile, []byte("fetch test\n"), 0644); err != nil {
+		t.Fatalf("failed to write file: %v", err)
+	}
+
+	result, err := CreateSnapshot(repoPath, "fetch001")
+	if err != nil {
+		t.Fatalf("CreateSnapshot() error = %v", err)
+	}
+	if err := PushSnapshot(repoPath, "origin", result); err != nil {
+		t.Fatalf("PushSnapshot() error = %v", err)
+	}
+
+	// Fetch snapshot to new directory
+	taskDir, err := os.MkdirTemp("", "nextask-fetch-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	os.RemoveAll(taskDir) // FetchSnapshot will create it
+	defer os.RemoveAll(taskDir)
+
+	commit, err := FetchSnapshot(remotePath, result.Ref, taskDir)
+	if err != nil {
+		t.Fatalf("FetchSnapshot() error = %v", err)
+	}
+
+	if commit != result.Commit {
+		t.Errorf("commit = %v, want %v", commit, result.Commit)
+	}
+
+	// Verify file exists
+	fetchedFile := filepath.Join(taskDir, "newfile.txt")
+	if _, err := os.Stat(fetchedFile); os.IsNotExist(err) {
+		t.Error("newfile.txt not found in fetched snapshot")
+	}
+}
+
+func TestFetchSnapshot_InvalidRemote(t *testing.T) {
+	taskDir, err := os.MkdirTemp("", "nextask-fetch-invalid-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	os.RemoveAll(taskDir)
+
+	_, err = FetchSnapshot("/nonexistent/repo", "refs/nextask/test", taskDir)
+	if err == nil {
+		t.Error("expected error for invalid remote")
+	}
+
+	// Verify cleanup
+	if _, err := os.Stat(taskDir); !os.IsNotExist(err) {
+		t.Error("taskDir should be cleaned up on failure")
+	}
+}
+
+func TestFetchSnapshot_InvalidRef(t *testing.T) {
+	_, remotePath, cleanup := setupTestRepoWithRemote(t)
+	defer cleanup()
+
+	taskDir, err := os.MkdirTemp("", "nextask-fetch-badref-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	os.RemoveAll(taskDir)
+
+	_, err = FetchSnapshot(remotePath, "refs/nextask/nonexistent", taskDir)
+	if err == nil {
+		t.Error("expected error for invalid ref")
+	}
+
+	// Verify cleanup
+	if _, err := os.Stat(taskDir); !os.IsNotExist(err) {
+		t.Error("taskDir should be cleaned up on failure")
+	}
+}
