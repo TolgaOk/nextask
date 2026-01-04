@@ -1,6 +1,7 @@
 package db
 
 import (
+	"encoding/json"
 	"time"
 )
 
@@ -14,15 +15,23 @@ const (
 	StatusCancelled TaskStatus = "cancelled"
 )
 
+type WorkerInfo struct {
+	Hostname string `json:"hostname"`
+	OS       string `json:"os"`
+	PID      int    `json:"pid"`
+}
+
 type Task struct {
 	ID           string
 	Command      string
 	Status       TaskStatus
-	SourceRemote *string
-	SourceRef    *string
-	SourceCommit *string
+	SourceType   string
+	SourceConfig json.RawMessage
+	InitType     string
+	InitConfig   json.RawMessage
 	Tags         map[string]string
 	WorkerID     *string
+	WorkerInfo   *WorkerInfo
 	ExitCode     *int
 	CreatedAt    time.Time
 	StartedAt    *time.Time

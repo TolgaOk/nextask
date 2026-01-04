@@ -20,10 +20,15 @@ func Connect(ctx context.Context, dbURL string) (*pgxpool.Pool, error) {
 }
 
 func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
-	sql, err := migrations.FS.ReadFile("001_init.sql")
-	if err != nil {
-		return fmt.Errorf("failed to read migration: %w", err)
+	migrationFiles := []string{"001_init.sql"}
+	for _, file := range migrationFiles {
+		sql, err := migrations.FS.ReadFile(file)
+		if err != nil {
+			return fmt.Errorf("failed to read migration %s: %w", file, err)
+		}
+		if _, err = pool.Exec(ctx, string(sql)); err != nil {
+			return fmt.Errorf("failed to run migration %s: %w", file, err)
+		}
 	}
-	_, err = pool.Exec(ctx, string(sql))
-	return err
+	return nil
 }

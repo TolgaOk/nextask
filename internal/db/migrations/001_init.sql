@@ -3,16 +3,20 @@ CREATE TABLE IF NOT EXISTS tasks (
     command TEXT NOT NULL,
     status TEXT NOT NULL DEFAULT 'pending',
 
-    -- Source snapshot
-    source_remote TEXT,
-    source_ref TEXT,
-    source_commit TEXT,
+    -- Source: type discriminator + flexible config
+    source_type TEXT NOT NULL DEFAULT 'noop',
+    source_config JSONB,
+
+    -- Initializer: type discriminator + flexible config
+    init_type TEXT NOT NULL DEFAULT 'noop',
+    init_config JSONB,
 
     -- Metadata
     tags JSONB NOT NULL DEFAULT '{}',
 
     -- Worker info
     worker_id TEXT,
+    worker_info JSONB,
     exit_code INTEGER,
 
     -- Timestamps
@@ -24,6 +28,11 @@ CREATE TABLE IF NOT EXISTS tasks (
 CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
 CREATE INDEX IF NOT EXISTS idx_tasks_created_at ON tasks(created_at);
 CREATE INDEX IF NOT EXISTS idx_tasks_tags ON tasks USING GIN(tags);
+
+-- Partial index for efficient pending task claiming (FOR UPDATE SKIP LOCKED)
+CREATE INDEX IF NOT EXISTS idx_tasks_pending_fifo
+ON tasks(created_at)
+WHERE status = 'pending';
 
 CREATE TABLE IF NOT EXISTS task_logs (
     id SERIAL PRIMARY KEY,
