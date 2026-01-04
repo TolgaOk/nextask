@@ -2,12 +2,15 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 
 	gonanoid "github.com/matoous/go-nanoid/v2"
 	"github.com/nextask/nextask/internal/db"
 	"github.com/nextask/nextask/internal/source"
+	"github.com/nextask/nextask/internal/worker"
 	"github.com/spf13/cobra"
 )
 
@@ -47,20 +50,34 @@ var enqueueCmd = &cobra.Command{
 			return fmt.Errorf("--remote is required when using --snapshot")
 		}
 
-		// Get source snapshot
-		// TODO: get remote from config when available
-		result, err := source.CreateSnapshot(".", id)
-		if err != nil {
-			cmd.SilenceUsage = true
-			return fmt.Errorf("failed to create snapshot: %w", err)
+		task := &db.Task{
+			ID:         id,
+			Command:    command,
+			Status:     db.StatusPending,
+			Tags:       parsedTags,
+			SourceType: "noop",
+			InitType:   "noop",
 		}
 
-		// Push snapshot if requested
+		// Create and push source snapshot if requested
 		if snapshot {
+			result, err := source.CreateSnapshot(".", id)
+			if err != nil {
+				cmd.SilenceUsage = true
+				return fmt.Errorf("failed to create snapshot: %w", err)
+			}
+
 			if err := source.PushSnapshot(".", remote, result); err != nil {
 				cmd.SilenceUsage = true
 				return fmt.Errorf("failed to push snapshot: %w", err)
 			}
+
+			task.SourceType = "git"
+			task.SourceConfig, _ = json.Marshal(worker.GitSourceConfig{
+				Remote: remote,
+				Ref:    result.Ref,
+				Commit: result.Commit,
+			})
 		}
 
 		ctx := context.Background()
@@ -72,23 +89,14 @@ var enqueueCmd = &cobra.Command{
 		}
 		defer pool.Close()
 
-		task := &db.Task{
-			ID:           id,
-			Command:      command,
-			Status:       db.StatusPending,
-			Tags:         parsedTags,
-			SourceCommit: &result.Commit,
-		}
-
-		// Set source remote/ref only if snapshot was pushed
-		if snapshot {
-			task.SourceRemote = &remote
-			task.SourceRef = &result.Ref
-		}
-
 		if err := db.CreateTask(ctx, pool, task); err != nil {
 			cmd.SilenceUsage = true
 			return fmt.Errorf("failed to enqueue task: %w", err)
+		}
+
+		// Notify waiting workers (non-fatal if fails)
+		if _, err := pool.Exec(ctx, "NOTIFY new_task"); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: notify failed: %v\n", err)
 		}
 
 		fmt.Printf("Task enqueued: %s\n", id)
