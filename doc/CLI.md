@@ -1,125 +1,167 @@
 # CLI Reference
 
-## Global Options
-
-| Option | Description |
-|--------|-------------|
-| `--db-url` | PostgreSQL connection URL (required) |
-
 ---
 
-## init db
+## nextask
 
-Create database tables. Safe to run multiple times.
+Distributed task queue providing full reproducibility with non-intrusive source snapshotting
 
-```bash
-nextask init db --db-url "postgres://localhost/nextask"
-```
+### Synopsis
 
----
+Distributed task queue providing full reproducibility with non-intrusive source snapshotting.
 
-## init source
+Tasks are stored and managed in PostgreSQL with full stdout/stderr capture from workers.
+During enqueue, nextask can snapshot the working repository—including unstaged changes—to
+a remote git server, preserving the exact source code for execution by available workers.
 
-Create a local bare git repository for source snapshots.
-
-```bash
-nextask init source
-nextask init source --path "/custom/path/source.git"
-```
-
-**Options:**
-
-| Option | Description |
-|--------|-------------|
-| `--path` | Path for bare repo (default: `~/.nextask/source.git`) |
-
-**Output:**
+### Options
 
 ```
-Source repository initialized: /Users/you/.nextask/source.git
+      --db-url string   PostgreSQL connection URL
+  -h, --help            help for nextask
 ```
 
 ---
 
-## enqueue
+## nextask enqueue
 
-Add a task to the queue.
-
-```bash
-nextask enqueue "python train.py" --db-url "..."
-```
-
-**Options:**
-
-| Option | Description |
-|--------|-------------|
-| `--tag key=value ...` | Tags for metadata/filtering (multiple values allowed) |
-
-**Examples:**
-
-```bash
-# Basic
-nextask enqueue "python train.py"
-
-# With tags
-nextask enqueue "python train.py" --tag device=gpu lr=0.001 experiment=baseline
-```
-
-**Output:**
+Add a task to the queue
 
 ```
-Task enqueued: k8f2m9xa
+nextask enqueue COMMAND [flags]
+```
+
+### Options
+
+```
+  -h, --help            help for enqueue
+      --remote string   Git remote name or path for snapshot (required if --snapshot)
+      --snapshot        Create and push source snapshot
+      --tag strings     Tags (key=value, can specify multiple)
+```
+
+### Options inherited from parent commands
+
+```
+      --db-url string   PostgreSQL connection URL
 ```
 
 ---
 
-## list
+## nextask init
 
-List tasks with optional filters.
+Initialize nextask resources
 
-```bash
-nextask list --db-url "..."
-```
-
-**Options:**
-
-| Option | Description |
-|--------|-------------|
-| `--status` | Filter by status (comma-separated, OR logic) |
-| `--tag` | Filter by tag key=value (repeatable, AND logic) |
-| `--command` | Substring match in command (repeatable, AND logic, case-insensitive) |
-| `--since` | Tasks created after (1h, 24h, 7d) |
-| `--limit` | Max results (default: 50) |
-
-**Examples:**
-
-```bash
-# All tasks
-nextask list
-
-# Filter by status
-nextask list --status pending
-nextask list --status running,failed
-
-# Filter by tag
-nextask list --tag device=gpu
-nextask list --tag device=gpu --tag project=rl
-
-# Substring match in command
-nextask list --command "train.py"
-nextask list --command "train.py" --command "lr=0.95"
-
-# Recent tasks
-nextask list --since 24h
-
-# Combine filters
-nextask list --status pending --tag device=gpu --command "train" --since 1h --limit 10
-```
-
-**Output:**
+### Options
 
 ```
-ID        STATUS     COMMAND              TAGS                 CREATED
-k8f2m9xa  pending    python train.py      device=gpu lr=0.001  2025-01-03 10:30
-a2b3c4d5  running    python eval.py       device=cpu           2025-01-03 10:25
+  -h, --help   help for init
 ```
+
+### Options inherited from parent commands
+
+```
+      --db-url string   PostgreSQL connection URL
+```
+
+---
+
+## nextask init db
+
+Create database tables
+
+```
+nextask init db [flags]
+```
+
+### Options
+
+```
+  -h, --help   help for db
+```
+
+### Options inherited from parent commands
+
+```
+      --db-url string   PostgreSQL connection URL
+```
+
+---
+
+## nextask init source
+
+Create a local bare git remote for source snapshots
+
+```
+nextask init source [flags]
+```
+
+### Options
+
+```
+  -h, --help          help for source
+      --path string   Path for bare remote (default: ~/.nextask/source.git)
+```
+
+### Options inherited from parent commands
+
+```
+      --db-url string   PostgreSQL connection URL
+```
+
+---
+
+## nextask list
+
+List tasks with optional filters
+
+```
+nextask list [flags]
+```
+
+### Options
+
+```
+      --command strings   Substring match in command (repeatable)
+  -h, --help              help for list
+      --limit int         Max results (default 50)
+      --since string      Tasks created after (e.g., 1h, 24h, 7d)
+      --status strings    Filter by status (comma-separated)
+      --tag strings       Filter by tag key=value (repeatable)
+```
+
+### Options inherited from parent commands
+
+```
+      --db-url string   PostgreSQL connection URL
+```
+
+---
+
+## nextask worker
+
+Start a worker to process tasks
+
+```
+nextask worker [flags]
+```
+
+### Options
+
+```
+  -h, --help             help for worker
+      --name string      Worker identifier (default: random)
+      --once             Run single task and exit
+      --workdir string   Base directory for task execution (default "/tmp/nextask")
+```
+
+### Options inherited from parent commands
+
+```
+      --db-url string   PostgreSQL connection URL
+```
+
+
+---
+
+###### Auto generated by spf13/cobra
