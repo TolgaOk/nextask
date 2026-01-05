@@ -1,77 +1,41 @@
 # nextask
 
-Simple Redis-based task queue for distributed tasks running targeting the ML experiment.
+Distributed task queue providing full reproducibility with non-intrusive source snapshotting.
 
-> ⚠️ **Warning**: This is a vibe coding project. Use in production at your own risk.
+Tasks are stored and managed in *PostgreSQL* with full stdout/stderr capture from _workers_. During `enqueue`, *nextask* can snapshot the working repository—including unstaged changes—to a remote git server, preserving the exact source code for execution by available _workers_.
 
 ## Installation
 
 ```bash
-uv pip install -e .
+go install github.com/TolgaOk/nextask/cmd/nextask@latest
 ```
 
-## Usage
+Or build from source:
 
-`nextask` provide two APIs: CLI and Python. Use CLI to have an overview of the tasks and Python API to fetch the next task (hence, the name).
-
-### Python API
-
-Worker loop that processes tasks from the queue. The queue yields the oldest `PENDING` task from REDIS storage.
-
-```python
-from nextask import TaskQueue, RecordStatus
-
-
-queue = TaskQueue(host="localhost", port=6379)
-
-for record in queue(prefix="/experiments"):
-    result = train_model(record.data)
-    
-    queue.update_data(record.path, {"reward": result})
-    queue.set_status(record.path, RecordStatus.COMPLETED)
-```
-
-### CLI
-
-Create a new task:
 ```bash
-$ nextask add /experiments/run1 --data '{"lr": 0.001}'
-╭────────────────────────────── ✓ Record Created ──────────────────────────────╮
-│ Path: /experiments/run1                                                      │
-│ Status: pending                                                              │
-│ Data: {                                                                      │
-│   "lr": 0.001                                                                │
-│ }                                                                            │
-╰──────────────────────────────────────────────────────────────────────────────╯
+git clone https://github.com/TolgaOk/nextask
+cd nextask
+go build -o nextask ./cmd/nextask
 ```
 
-List tasks by prefix:
+## Quick Start
+
 ```bash
-$ nextask list --prefix /experiments
-                               Records (found 2)                                
-╭──────────────┬────────────────────┬─────────────────────┬──────────────────╮
-│ Status       │ Path               │ Created             │ Data             │
-├──────────────┼────────────────────┼─────────────────────┼──────────────────┤
-│ pending      │ /experiments/run1  │ 2025-10-10 15:43:05 │ {"lr": 0.001}    │
-│ pending      │ /experiments/run2  │ 2025-10-10 15:43:44 │ {"lr": 0.01}     │
-╰──────────────┴────────────────────┴─────────────────────┴──────────────────╯
+# Initialize database
+$ nextask init db --db-url "postgres://user@localhost:5432/nextask"
+
+# Initialize source repository for snapshots (default: `~/.nextask/source.git`)
+$ nextask init source
+
+# Enqueue a task with source snapshot (optional)
+$ nextask enqueue "python train.py" --db-url "..." --snapshot --remote ~/.nextask/source.git
+
+# Start a worker (potentially in a remote machine)
+$ nextask worker --db-url "..." --workdir /tmp/nextask
+
+# List tasks
+$ nextask list --db-url "..."
 ```
 
-View queue statistics:
-```bash
-$ nextask stats
-Queue Statistics (prefix: /)            
-╭───────────────┬───────╮
-│ Metric        │ Value │
-├───────────────┼───────┤
-│ Total records │     2 │
-│ Pending       │     2 │
-│ Running       │     0 │
-│ Completed     │     0 │
-│ Failed        │     0 │
-│               │       │
-│ Avg duration  │ 0.00s │
-╰───────────────┴───────╯
-```
+See `doc/CLI.md` for further details.
 
-See `doc/API.md` and `doc/CLI.md` for complete documentation.
