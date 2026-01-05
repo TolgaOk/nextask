@@ -21,8 +21,17 @@ var workerCmd = &cobra.Command{
 	Use:   "worker",
 	Short: "Start a worker to process tasks",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if dbURL == "" {
+		if cfg.DB.URL == "" {
 			return errDBRequired()
+		}
+
+		// Apply command-specific flag
+		if workdir != "" {
+			cfg.Worker.Workdir = workdir
+		}
+		// Use default if still empty
+		if cfg.Worker.Workdir == "" {
+			cfg.Worker.Workdir = "/tmp/nextask"
 		}
 
 		ctx, cancel := context.WithCancel(context.Background())
@@ -37,8 +46,8 @@ var workerCmd = &cobra.Command{
 		}()
 
 		w, err := worker.New(ctx, worker.Config{
-			DBURL:   dbURL,
-			Workdir: workdir,
+			DBURL:   cfg.DB.URL,
+			Workdir: cfg.Worker.Workdir,
 			Name:    workerName,
 			Once:    once,
 		})
@@ -52,7 +61,7 @@ var workerCmd = &cobra.Command{
 }
 
 func init() {
-	workerCmd.Flags().StringVar(&workdir, "workdir", "/tmp/nextask", "Base directory for task execution")
+	workerCmd.Flags().StringVar(&workdir, "workdir", "", "Base directory for task execution (default /tmp/nextask)")
 	workerCmd.Flags().StringVar(&workerName, "name", "", "Worker identifier (default: random)")
 	workerCmd.Flags().BoolVar(&once, "once", false, "Run single task and exit")
 	RootCmd.AddCommand(workerCmd)

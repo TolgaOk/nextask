@@ -6,12 +6,14 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/TolgaOk/nextask/internal/config"
+	"github.com/TolgaOk/nextask/internal/db"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
-	"github.com/TolgaOk/nextask/internal/db"
 )
 
 var dbURL string
+var cfg *config.Config
 
 var (
 	errStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Bold(true)
@@ -41,9 +43,10 @@ func errWithHints(msg string, hints ...string) error {
 }
 
 func errDBRequired() error {
-	return errWithHints("--db-url is required",
+	return errWithHints("database URL is required",
 		"Provide "+codeStyle.Render("--db-url \"postgres://user@localhost:5432/dbname\""),
 		"Or set "+codeStyle.Render("NEXTASK_DB_URL")+" environment variable",
+		"Or set "+codeStyle.Render("db.url")+" in config file",
 	)
 }
 
@@ -63,6 +66,24 @@ During enqueue, nextask can snapshot the working repository—including unstaged
 a remote git server, preserving the exact source code for execution by available workers.`,
 	SilenceErrors: true,
 	SilenceUsage:  true,
+	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		var err error
+		cfg, err = config.Load()
+		if err != nil {
+			path, _ := config.GlobalPath()
+			return withHints(err,
+				"Check TOML syntax in "+codeStyle.Render(path),
+				"Example format:",
+				"  [db]",
+				"  url = \"postgres://user@localhost/dbname\"",
+			)
+		}
+		// Apply persistent flag
+		if dbURL != "" {
+			cfg.DB.URL = dbURL
+		}
+		return nil
+	},
 }
 
 // Execute runs the root command.

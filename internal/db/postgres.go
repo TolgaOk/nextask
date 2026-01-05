@@ -4,10 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 
+	"github.com/TolgaOk/nextask/internal/db/migrations"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/TolgaOk/nextask/internal/db/migrations"
 )
 
 // Sentinel errors for database operations.
@@ -31,6 +32,10 @@ func Connect(ctx context.Context, dbURL string) (*pgxpool.Pool, error) {
 }
 
 func wrapPgError(err error) error {
+	if err == nil {
+		return nil
+	}
+
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) {
 		switch pgErr.Code {
@@ -42,7 +47,14 @@ func wrapPgError(err error) error {
 			return ErrNotInitialized
 		}
 	}
-	return ErrConnRefused
+
+	// Check for connection refused via net.OpError
+	var opErr *net.OpError
+	if errors.As(err, &opErr) {
+		return ErrConnRefused
+	}
+
+	return err
 }
 
 // Migrate runs database migrations to create required tables.

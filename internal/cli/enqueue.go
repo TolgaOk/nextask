@@ -7,10 +7,10 @@ import (
 	"os"
 	"strings"
 
-	gonanoid "github.com/matoous/go-nanoid/v2"
 	"github.com/TolgaOk/nextask/internal/db"
 	"github.com/TolgaOk/nextask/internal/source"
 	"github.com/TolgaOk/nextask/internal/worker"
+	gonanoid "github.com/matoous/go-nanoid/v2"
 	"github.com/spf13/cobra"
 )
 
@@ -40,8 +40,13 @@ var enqueueCmd = &cobra.Command{
 		return nil
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if dbURL == "" {
+		if cfg.DB.URL == "" {
 			return errDBRequired()
+		}
+
+		// Apply command-specific flag
+		if remote != "" {
+			cfg.Source.Remote = remote
 		}
 
 		command := args[0]
@@ -51,8 +56,8 @@ var enqueueCmd = &cobra.Command{
 			parts := strings.SplitN(tag, "=", 2)
 			if len(parts) != 2 {
 				return errWithHints(fmt.Sprintf("invalid tag format: %s", tag),
-				"Expected format: "+codeStyle.Render("key=value"),
-			)
+					"Expected format: "+codeStyle.Render("key=value"),
+				)
 			}
 			parsedTags[parts[0]] = parts[1]
 		}
@@ -62,9 +67,10 @@ var enqueueCmd = &cobra.Command{
 			return fmt.Errorf("failed to generate ID: %w", err)
 		}
 
-		if snapshot && remote == "" {
-			return errWithHints("--remote is required when using --snapshot",
+		if snapshot && cfg.Source.Remote == "" {
+			return errWithHints("remote is required when using --snapshot",
 				"Provide: "+codeStyle.Render("--remote ~/.nextask/source.git"),
+				"Or set "+codeStyle.Render("source.remote")+" in config file",
 				"Create with: "+codeStyle.Render("nextask init source"),
 			)
 		}
@@ -82,19 +88,19 @@ var enqueueCmd = &cobra.Command{
 			result, err := source.CreateSnapshot(".", id)
 			if err != nil {
 				return withHints(fmt.Errorf("failed to create snapshot: %w", err),
-				"Ensure you are in a git repository",
-			)
+					"Ensure you are in a git repository",
+				)
 			}
 
-			if err := source.PushSnapshot(".", remote, result); err != nil {
+			if err := source.PushSnapshot(".", cfg.Source.Remote, result); err != nil {
 				return withHints(fmt.Errorf("failed to push snapshot: %w", err),
-					"Check that remote exists: "+codeStyle.Render(remote),
+					"Check that remote exists: "+codeStyle.Render(cfg.Source.Remote),
 				)
 			}
 
 			task.SourceType = "git"
 			task.SourceConfig, _ = json.Marshal(worker.GitSourceConfig{
-				Remote: remote,
+				Remote: cfg.Source.Remote,
 				Ref:    result.Ref,
 				Commit: result.Commit,
 			})
@@ -102,7 +108,7 @@ var enqueueCmd = &cobra.Command{
 
 		ctx := context.Background()
 
-		pool, err := db.Connect(ctx, dbURL)
+		pool, err := db.Connect(ctx, cfg.DB.URL)
 		if err != nil {
 			return err
 		}
