@@ -24,28 +24,30 @@ func (e *Executor) Execute(ctx context.Context, task *db.Task) int {
 
 	src, err := GetSource(task.SourceType)
 	if err != nil {
-		log.Log("error", fmt.Sprintf("unable to instantiate source '%s': %v", task.SourceType, err))
+		log.Log("nextask", fmt.Sprintf("[error] unable to instantiate source '%s': %v", task.SourceType, err))
 		return 1
 	}
 	if err := src.Fetch(ctx, task.SourceConfig, taskDir, log); err != nil {
-		log.Log("error", fmt.Sprintf("source fetch failed: %v", err))
+		log.Log("nextask", fmt.Sprintf("[error] source fetch failed: %v", err))
 		return 1
 	}
 
 	init, err := GetInitializer(task.InitType)
 	if err != nil {
-		log.Log("error", fmt.Sprintf("unable to instantiate init '%s': %v", task.InitType, err))
+		log.Log("nextask", fmt.Sprintf("[error] unable to instantiate init '%s': %v", task.InitType, err))
 		return 1
 	}
 	if err := init.Run(ctx, task.InitConfig, taskDir, log); err != nil {
-		log.Log("error", fmt.Sprintf("init run failed: %v", err))
+		log.Log("nextask", fmt.Sprintf("[error] init failed: %v", err))
 		return 1
 	}
 
+	log.Log("nextask", fmt.Sprintf("[info] running: %s", task.Command))
 	exitCode, err := e.runCommand(ctx, task, taskDir, log)
 	if err != nil {
-		log.Log("error", fmt.Sprintf("command failed: %v", err))
+		log.Log("nextask", fmt.Sprintf("[error] command failed: %v", err))
 	}
+	log.Log("nextask", fmt.Sprintf("[info] exit code: %d", exitCode))
 
 	return exitCode
 }
