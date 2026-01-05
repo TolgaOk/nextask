@@ -25,6 +25,7 @@ var (
 var listCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List tasks with optional filters",
+	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if dbURL == "" {
 			return fmt.Errorf("--db-url is required")
