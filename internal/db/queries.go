@@ -26,7 +26,7 @@ func CreateTask(ctx context.Context, pool *pgxpool.Pool, task *Task) error {
 	`, task.ID, task.Command, task.Status, tagsJSON,
 		task.SourceType, task.SourceConfig, task.InitType, task.InitConfig)
 
-	return err
+	return wrapPgError(err)
 }
 
 // ListFilter specifies criteria for filtering tasks.
@@ -71,7 +71,7 @@ func ListTasks(ctx context.Context, pool *pgxpool.Pool, filter ListFilter) ([]Ta
 
 	rows, err := pool.Query(ctx, sql, args...)
 	if err != nil {
-		return nil, err
+		return nil, wrapPgError(err)
 	}
 	defer rows.Close()
 

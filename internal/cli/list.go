@@ -28,7 +28,7 @@ var listCmd = &cobra.Command{
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if dbURL == "" {
-			return fmt.Errorf("--db-url is required")
+			return errDBRequired()
 		}
 
 		ctx := context.Background()
@@ -43,7 +43,9 @@ var listCmd = &cobra.Command{
 		for _, tag := range listTags {
 			parts := strings.SplitN(tag, "=", 2)
 			if len(parts) != 2 {
-				return fmt.Errorf("invalid tag format: %s (expected key=value)", tag)
+				return errWithHints(fmt.Sprintf("invalid tag format: %s", tag),
+				"Expected format: "+codeStyle.Render("key=value"),
+			)
 			}
 			parsedTags[parts[0]] = parts[1]
 		}
@@ -52,9 +54,17 @@ var listCmd = &cobra.Command{
 		if listSince != "" {
 			dur, err := str2duration.ParseDuration(listSince)
 			if err != nil {
-				return fmt.Errorf("invalid since format: %s", listSince)
+				return errWithHints(fmt.Sprintf("invalid since format: %s", listSince),
+				"Examples: "+codeStyle.Render("1h")+", "+codeStyle.Render("24h")+", "+codeStyle.Render("7d"),
+			)
 			}
 			since = time.Now().Add(-dur)
+		}
+
+		if listLimit < 0 {
+			return errWithHints("limit must be positive",
+				"Example: "+codeStyle.Render("--limit 50"),
+			)
 		}
 
 		filter := db.ListFilter{

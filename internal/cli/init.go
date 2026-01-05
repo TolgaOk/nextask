@@ -23,7 +23,7 @@ var initDBCmd = &cobra.Command{
 	Short: "Create database tables",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if dbURL == "" {
-			return fmt.Errorf("--db-url is required")
+			return errDBRequired()
 		}
 
 		ctx := context.Background()
@@ -57,11 +57,15 @@ var initSourceCmd = &cobra.Command{
 		}
 
 		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
-			return fmt.Errorf("failed to create directory: %w", err)
+			return withHints(fmt.Errorf("failed to create directory: %w", err),
+				"Check path is writable: "+codeStyle.Render(filepath.Dir(path)),
+			)
 		}
 
 		if _, err := os.Stat(path); err == nil {
-			return fmt.Errorf("remote already exists: %s", path)
+			return errWithHints(fmt.Sprintf("remote already exists: %s", path),
+				"Remove it first or use a different path",
+			)
 		}
 
 		_, err := git.PlainInit(path, true)

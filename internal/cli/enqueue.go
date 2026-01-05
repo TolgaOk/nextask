@@ -21,10 +21,27 @@ var remote string
 var enqueueCmd = &cobra.Command{
 	Use:   "enqueue COMMAND",
 	Short: "Add a task to the queue",
-	Args:  cobra.ExactArgs(1),
+	Args: func(cmd *cobra.Command, args []string) error {
+		if len(args) == 0 {
+			return errWithHints("command is required",
+				"Example: "+codeStyle.Render("nextask enqueue \"python train.py\""),
+			)
+		}
+		if len(args) > 1 {
+			return errWithHints("too many arguments",
+				"Wrap command in quotes: "+codeStyle.Render("nextask enqueue \"python train.py --epochs 10\""),
+			)
+		}
+		if args[0] == "" {
+			return errWithHints("command cannot be empty",
+				"Example: "+codeStyle.Render("nextask enqueue \"python train.py\""),
+			)
+		}
+		return nil
+	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if dbURL == "" {
-			return fmt.Errorf("--db-url is required")
+			return errDBRequired()
 		}
 
 		command := args[0]
@@ -33,7 +50,9 @@ var enqueueCmd = &cobra.Command{
 		for _, tag := range tags {
 			parts := strings.SplitN(tag, "=", 2)
 			if len(parts) != 2 {
-				return fmt.Errorf("invalid tag format: %s (expected key=value)", tag)
+				return errWithHints(fmt.Sprintf("invalid tag format: %s", tag),
+				"Expected format: "+codeStyle.Render("key=value"),
+			)
 			}
 			parsedTags[parts[0]] = parts[1]
 		}
@@ -44,7 +63,10 @@ var enqueueCmd = &cobra.Command{
 		}
 
 		if snapshot && remote == "" {
-			return fmt.Errorf("--remote is required when using --snapshot")
+			return errWithHints("--remote is required when using --snapshot",
+				"Provide: "+codeStyle.Render("--remote ~/.nextask/source.git"),
+				"Create with: "+codeStyle.Render("nextask init source"),
+			)
 		}
 
 		task := &db.Task{
@@ -59,13 +81,15 @@ var enqueueCmd = &cobra.Command{
 		if snapshot {
 			result, err := source.CreateSnapshot(".", id)
 			if err != nil {
-				cmd.SilenceUsage = true
-				return fmt.Errorf("failed to create snapshot: %w", err)
+				return withHints(fmt.Errorf("failed to create snapshot: %w", err),
+				"Ensure you are in a git repository",
+			)
 			}
 
 			if err := source.PushSnapshot(".", remote, result); err != nil {
-				cmd.SilenceUsage = true
-				return fmt.Errorf("failed to push snapshot: %w", err)
+				return withHints(fmt.Errorf("failed to push snapshot: %w", err),
+					"Check that remote exists: "+codeStyle.Render(remote),
+				)
 			}
 
 			task.SourceType = "git"
@@ -80,14 +104,12 @@ var enqueueCmd = &cobra.Command{
 
 		pool, err := db.Connect(ctx, dbURL)
 		if err != nil {
-			cmd.SilenceUsage = true
 			return err
 		}
 		defer pool.Close()
 
 		if err := db.CreateTask(ctx, pool, task); err != nil {
-			cmd.SilenceUsage = true
-			return fmt.Errorf("failed to enqueue task: %w", err)
+			return err
 		}
 
 		if _, err := pool.Exec(ctx, "NOTIFY new_task"); err != nil {
