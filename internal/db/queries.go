@@ -156,3 +156,13 @@ func InsertLog(ctx context.Context, pool *pgxpool.Pool, taskID, stream, data str
 	_, err = pool.Exec(ctx, string(sql), taskID, stream, data)
 	return err
 }
+
+// GetTask retrieves a single task by ID.
+func GetTask(ctx context.Context, pool *pgxpool.Pool, taskID string) (*Task, error) {
+	sql, err := migrations.FS.ReadFile("get_task.sql")
+	if err != nil {
+		return nil, fmt.Errorf("failed to read get_task.sql: %w", err)
+	}
+	row := pool.QueryRow(ctx, string(sql), taskID)
+	return scanTask(row)
+}
