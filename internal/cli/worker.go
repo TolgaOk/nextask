@@ -22,7 +22,7 @@ var workerCmd = &cobra.Command{
 	Short: "Start a worker to process tasks",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if dbURL == "" {
-			return fmt.Errorf("--db-url is required")
+			return errDBRequired()
 		}
 
 		ctx, cancel := context.WithCancel(context.Background())
@@ -43,7 +43,6 @@ var workerCmd = &cobra.Command{
 			Once:    once,
 		})
 		if err != nil {
-			cmd.SilenceUsage = true
 			return err
 		}
 		defer w.Close(ctx)
