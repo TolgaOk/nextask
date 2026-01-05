@@ -23,6 +23,28 @@ a remote git server, preserving the exact source code for execution by available
 
 ---
 
+## nextask config
+
+Show configuration
+
+```
+nextask config [flags]
+```
+
+### Options
+
+```
+  -h, --help   help for config
+```
+
+### Options inherited from parent commands
+
+```
+      --db-url string   PostgreSQL connection URL
+```
+
+---
+
 ## nextask enqueue
 
 Add a task to the queue
@@ -152,7 +174,7 @@ nextask worker [flags]
   -h, --help             help for worker
       --name string      Worker identifier (default: random)
       --once             Run single task and exit
-      --workdir string   Base directory for task execution (default "/tmp/nextask")
+      --workdir string   Base directory for task execution (default /tmp/nextask)
 ```
 
 ### Options inherited from parent commands

@@ -6,8 +6,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/go-git/go-git/v5"
 	"github.com/TolgaOk/nextask/internal/db"
+	"github.com/go-git/go-git/v5"
 	"github.com/spf13/cobra"
 )
 
@@ -22,13 +22,13 @@ var initDBCmd = &cobra.Command{
 	Use:   "db",
 	Short: "Create database tables",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if dbURL == "" {
+		if cfg.DB.URL == "" {
 			return errDBRequired()
 		}
 
 		ctx := context.Background()
 
-		pool, err := db.Connect(ctx, dbURL)
+		pool, err := db.Connect(ctx, cfg.DB.URL)
 		if err != nil {
 			return err
 		}

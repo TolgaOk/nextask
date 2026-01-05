@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/TolgaOk/nextask/internal/db"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/lipgloss/table"
-	"github.com/TolgaOk/nextask/internal/db"
 	"github.com/spf13/cobra"
 	str2duration "github.com/xhit/go-str2duration/v2"
 )
@@ -27,13 +27,13 @@ var listCmd = &cobra.Command{
 	Short: "List tasks with optional filters",
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if dbURL == "" {
+		if cfg.DB.URL == "" {
 			return errDBRequired()
 		}
 
 		ctx := context.Background()
 
-		pool, err := db.Connect(ctx, dbURL)
+		pool, err := db.Connect(ctx, cfg.DB.URL)
 		if err != nil {
 			return err
 		}
@@ -44,8 +44,8 @@ var listCmd = &cobra.Command{
 			parts := strings.SplitN(tag, "=", 2)
 			if len(parts) != 2 {
 				return errWithHints(fmt.Sprintf("invalid tag format: %s", tag),
-				"Expected format: "+codeStyle.Render("key=value"),
-			)
+					"Expected format: "+codeStyle.Render("key=value"),
+				)
 			}
 			parsedTags[parts[0]] = parts[1]
 		}
@@ -55,8 +55,8 @@ var listCmd = &cobra.Command{
 			dur, err := str2duration.ParseDuration(listSince)
 			if err != nil {
 				return errWithHints(fmt.Sprintf("invalid since format: %s", listSince),
-				"Examples: "+codeStyle.Render("1h")+", "+codeStyle.Render("24h")+", "+codeStyle.Render("7d"),
-			)
+					"Examples: "+codeStyle.Render("1h")+", "+codeStyle.Render("24h")+", "+codeStyle.Render("7d"),
+				)
 			}
 			since = time.Now().Add(-dur)
 		}
