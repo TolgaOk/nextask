@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/BurntSushi/toml"
 )
@@ -96,4 +97,26 @@ func applyEnv(cfg *Config) {
 	if v := os.Getenv("NEXTASK_WORKER_WORKDIR"); v != "" {
 		cfg.Worker.Workdir = v
 	}
+	normalizePaths(cfg)
+}
+
+func normalizePaths(cfg *Config) {
+	cfg.Source.Remote = ToAbsPath(cfg.Source.Remote)
+	cfg.Worker.Workdir = ToAbsPath(cfg.Worker.Workdir)
+}
+
+// ToAbsPath expands ~ and converts to absolute path.
+func ToAbsPath(path string) string {
+	if path == "" {
+		return path
+	}
+	if strings.HasPrefix(path, "~/") {
+		if home, err := os.UserHomeDir(); err == nil {
+			path = filepath.Join(home, path[2:])
+		}
+	}
+	if abs, err := filepath.Abs(path); err == nil {
+		return abs
+	}
+	return path
 }

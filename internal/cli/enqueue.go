@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/TolgaOk/nextask/internal/config"
 	"github.com/TolgaOk/nextask/internal/db"
 	"github.com/TolgaOk/nextask/internal/source"
 	"github.com/TolgaOk/nextask/internal/worker"
@@ -46,7 +47,7 @@ var enqueueCmd = &cobra.Command{
 
 		// Apply command-specific flag
 		if remote != "" {
-			cfg.Source.Remote = remote
+			cfg.Source.Remote = config.ToAbsPath(remote)
 		}
 
 		command := args[0]

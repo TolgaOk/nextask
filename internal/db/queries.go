@@ -156,3 +156,80 @@ func InsertLog(ctx context.Context, pool *pgxpool.Pool, taskID, stream, data str
 	_, err = pool.Exec(ctx, string(sql), taskID, stream, data)
 	return err
 }
+
+// GetTask retrieves a single task by ID.
+func GetTask(ctx context.Context, pool *pgxpool.Pool, taskID string) (*Task, error) {
+	sql, err := migrations.FS.ReadFile("get_task.sql")
+	if err != nil {
+		return nil, fmt.Errorf("failed to read get_task.sql: %w", err)
+	}
+	row := pool.QueryRow(ctx, string(sql), taskID)
+	return scanTask(row)
+}
+
+// RequestCancel requests cancellation of a task.
+// For pending tasks: directly sets status to cancelled.
+// For running tasks: sets cancel_requested_at (worker handles actual cancellation).
+// Returns the original status (nil if task not found).
+func RequestCancel(ctx context.Context, pool *pgxpool.Pool, taskID string) (*TaskStatus, error) {
+	sql, err := migrations.FS.ReadFile("request_cancel.sql")
+	if err != nil {
+		return nil, fmt.Errorf("failed to read request_cancel.sql: %w", err)
+	}
+
+	var originalStatus *TaskStatus
+	err = pool.QueryRow(ctx, string(sql), taskID).Scan(&originalStatus)
+	if err != nil {
+		if err.Error() == "no rows in result set" {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	return originalStatus, nil
+}
+
+// DeleteTask removes a task and its logs from the database.
+// Returns true if the task was deleted, false if it didn't exist.
+func DeleteTask(ctx context.Context, pool *pgxpool.Pool, taskID string) (bool, error) {
+	sql, err := migrations.FS.ReadFile("delete_task.sql")
+	if err != nil {
+		return false, fmt.Errorf("failed to read delete_task.sql: %w", err)
+	}
+
+	var deletedID *string
+	err = pool.QueryRow(ctx, string(sql), taskID).Scan(&deletedID)
+	if err != nil {
+		if err.Error() == "no rows in result set" {
+			return false, nil
+		}
+		return false, err
+	}
+	return deletedID != nil, nil
+}
+
+// GetLogs retrieves logs for a task, optionally filtered by stream.
+// If limit > 0, returns at most limit lines. If tail is true, returns the last lines.
+func GetLogs(ctx context.Context, pool *pgxpool.Pool, taskID, stream string, limit int, tail bool) ([]TaskLog, error) {
+	sql, err := migrations.FS.ReadFile("get_logs.sql")
+	if err != nil {
+		return nil, fmt.Errorf("failed to read get_logs.sql: %w", err)
+	}
+
+	rows, err := pool.Query(ctx, string(sql), taskID, stream, limit, tail)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var logs []TaskLog
+	for rows.Next() {
+		var log TaskLog
+		if err := rows.Scan(&log.ID, &log.TaskID, &log.Stream, &log.Data, &log.CreatedAt); err != nil {
+			return nil, err
+		}
+		logs = append(logs, log)
+	}
+
+	return logs, rows.Err()
+}

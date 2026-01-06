@@ -169,7 +169,7 @@ func TestDBLogger_LogsErrorOnSourceFailure(t *testing.T) {
 	executor.Execute(ctx, task)
 
 	var count int
-	pool.QueryRow(ctx, "SELECT COUNT(*) FROM task_logs WHERE task_id = $1 AND stream = 'error'", task.ID).Scan(&count)
+	pool.QueryRow(ctx, "SELECT COUNT(*) FROM task_logs WHERE task_id = $1 AND stream = 'nextask' AND data LIKE '%[error]%'", task.ID).Scan(&count)
 	if count == 0 {
 		t.Error("error log not captured for source failure")
 	}
@@ -194,7 +194,7 @@ func TestDBLogger_LogsErrorOnInitFailure(t *testing.T) {
 	executor.Execute(ctx, task)
 
 	var count int
-	pool.QueryRow(ctx, "SELECT COUNT(*) FROM task_logs WHERE task_id = $1 AND stream = 'error'", task.ID).Scan(&count)
+	pool.QueryRow(ctx, "SELECT COUNT(*) FROM task_logs WHERE task_id = $1 AND stream = 'nextask' AND data LIKE '%[error]%'", task.ID).Scan(&count)
 	if count == 0 {
 		t.Error("error log not captured for init failure")
 	}

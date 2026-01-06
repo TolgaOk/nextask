@@ -158,3 +158,60 @@ func TestGlobalPath(t *testing.T) {
 		t.Errorf("expected %q, got %q", expected, path)
 	}
 }
+
+func TestToAbsPath(t *testing.T) {
+	home, _ := os.UserHomeDir()
+
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{"empty", "", ""},
+		{"absolute", "/absolute/path", "/absolute/path"},
+		{"tilde", "~/some/path", filepath.Join(home, "some/path")},
+		{"tilde only", "~/", home},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := ToAbsPath(tt.input)
+			if result != tt.expected {
+				t.Errorf("ToAbsPath(%q) = %q, want %q", tt.input, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestLoadFrom_TildeExpansion(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+
+	content := `
+[source]
+remote = "~/.nextask/source.git"
+
+[worker]
+workdir = "~/nextask-work"
+`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadFrom(path)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	home, _ := os.UserHomeDir()
+
+	expectedRemote := filepath.Join(home, ".nextask/source.git")
+	if cfg.Source.Remote != expectedRemote {
+		t.Errorf("Source.Remote = %q, want %q", cfg.Source.Remote, expectedRemote)
+	}
+
+	expectedWorkdir := filepath.Join(home, "nextask-work")
+	if cfg.Worker.Workdir != expectedWorkdir {
+		t.Errorf("Worker.Workdir = %q, want %q", cfg.Worker.Workdir, expectedWorkdir)
+	}
+}

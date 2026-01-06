@@ -22,19 +22,25 @@ go build -o nextask ./cmd/nextask
 
 ```bash
 # Initialize database
-$ nextask init db --db-url "postgres://user@localhost:5432/nextask"
+$ nextask init db
 
 # Initialize source repository for snapshots (default: `~/.nextask/source.git`)
 $ nextask init source
 
 # Enqueue a task with source snapshot (optional)
-$ nextask enqueue "python train.py" --db-url "..." --snapshot --remote ~/.nextask/source.git
+$ nextask enqueue "python train.py" --snapshot
 
 # Start a worker (potentially in a remote machine)
-$ nextask worker --db-url "..." --workdir /tmp/nextask
+$ nextask worker
+
+# View task logs
+$ nextask log <task-id> [--stream stdout|stderr|nextask] [--head N] [--tail N]
 
 # List tasks
-$ nextask list --db-url "..."
+$ nextask list
+
+# Remove a task (including logs and snapshot)
+$ nextask remove <task-id>
 ```
 
 See `doc/CLI.md` for further details.

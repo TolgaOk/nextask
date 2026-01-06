@@ -28,7 +28,7 @@ func (b BashInitializer) Run(ctx context.Context, rawConfig json.RawMessage, tas
 		return fmt.Errorf("bash init config: script is required")
 	}
 
-	log.Log("info", fmt.Sprintf("Running %s", cfg.Script))
+	log.Log("nextask", fmt.Sprintf("[info] running init script: %s", cfg.Script))
 
 	cmd := exec.CommandContext(ctx, "sh", cfg.Script)
 	cmd.Dir = taskDir
