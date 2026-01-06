@@ -23,6 +23,29 @@ a remote git server, preserving the exact source code for execution by available
 
 ---
 
+## nextask cancel
+
+Cancel a pending or running task
+
+```
+nextask cancel TASK_ID [flags]
+```
+
+### Options
+
+```
+  -h, --help               help for cancel
+      --timeout duration   Timeout waiting for cancel confirmation (default 10s)
+```
+
+### Options inherited from parent commands
+
+```
+      --db-url string   PostgreSQL connection URL
+```
+
+---
+
 ## nextask config
 
 Show configuration
@@ -150,6 +173,75 @@ nextask list [flags]
       --since string      Tasks created after (e.g., 1h, 24h, 7d)
       --status strings    Filter by status (comma-separated)
       --tag strings       Filter by tag key=value (repeatable)
+```
+
+### Options inherited from parent commands
+
+```
+      --db-url string   PostgreSQL connection URL
+```
+
+---
+
+## nextask log
+
+View task output
+
+```
+nextask log TASK_ID [flags]
+```
+
+### Options
+
+```
+      --head int        Show first N lines
+  -h, --help            help for log
+  -s, --stream string   Filter by stream (stdout, stderr, nextask)
+      --tail int        Show last N lines
+```
+
+### Options inherited from parent commands
+
+```
+      --db-url string   PostgreSQL connection URL
+```
+
+---
+
+## nextask remove
+
+Remove a task, its logs, and snapshot
+
+```
+nextask remove TASK_ID [flags]
+```
+
+### Options
+
+```
+  -h, --help   help for remove
+```
+
+### Options inherited from parent commands
+
+```
+      --db-url string   PostgreSQL connection URL
+```
+
+---
+
+## nextask show
+
+Show task details
+
+```
+nextask show TASK_ID [flags]
+```
+
+### Options
+
+```
+  -h, --help   help for show
 ```
 
 ### Options inherited from parent commands
