@@ -50,16 +50,6 @@ func (e *Executor) Execute(ctx context.Context, task *db.Task) *ExitResult {
 		return &ExitResult{Code: 1, Err: err}
 	}
 
-	init, err := GetInitializer(task.InitType)
-	if err != nil {
-		log.Log("nextask", fmt.Sprintf("[error] unable to instantiate init '%s': %v", task.InitType, err))
-		return &ExitResult{Code: 1, Err: err}
-	}
-	if err := init.Run(ctx, task.InitConfig, taskDir, log); err != nil {
-		log.Log("nextask", fmt.Sprintf("[error] init failed: %v", err))
-		return &ExitResult{Code: 1, Err: err}
-	}
-
 	log.Log("nextask", fmt.Sprintf("[info] running: %s", task.Command))
 	return e.runCommand(ctx, task, taskDir, log)
 }

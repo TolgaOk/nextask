@@ -31,8 +31,6 @@ type Task struct {
 	Status       TaskStatus
 	SourceType   string
 	SourceConfig json.RawMessage
-	InitType     string
-	InitConfig   json.RawMessage
 	Tags         map[string]string
 	WorkerID     *string
 	WorkerInfo   *WorkerInfo

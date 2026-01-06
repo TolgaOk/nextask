@@ -7,10 +7,6 @@ CREATE TABLE IF NOT EXISTS tasks (
     source_type TEXT NOT NULL DEFAULT 'noop',
     source_config JSONB,
 
-    -- Initializer: type discriminator + flexible config
-    init_type TEXT NOT NULL DEFAULT 'noop',
-    init_config JSONB,
-
     -- Metadata
     tags JSONB NOT NULL DEFAULT '{}',
 
@@ -25,9 +21,6 @@ CREATE TABLE IF NOT EXISTS tasks (
     finished_at TIMESTAMPTZ,
     cancel_requested_at TIMESTAMPTZ
 );
-
--- Add column if table already exists (idempotent)
-ALTER TABLE tasks ADD COLUMN IF NOT EXISTS cancel_requested_at TIMESTAMPTZ;
 
 CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
 CREATE INDEX IF NOT EXISTS idx_tasks_created_at ON tasks(created_at);

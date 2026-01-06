@@ -116,12 +116,6 @@ func printTask(task *db.Task) {
 		printField(showIndentLabel, "Type", task.SourceType)
 		printSourceConfig(task.SourceType, task.SourceConfig)
 	}
-
-	if task.InitType != "noop" && task.InitType != "" {
-		fmt.Println(showSectionStyle.Render("Init"))
-		printField(showIndentLabel, "Type", task.InitType)
-		printInitConfig(task.InitType, task.InitConfig)
-	}
 }
 
 func printField(labelStyle lipgloss.Style, label, value string) {
@@ -148,26 +142,6 @@ func printSourceConfig(sourceType string, data json.RawMessage) {
 			}
 			if cfg.Commit != "" {
 				printField(showIndentLabel, "Commit", cfg.Commit)
-			}
-			return
-		}
-	}
-
-	printRawConfig(data)
-}
-
-func printInitConfig(initType string, data json.RawMessage) {
-	if len(data) == 0 {
-		return
-	}
-
-	if initType == "bash" {
-		var cfg struct {
-			Script string `json:"script"`
-		}
-		if err := json.Unmarshal(data, &cfg); err == nil {
-			if cfg.Script != "" {
-				printField(showIndentLabel, "Script", cfg.Script)
 			}
 			return
 		}

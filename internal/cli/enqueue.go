@@ -82,7 +82,6 @@ var enqueueCmd = &cobra.Command{
 			Status:     db.StatusPending,
 			Tags:       parsedTags,
 			SourceType: "noop",
-			InitType:   "noop",
 		}
 
 		if snapshot {

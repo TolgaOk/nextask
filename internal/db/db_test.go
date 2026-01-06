@@ -105,7 +105,6 @@ func TestCreateTask_WithSourceConfig(t *testing.T) {
 		Tags:         map[string]string{},
 		SourceType:   "git",
 		SourceConfig: json.RawMessage(`{"remote":"origin","ref":"refs/nextask/test5678","commit":"abc123"}`),
-		InitType:     "noop",
 	}
 
 	err := CreateTask(ctx, pool, task)
@@ -339,8 +338,6 @@ func TestClaimTask_WithSourceConfig(t *testing.T) {
 		Tags:         map[string]string{},
 		SourceType:   "git",
 		SourceConfig: json.RawMessage(`{"remote":"origin","ref":"refs/nextask/test"}`),
-		InitType:     "bash",
-		InitConfig:   json.RawMessage(`{"script":"setup.sh"}`),
 	}
 	if err := CreateTask(ctx, pool, task); err != nil {
 		t.Fatalf("CreateTask() error = %v", err)
@@ -357,20 +354,11 @@ func TestClaimTask_WithSourceConfig(t *testing.T) {
 	if claimed.SourceType != "git" {
 		t.Errorf("SourceType = %s, want git", claimed.SourceType)
 	}
-	if claimed.InitType != "bash" {
-		t.Errorf("InitType = %s, want bash", claimed.InitType)
-	}
 
 	var srcCfg map[string]string
 	json.Unmarshal(claimed.SourceConfig, &srcCfg)
 	if srcCfg["remote"] != "origin" || srcCfg["ref"] != "refs/nextask/test" {
 		t.Errorf("SourceConfig = %v", srcCfg)
-	}
-
-	var initCfg map[string]string
-	json.Unmarshal(claimed.InitConfig, &initCfg)
-	if initCfg["script"] != "setup.sh" {
-		t.Errorf("InitConfig = %v", initCfg)
 	}
 }
 

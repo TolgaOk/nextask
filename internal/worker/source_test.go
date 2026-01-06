@@ -102,7 +102,6 @@ func TestExecutor_NoopSource_Integration(t *testing.T) {
 		Command:    "echo hello",
 		Status:     db.StatusPending,
 		SourceType: "noop",
-		InitType:   "noop",
 		Tags:       map[string]string{},
 	}
 	db.CreateTask(ctx, pool, task)
@@ -156,7 +155,6 @@ func TestExecutor_GitSource_Integration(t *testing.T) {
 		Status:       db.StatusPending,
 		SourceType:   "git",
 		SourceConfig: sourceConfig,
-		InitType:     "noop",
 		Tags:         map[string]string{},
 	}
 	db.CreateTask(ctx, pool, task)
@@ -188,7 +186,6 @@ func TestExecutor_UnknownSourceType_Integration(t *testing.T) {
 		Command:    "echo test",
 		Status:     db.StatusPending,
 		SourceType: "unknown",
-		InitType:   "noop",
 		Tags:       map[string]string{},
 	}
 	db.CreateTask(ctx, pool, task)
