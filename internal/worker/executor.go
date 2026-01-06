@@ -3,10 +3,12 @@ package worker
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sync"
 	"syscall"
 	"time"
 
@@ -37,7 +39,6 @@ func (r *ExitResult) String() string {
 // Execute runs a task and returns the exit result.
 func (e *Executor) Execute(ctx context.Context, task *db.Task) *ExitResult {
 	taskDir := filepath.Join(e.Workdir, task.ID)
-	// Use Background context for logging so logs are captured even after cancellation
 	log := NewDBLogger(context.Background(), e.Pool, task.ID)
 
 	src, err := GetSource(task.SourceType)
@@ -58,15 +59,39 @@ func (e *Executor) runCommand(ctx context.Context, task *db.Task, taskDir string
 	cmd := exec.CommandContext(ctx, "sh", "-c", task.Command)
 	cmd.Dir = taskDir
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+
+	processDone := make(chan struct{})
+
 	cmd.Cancel = func() error {
-		pgid := cmd.Process.Pid
-		// Send SIGINT to process group (graceful shutdown)
-		syscall.Kill(-pgid, syscall.SIGINT)
-		// Escalate to SIGKILL after 5 seconds if process doesn't exit
+		if cmd.Process == nil {
+			return os.ErrProcessDone
+		}
+
+		pgid, err := syscall.Getpgid(cmd.Process.Pid)
+		if err != nil {
+			if errors.Is(err, syscall.ESRCH) {
+				return os.ErrProcessDone
+			}
+			return err
+		}
+
+		if err := syscall.Kill(-pgid, syscall.SIGINT); err != nil {
+			if errors.Is(err, syscall.ESRCH) {
+				return os.ErrProcessDone
+			}
+			return err
+		}
+
 		go func() {
-			time.Sleep(5 * time.Second)
-			syscall.Kill(-pgid, syscall.SIGKILL)
+			timer := time.NewTimer(5 * time.Second)
+			defer timer.Stop()
+			select {
+			case <-timer.C:
+				_ = syscall.Kill(-pgid, syscall.SIGKILL)
+			case <-processDone:
+			}
 		}()
+
 		return nil
 	}
 	cmd.WaitDelay = 10 * time.Second
@@ -84,26 +109,51 @@ func (e *Executor) runCommand(ctx context.Context, task *db.Task, taskDir string
 		return &ExitResult{Code: 1, Err: err}
 	}
 
-	done := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(2)
+
 	go func() {
+		defer wg.Done()
 		scanner := bufio.NewScanner(stdout)
+		buf := make([]byte, 64*1024)
+		scanner.Buffer(buf, 1024*1024)
 		for scanner.Scan() {
 			log.Log("stdout", scanner.Text())
 		}
-		done <- struct{}{}
+		if err := scanner.Err(); err != nil && !errors.Is(err, os.ErrClosed) {
+			log.Log("nextask", fmt.Sprintf("[warn] stdout scan: %v", err))
+		}
 	}()
+
 	go func() {
+		defer wg.Done()
 		scanner := bufio.NewScanner(stderr)
+		buf := make([]byte, 64*1024)
+		scanner.Buffer(buf, 1024*1024)
 		for scanner.Scan() {
 			log.Log("stderr", scanner.Text())
 		}
-		done <- struct{}{}
+		if err := scanner.Err(); err != nil && !errors.Is(err, os.ErrClosed) {
+			log.Log("nextask", fmt.Sprintf("[warn] stderr scan: %v", err))
+		}
 	}()
 
-	<-done
-	<-done
-
 	err = cmd.Wait()
+	close(processDone)
+
+	wg.Wait()
+
+	if errors.Is(err, exec.ErrWaitDelay) {
+		log.Log("nextask", "[warn] pipes forced closed after WaitDelay (orphaned child?)")
+		if cmd.ProcessState != nil && cmd.ProcessState.ExitCode() == 0 {
+			return &ExitResult{Code: 0, Err: err}
+		}
+		if cmd.ProcessState != nil {
+			return &ExitResult{Code: cmd.ProcessState.ExitCode(), Err: err}
+		}
+		return &ExitResult{Code: 1, Err: err}
+	}
+
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			if status, ok := exitErr.Sys().(syscall.WaitStatus); ok && status.Signaled() {

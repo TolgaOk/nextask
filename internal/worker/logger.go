@@ -2,6 +2,8 @@ package worker
 
 import (
 	"context"
+	"fmt"
+	"os"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/TolgaOk/nextask/internal/db"
@@ -30,5 +32,7 @@ func NewDBLogger(ctx context.Context, pool *pgxpool.Pool, taskID string) *DBLogg
 
 // Log writes a line to the specified stream (stdout/stderr).
 func (l *DBLogger) Log(stream, data string) {
-	db.InsertLog(l.ctx, l.pool, l.taskID, stream, data)
+	if err := db.InsertLog(l.ctx, l.pool, l.taskID, stream, data); err != nil {
+		fmt.Fprintf(os.Stderr, "failed to insert log: %v\n", err)
+	}
 }

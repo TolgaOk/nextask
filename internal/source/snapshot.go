@@ -2,6 +2,7 @@
 package source
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -159,7 +160,7 @@ func DeleteSnapshot(remote, ref string) error {
 }
 
 // FetchSnapshot clones a repository and checks out a specific snapshot ref.
-func FetchSnapshot(remote, ref, taskDir string) (commit string, err error) {
+func FetchSnapshot(ctx context.Context, remote, ref, taskDir string) (commit string, err error) {
 	defer func() {
 		if err != nil {
 			os.RemoveAll(taskDir)
@@ -167,10 +168,13 @@ func FetchSnapshot(remote, ref, taskDir string) (commit string, err error) {
 	}()
 
 	runGit := func(args ...string) (string, error) {
-		cmd := exec.Command("git", args...)
+		cmd := exec.CommandContext(ctx, "git", args...)
 		cmd.Dir = taskDir
 		out, err := cmd.Output()
 		if err != nil {
+			if ctx.Err() != nil {
+				return "", ctx.Err()
+			}
 			if exitErr, ok := err.(*exec.ExitError); ok {
 				return "", fmt.Errorf("git %s: %s", args[0], string(exitErr.Stderr))
 			}
@@ -179,8 +183,11 @@ func FetchSnapshot(remote, ref, taskDir string) (commit string, err error) {
 		return strings.TrimSpace(string(out)), nil
 	}
 
-	cmd := exec.Command("git", "clone", remote, taskDir)
+	cmd := exec.CommandContext(ctx, "git", "clone", remote, taskDir)
 	if err = cmd.Run(); err != nil {
+		if ctx.Err() != nil {
+			return "", ctx.Err()
+		}
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			return "", fmt.Errorf("git clone: %s", string(exitErr.Stderr))
 		}
@@ -188,16 +195,16 @@ func FetchSnapshot(remote, ref, taskDir string) (commit string, err error) {
 	}
 
 	if _, err = runGit("fetch", "origin", ref); err != nil {
-		return "", fmt.Errorf("failed to fetch ref: %w", err)
+		return "", err
 	}
 
 	if _, err = runGit("checkout", "FETCH_HEAD"); err != nil {
-		return "", fmt.Errorf("failed to checkout: %w", err)
+		return "", err
 	}
 
 	commit, err = runGit("rev-parse", "HEAD")
 	if err != nil {
-		return "", fmt.Errorf("failed to get commit: %w", err)
+		return "", err
 	}
 
 	return commit, nil

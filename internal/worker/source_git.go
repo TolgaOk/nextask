@@ -35,7 +35,7 @@ func (g GitSource) Fetch(ctx context.Context, rawConfig json.RawMessage, taskDir
 
 	log.Log("nextask", fmt.Sprintf("[info] fetching source from %s", cfg.Remote))
 
-	commit, err := source.FetchSnapshot(cfg.Remote, cfg.Ref, taskDir)
+	commit, err := source.FetchSnapshot(ctx, cfg.Remote, cfg.Ref, taskDir)
 	if err != nil {
 		return err
 	}
