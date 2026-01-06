@@ -54,7 +54,7 @@ var workerCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		defer w.Close(ctx)
+		defer w.Close(context.Background())
 
 		return w.Run(ctx)
 	},

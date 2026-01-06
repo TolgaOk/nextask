@@ -1,6 +1,7 @@
 package source
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -442,7 +443,7 @@ func TestFetchSnapshot_Basic(t *testing.T) {
 	os.RemoveAll(taskDir) // FetchSnapshot will create it
 	defer os.RemoveAll(taskDir)
 
-	commit, err := FetchSnapshot(remotePath, result.Ref, taskDir)
+	commit, err := FetchSnapshot(context.Background(), remotePath, result.Ref, taskDir)
 	if err != nil {
 		t.Fatalf("FetchSnapshot() error = %v", err)
 	}
@@ -465,7 +466,7 @@ func TestFetchSnapshot_InvalidRemote(t *testing.T) {
 	}
 	os.RemoveAll(taskDir)
 
-	_, err = FetchSnapshot("/nonexistent/repo", "refs/nextask/test", taskDir)
+	_, err = FetchSnapshot(context.Background(), "/nonexistent/repo", "refs/nextask/test", taskDir)
 	if err == nil {
 		t.Error("expected error for invalid remote")
 	}
@@ -486,7 +487,7 @@ func TestFetchSnapshot_InvalidRef(t *testing.T) {
 	}
 	os.RemoveAll(taskDir)
 
-	_, err = FetchSnapshot(remotePath, "refs/nextask/nonexistent", taskDir)
+	_, err = FetchSnapshot(context.Background(), remotePath, "refs/nextask/nonexistent", taskDir)
 	if err == nil {
 		t.Error("expected error for invalid ref")
 	}

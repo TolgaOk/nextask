@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -66,31 +67,42 @@ func waitForCancel(ctx context.Context, pool *pgxpool.Pool, taskID string) error
 	}
 	defer conn.Close(ctx)
 
-	channel := fmt.Sprintf("task_cancelled_%s", taskID)
-	if _, err := conn.Exec(ctx, "LISTEN "+channel); err != nil {
+	if _, err := conn.Exec(ctx, "LISTEN task_event"); err != nil {
 		return err
 	}
 
-	if _, err := pool.Exec(ctx, fmt.Sprintf("NOTIFY task_cancel_%s", taskID)); err != nil {
+	payload, _ := json.Marshal(map[string]string{"task_id": taskID})
+	if _, err := pool.Exec(ctx, "SELECT pg_notify('task_cancel', $1)", string(payload)); err != nil {
 		return err
 	}
 
 	waitCtx, cancel := context.WithTimeout(ctx, cancelTimeout)
 	defer cancel()
 
-	_, err = conn.WaitForNotification(waitCtx)
-	if err != nil {
-		if waitCtx.Err() == context.DeadlineExceeded {
-			return errWithHints("cancel requested but worker did not confirm",
-				"Worker may be unresponsive or disconnected",
-				"Check task status with "+codeStyle.Render("nextask show "+taskID),
-			)
+	for {
+		notif, err := conn.WaitForNotification(waitCtx)
+		if err != nil {
+			if waitCtx.Err() == context.DeadlineExceeded {
+				return errWithHints("cancel requested but worker did not confirm",
+					"Worker may be unresponsive or disconnected",
+					"Check task status with "+codeStyle.Render("nextask show "+taskID),
+				)
+			}
+			return err
 		}
-		return err
-	}
 
-	fmt.Println("Task cancelled")
-	return nil
+		var event struct {
+			TaskID string `json:"task_id"`
+			Event  string `json:"event"`
+		}
+		if err := json.Unmarshal([]byte(notif.Payload), &event); err != nil {
+			continue
+		}
+		if event.TaskID == taskID && event.Event == "cancelled" {
+			fmt.Println("Task cancelled")
+			return nil
+		}
+	}
 }
 
 func init() {
