@@ -21,10 +21,10 @@ func CreateTask(ctx context.Context, pool *pgxpool.Pool, task *Task) error {
 	}
 
 	_, err = pool.Exec(ctx, `
-		INSERT INTO tasks (id, command, status, tags, source_type, source_config, init_type, init_config)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		INSERT INTO tasks (id, command, status, tags, source_type, source_config)
+		VALUES ($1, $2, $3, $4, $5, $6)
 	`, task.ID, task.Command, task.Status, tagsJSON,
-		task.SourceType, task.SourceConfig, task.InitType, task.InitConfig)
+		task.SourceType, task.SourceConfig)
 
 	return wrapPgError(err)
 }
@@ -100,7 +100,7 @@ func scanTask(row scannable) (*Task, error) {
 	var tagsJSON, wiJSON []byte
 	err := row.Scan(
 		&t.ID, &t.Command, &t.Status,
-		&t.SourceType, &t.SourceConfig, &t.InitType, &t.InitConfig,
+		&t.SourceType, &t.SourceConfig,
 		&tagsJSON, &t.WorkerID, &wiJSON, &t.ExitCode,
 		&t.CreatedAt, &t.StartedAt, &t.FinishedAt,
 	)

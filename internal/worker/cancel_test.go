@@ -23,7 +23,6 @@ func TestWorker_CancelDuringExecution(t *testing.T) {
 		Command:    "sleep 60",
 		Status:     db.StatusPending,
 		SourceType: "noop",
-		InitType:   "noop",
 		Tags:       map[string]string{},
 	}
 	db.CreateTask(ctx, pool, task)
@@ -94,7 +93,6 @@ func TestWorker_CancelDuringSourceFetch(t *testing.T) {
 		Command:    "sleep 60",
 		Status:     db.StatusPending,
 		SourceType: "noop",
-		InitType:   "noop",
 		Tags:       map[string]string{},
 	}
 	db.CreateTask(ctx, pool, task)
@@ -126,51 +124,7 @@ func TestWorker_CancelDuringSourceFetch(t *testing.T) {
 	}
 }
 
-// Test 10: Cancel during init phase
-func TestWorker_CancelDuringInit(t *testing.T) {
-	pool := setupTestDB(t)
-	defer pool.Close()
-	ctx := context.Background()
-
-	workdir := t.TempDir()
-
-	// Create a long-running init script
-	initConfig := marshalJSON(BashInitConfig{Script: "sleep 60"})
-	task := &db.Task{
-		ID:         "cancelinit01",
-		Command:    "echo done",
-		Status:     db.StatusPending,
-		SourceType: "noop",
-		InitType:   "bash",
-		InitConfig: initConfig,
-		Tags:       map[string]string{},
-	}
-	db.CreateTask(ctx, pool, task)
-
-	taskCtx, cancel := context.WithCancel(ctx)
-
-	executor := &Executor{Pool: pool, Workdir: workdir}
-
-	done := make(chan *ExitResult)
-	go func() {
-		done <- executor.Execute(taskCtx, task)
-	}()
-
-	// Cancel during init
-	time.Sleep(300 * time.Millisecond)
-	cancel()
-
-	select {
-	case result := <-done:
-		if result.Code == 0 {
-			t.Error("expected non-zero exit code after cancel during init")
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("executor didn't finish in time")
-	}
-}
-
-// Test 11: Cancel notification after task completes (should be ignored)
+// Test 10: Cancel notification after task completes (should be ignored)
 func TestWorker_CancelAfterComplete(t *testing.T) {
 	pool := setupTestDB(t)
 	defer pool.Close()
@@ -181,7 +135,6 @@ func TestWorker_CancelAfterComplete(t *testing.T) {
 		Command:    "echo fast",
 		Status:     db.StatusPending,
 		SourceType: "noop",
-		InitType:   "noop",
 		Tags:       map[string]string{},
 	}
 	db.CreateTask(ctx, pool, task)
@@ -231,7 +184,6 @@ func TestWorker_ParentContextCancelled(t *testing.T) {
 		Command:    "sleep 60",
 		Status:     db.StatusPending,
 		SourceType: "noop",
-		InitType:   "noop",
 		Tags:       map[string]string{},
 	}
 	db.CreateTask(ctx, pool, task)
@@ -290,7 +242,6 @@ func TestCancel_EndToEnd(t *testing.T) {
 		Command:    "sleep 60",
 		Status:     db.StatusPending,
 		SourceType: "noop",
-		InitType:   "noop",
 		Tags:       map[string]string{},
 	}
 	if err := db.CreateTask(ctx, pool, task); err != nil {
@@ -396,7 +347,6 @@ func TestWorker_CancelRaceWithCompletion(t *testing.T) {
 		Command:    "echo done",
 		Status:     db.StatusPending,
 		SourceType: "noop",
-		InitType:   "noop",
 		Tags:       map[string]string{},
 	}
 	db.CreateTask(ctx, pool, task)
@@ -457,7 +407,6 @@ func TestWorker_CancelKillsChildProcesses(t *testing.T) {
 		Command:    fmt.Sprintf("echo %s; sleep 300", marker),
 		Status:     db.StatusPending,
 		SourceType: "noop",
-		InitType:   "noop",
 		Tags:       map[string]string{},
 	}
 	db.CreateTask(ctx, pool, task)
@@ -534,11 +483,10 @@ func TestWorker_CancelFallbackToSIGKILL(t *testing.T) {
 
 	// Command that traps and ignores SIGINT
 	task := &db.Task{
-		ID:      "cancelsigkill01",
-		Command: fmt.Sprintf("trap '' INT; echo %s; sleep 300", marker),
-		Status:  db.StatusPending,
+		ID:         "cancelsigkill01",
+		Command:    fmt.Sprintf("trap '' INT; echo %s; sleep 300", marker),
+		Status:     db.StatusPending,
 		SourceType: "noop",
-		InitType:   "noop",
 		Tags:       map[string]string{},
 	}
 	db.CreateTask(ctx, pool, task)
