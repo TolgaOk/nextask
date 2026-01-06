@@ -608,3 +608,209 @@ func TestNotifyMultipleListeners(t *testing.T) {
 		t.Errorf("conn2 channel = %s, want new_task", n2.Channel)
 	}
 }
+
+func TestGetLogs_All(t *testing.T) {
+	pool := setupTestDB(t)
+	defer pool.Close()
+	ctx := context.Background()
+
+	if err := CreateTask(ctx, pool, &Task{ID: "getlog01", Command: "test", Status: StatusRunning, Tags: map[string]string{}}); err != nil {
+		t.Fatal(err)
+	}
+
+	InsertLog(ctx, pool, "getlog01", "stdout", "line1")
+	InsertLog(ctx, pool, "getlog01", "stderr", "line2")
+	InsertLog(ctx, pool, "getlog01", "stdout", "line3")
+
+	logs, err := GetLogs(ctx, pool, "getlog01", "", 0, false)
+	if err != nil {
+		t.Fatalf("GetLogs() error = %v", err)
+	}
+	if len(logs) != 3 {
+		t.Errorf("len(logs) = %d, want 3", len(logs))
+	}
+	if logs[0].Data != "line1" || logs[1].Data != "line2" || logs[2].Data != "line3" {
+		t.Errorf("logs not in chronological order: %v", logs)
+	}
+}
+
+func TestGetLogs_FilterByStream(t *testing.T) {
+	pool := setupTestDB(t)
+	defer pool.Close()
+	ctx := context.Background()
+
+	if err := CreateTask(ctx, pool, &Task{ID: "getlog02", Command: "test", Status: StatusRunning, Tags: map[string]string{}}); err != nil {
+		t.Fatal(err)
+	}
+
+	InsertLog(ctx, pool, "getlog02", "stdout", "out1")
+	InsertLog(ctx, pool, "getlog02", "stderr", "err1")
+	InsertLog(ctx, pool, "getlog02", "stdout", "out2")
+
+	logs, err := GetLogs(ctx, pool, "getlog02", "stdout", 0, false)
+	if err != nil {
+		t.Fatalf("GetLogs() error = %v", err)
+	}
+	if len(logs) != 2 {
+		t.Errorf("len(logs) = %d, want 2", len(logs))
+	}
+	for _, log := range logs {
+		if log.Stream != "stdout" {
+			t.Errorf("unexpected stream: %s", log.Stream)
+		}
+	}
+}
+
+func TestGetLogs_NonExistentStream(t *testing.T) {
+	pool := setupTestDB(t)
+	defer pool.Close()
+	ctx := context.Background()
+
+	if err := CreateTask(ctx, pool, &Task{ID: "getlog03", Command: "test", Status: StatusRunning, Tags: map[string]string{}}); err != nil {
+		t.Fatal(err)
+	}
+
+	InsertLog(ctx, pool, "getlog03", "stdout", "line1")
+
+	logs, err := GetLogs(ctx, pool, "getlog03", "nonexistent", 0, false)
+	if err != nil {
+		t.Fatalf("GetLogs() error = %v", err)
+	}
+	if len(logs) != 0 {
+		t.Errorf("len(logs) = %d, want 0", len(logs))
+	}
+}
+
+func TestGetLogs_Head(t *testing.T) {
+	pool := setupTestDB(t)
+	defer pool.Close()
+	ctx := context.Background()
+
+	if err := CreateTask(ctx, pool, &Task{ID: "getlog04", Command: "test", Status: StatusRunning, Tags: map[string]string{}}); err != nil {
+		t.Fatal(err)
+	}
+
+	for i := 1; i <= 5; i++ {
+		InsertLog(ctx, pool, "getlog04", "stdout", fmt.Sprintf("line%d", i))
+	}
+
+	logs, err := GetLogs(ctx, pool, "getlog04", "", 3, false)
+	if err != nil {
+		t.Fatalf("GetLogs() error = %v", err)
+	}
+	if len(logs) != 3 {
+		t.Errorf("len(logs) = %d, want 3", len(logs))
+	}
+	if logs[0].Data != "line1" || logs[2].Data != "line3" {
+		t.Errorf("head returned wrong logs: %v", logs)
+	}
+}
+
+func TestGetLogs_Tail(t *testing.T) {
+	pool := setupTestDB(t)
+	defer pool.Close()
+	ctx := context.Background()
+
+	if err := CreateTask(ctx, pool, &Task{ID: "getlog05", Command: "test", Status: StatusRunning, Tags: map[string]string{}}); err != nil {
+		t.Fatal(err)
+	}
+
+	for i := 1; i <= 5; i++ {
+		InsertLog(ctx, pool, "getlog05", "stdout", fmt.Sprintf("line%d", i))
+	}
+
+	logs, err := GetLogs(ctx, pool, "getlog05", "", 3, true)
+	if err != nil {
+		t.Fatalf("GetLogs() error = %v", err)
+	}
+	if len(logs) != 3 {
+		t.Errorf("len(logs) = %d, want 3", len(logs))
+	}
+	if logs[0].Data != "line3" || logs[2].Data != "line5" {
+		t.Errorf("tail returned wrong logs: %v", logs)
+	}
+}
+
+func TestGetLogs_StreamWithHead(t *testing.T) {
+	pool := setupTestDB(t)
+	defer pool.Close()
+	ctx := context.Background()
+
+	if err := CreateTask(ctx, pool, &Task{ID: "getlog06", Command: "test", Status: StatusRunning, Tags: map[string]string{}}); err != nil {
+		t.Fatal(err)
+	}
+
+	InsertLog(ctx, pool, "getlog06", "stdout", "out1")
+	InsertLog(ctx, pool, "getlog06", "stderr", "err1")
+	InsertLog(ctx, pool, "getlog06", "stdout", "out2")
+	InsertLog(ctx, pool, "getlog06", "stdout", "out3")
+
+	logs, err := GetLogs(ctx, pool, "getlog06", "stdout", 2, false)
+	if err != nil {
+		t.Fatalf("GetLogs() error = %v", err)
+	}
+	if len(logs) != 2 {
+		t.Errorf("len(logs) = %d, want 2", len(logs))
+	}
+	if logs[0].Data != "out1" || logs[1].Data != "out2" {
+		t.Errorf("stream+head returned wrong logs: %v", logs)
+	}
+}
+
+func TestGetLogs_StreamWithTail(t *testing.T) {
+	pool := setupTestDB(t)
+	defer pool.Close()
+	ctx := context.Background()
+
+	if err := CreateTask(ctx, pool, &Task{ID: "getlog07", Command: "test", Status: StatusRunning, Tags: map[string]string{}}); err != nil {
+		t.Fatal(err)
+	}
+
+	InsertLog(ctx, pool, "getlog07", "stdout", "out1")
+	InsertLog(ctx, pool, "getlog07", "stderr", "err1")
+	InsertLog(ctx, pool, "getlog07", "stdout", "out2")
+	InsertLog(ctx, pool, "getlog07", "stdout", "out3")
+
+	logs, err := GetLogs(ctx, pool, "getlog07", "stdout", 2, true)
+	if err != nil {
+		t.Fatalf("GetLogs() error = %v", err)
+	}
+	if len(logs) != 2 {
+		t.Errorf("len(logs) = %d, want 2", len(logs))
+	}
+	if logs[0].Data != "out2" || logs[1].Data != "out3" {
+		t.Errorf("stream+tail returned wrong logs: %v", logs)
+	}
+}
+
+func TestGetLogs_NonExistentTask(t *testing.T) {
+	pool := setupTestDB(t)
+	defer pool.Close()
+	ctx := context.Background()
+
+	logs, err := GetLogs(ctx, pool, "nonexistent", "", 0, false)
+	if err != nil {
+		t.Fatalf("GetLogs() error = %v", err)
+	}
+	if len(logs) != 0 {
+		t.Errorf("len(logs) = %d, want 0", len(logs))
+	}
+}
+
+func TestGetLogs_EmptyLogs(t *testing.T) {
+	pool := setupTestDB(t)
+	defer pool.Close()
+	ctx := context.Background()
+
+	if err := CreateTask(ctx, pool, &Task{ID: "getlog08", Command: "test", Status: StatusRunning, Tags: map[string]string{}}); err != nil {
+		t.Fatal(err)
+	}
+
+	logs, err := GetLogs(ctx, pool, "getlog08", "", 0, false)
+	if err != nil {
+		t.Fatalf("GetLogs() error = %v", err)
+	}
+	if len(logs) != 0 {
+		t.Errorf("len(logs) = %d, want 0", len(logs))
+	}
+}

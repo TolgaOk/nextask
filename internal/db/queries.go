@@ -166,3 +166,29 @@ func GetTask(ctx context.Context, pool *pgxpool.Pool, taskID string) (*Task, err
 	row := pool.QueryRow(ctx, string(sql), taskID)
 	return scanTask(row)
 }
+
+// GetLogs retrieves logs for a task, optionally filtered by stream.
+// If limit > 0, returns at most limit lines. If tail is true, returns the last lines.
+func GetLogs(ctx context.Context, pool *pgxpool.Pool, taskID, stream string, limit int, tail bool) ([]TaskLog, error) {
+	sql, err := migrations.FS.ReadFile("get_logs.sql")
+	if err != nil {
+		return nil, fmt.Errorf("failed to read get_logs.sql: %w", err)
+	}
+
+	rows, err := pool.Query(ctx, string(sql), taskID, stream, limit, tail)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var logs []TaskLog
+	for rows.Next() {
+		var log TaskLog
+		if err := rows.Scan(&log.ID, &log.TaskID, &log.Stream, &log.Data, &log.CreatedAt); err != nil {
+			return nil, err
+		}
+		logs = append(logs, log)
+	}
+
+	return logs, rows.Err()
+}
