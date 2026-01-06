@@ -814,3 +814,422 @@ func TestGetLogs_EmptyLogs(t *testing.T) {
 		t.Errorf("len(logs) = %d, want 0", len(logs))
 	}
 }
+
+// === Cancel Tests ===
+
+func TestRequestCancel_NonExistentTask(t *testing.T) {
+	pool := setupTestDB(t)
+	defer pool.Close()
+	ctx := context.Background()
+
+	status, err := RequestCancel(ctx, pool, "nonexistent")
+	if err != nil {
+		t.Fatalf("RequestCancel() error = %v", err)
+	}
+	if status != nil {
+		t.Errorf("expected nil status for non-existent task, got %v", *status)
+	}
+}
+
+func TestRequestCancel_PendingTask(t *testing.T) {
+	pool := setupTestDB(t)
+	defer pool.Close()
+	ctx := context.Background()
+
+	task := &Task{ID: "cancel01", Command: "echo test", Status: StatusPending, Tags: map[string]string{}}
+	if err := CreateTask(ctx, pool, task); err != nil {
+		t.Fatal(err)
+	}
+
+	status, err := RequestCancel(ctx, pool, "cancel01")
+	if err != nil {
+		t.Fatalf("RequestCancel() error = %v", err)
+	}
+	if status == nil || *status != StatusPending {
+		t.Errorf("expected original status 'pending', got %v", status)
+	}
+
+	// Verify task is now cancelled
+	var newStatus string
+	var finishedAt *time.Time
+	err = pool.QueryRow(ctx, "SELECT status, finished_at FROM tasks WHERE id = $1", "cancel01").Scan(&newStatus, &finishedAt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if newStatus != string(StatusCancelled) {
+		t.Errorf("status = %s, want cancelled", newStatus)
+	}
+	if finishedAt == nil {
+		t.Error("finished_at should be set")
+	}
+}
+
+func TestRequestCancel_RunningTask(t *testing.T) {
+	pool := setupTestDB(t)
+	defer pool.Close()
+	ctx := context.Background()
+
+	task := &Task{ID: "cancel02", Command: "sleep 100", Status: StatusPending, Tags: map[string]string{}}
+	if err := CreateTask(ctx, pool, task); err != nil {
+		t.Fatal(err)
+	}
+	// Claim to make it running
+	if _, err := ClaimTask(ctx, pool, "worker1", &WorkerInfo{Hostname: "test"}); err != nil {
+		t.Fatal(err)
+	}
+
+	status, err := RequestCancel(ctx, pool, "cancel02")
+	if err != nil {
+		t.Fatalf("RequestCancel() error = %v", err)
+	}
+	if status == nil || *status != StatusRunning {
+		t.Errorf("expected original status 'running', got %v", status)
+	}
+
+	// Verify cancel_requested_at is set but status still running
+	var newStatus string
+	var cancelRequestedAt *time.Time
+	err = pool.QueryRow(ctx, "SELECT status, cancel_requested_at FROM tasks WHERE id = $1", "cancel02").Scan(&newStatus, &cancelRequestedAt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if newStatus != string(StatusRunning) {
+		t.Errorf("status = %s, want running (worker should change it)", newStatus)
+	}
+	if cancelRequestedAt == nil {
+		t.Error("cancel_requested_at should be set")
+	}
+}
+
+func TestRequestCancel_CompletedTask(t *testing.T) {
+	pool := setupTestDB(t)
+	defer pool.Close()
+	ctx := context.Background()
+
+	task := &Task{ID: "cancel03", Command: "echo done", Status: StatusPending, Tags: map[string]string{}}
+	if err := CreateTask(ctx, pool, task); err != nil {
+		t.Fatal(err)
+	}
+	ClaimTask(ctx, pool, "worker1", &WorkerInfo{Hostname: "test"})
+	CompleteTask(ctx, pool, "cancel03", StatusCompleted, 0)
+
+	status, err := RequestCancel(ctx, pool, "cancel03")
+	if err != nil {
+		t.Fatalf("RequestCancel() error = %v", err)
+	}
+	if status == nil || *status != StatusCompleted {
+		t.Errorf("expected original status 'completed', got %v", status)
+	}
+
+	// Verify task is still completed (not changed)
+	var newStatus string
+	pool.QueryRow(ctx, "SELECT status FROM tasks WHERE id = $1", "cancel03").Scan(&newStatus)
+	if newStatus != string(StatusCompleted) {
+		t.Errorf("status should remain completed, got %s", newStatus)
+	}
+}
+
+func TestRequestCancel_FailedTask(t *testing.T) {
+	pool := setupTestDB(t)
+	defer pool.Close()
+	ctx := context.Background()
+
+	task := &Task{ID: "cancel04", Command: "exit 1", Status: StatusPending, Tags: map[string]string{}}
+	if err := CreateTask(ctx, pool, task); err != nil {
+		t.Fatal(err)
+	}
+	ClaimTask(ctx, pool, "worker1", &WorkerInfo{Hostname: "test"})
+	CompleteTask(ctx, pool, "cancel04", StatusFailed, 1)
+
+	status, err := RequestCancel(ctx, pool, "cancel04")
+	if err != nil {
+		t.Fatalf("RequestCancel() error = %v", err)
+	}
+	if status == nil || *status != StatusFailed {
+		t.Errorf("expected original status 'failed', got %v", status)
+	}
+}
+
+func TestRequestCancel_AlreadyCancelledTask(t *testing.T) {
+	pool := setupTestDB(t)
+	defer pool.Close()
+	ctx := context.Background()
+
+	task := &Task{ID: "cancel05", Command: "echo test", Status: StatusPending, Tags: map[string]string{}}
+	if err := CreateTask(ctx, pool, task); err != nil {
+		t.Fatal(err)
+	}
+	// Cancel it first
+	RequestCancel(ctx, pool, "cancel05")
+
+	// Try to cancel again
+	status, err := RequestCancel(ctx, pool, "cancel05")
+	if err != nil {
+		t.Fatalf("RequestCancel() error = %v", err)
+	}
+	if status == nil || *status != StatusCancelled {
+		t.Errorf("expected original status 'cancelled', got %v", status)
+	}
+}
+
+func TestRequestCancel_RunningTwice(t *testing.T) {
+	pool := setupTestDB(t)
+	defer pool.Close()
+	ctx := context.Background()
+
+	task := &Task{ID: "cancel06", Command: "sleep 100", Status: StatusPending, Tags: map[string]string{}}
+	if err := CreateTask(ctx, pool, task); err != nil {
+		t.Fatal(err)
+	}
+	ClaimTask(ctx, pool, "worker1", &WorkerInfo{Hostname: "test"})
+
+	// First cancel
+	status1, _ := RequestCancel(ctx, pool, "cancel06")
+	if status1 == nil || *status1 != StatusRunning {
+		t.Errorf("first cancel: expected 'running', got %v", status1)
+	}
+
+	// Get the cancel_requested_at time
+	var firstCancelTime time.Time
+	pool.QueryRow(ctx, "SELECT cancel_requested_at FROM tasks WHERE id = $1", "cancel06").Scan(&firstCancelTime)
+
+	time.Sleep(10 * time.Millisecond)
+
+	// Second cancel
+	status2, _ := RequestCancel(ctx, pool, "cancel06")
+	if status2 == nil || *status2 != StatusRunning {
+		t.Errorf("second cancel: expected 'running', got %v", status2)
+	}
+
+	// Verify cancel_requested_at didn't change (second cancel was no-op)
+	var secondCancelTime time.Time
+	pool.QueryRow(ctx, "SELECT cancel_requested_at FROM tasks WHERE id = $1", "cancel06").Scan(&secondCancelTime)
+
+	if !firstCancelTime.Equal(secondCancelTime) {
+		t.Errorf("cancel_requested_at changed on second cancel: %v -> %v", firstCancelTime, secondCancelTime)
+	}
+}
+
+// === Cancel Integration/NOTIFY Tests ===
+
+// Test 14: Task-specific cancel channel
+func TestCancel_TaskSpecificChannel(t *testing.T) {
+	pool := setupTestDB(t)
+	defer pool.Close()
+	ctx := context.Background()
+
+	// Create two listener connections for different task channels
+	conn1, err := pgx.Connect(ctx, getTestDBURL(t))
+	if err != nil {
+		t.Fatalf("failed to connect conn1: %v", err)
+	}
+	defer conn1.Close(ctx)
+
+	conn2, err := pgx.Connect(ctx, getTestDBURL(t))
+	if err != nil {
+		t.Fatalf("failed to connect conn2: %v", err)
+	}
+	defer conn2.Close(ctx)
+
+	// Listen on different task-specific channels
+	conn1.Exec(ctx, "LISTEN task_cancel_task001")
+	conn2.Exec(ctx, "LISTEN task_cancel_task002")
+
+	// Send notification for task001
+	pool.Exec(ctx, "NOTIFY task_cancel_task001")
+
+	// conn1 should receive notification
+	waitCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+
+	n1, err1 := conn1.WaitForNotification(waitCtx)
+	if err1 != nil {
+		t.Errorf("conn1 failed to receive: %v", err1)
+	}
+	if n1 != nil && n1.Channel != "task_cancel_task001" {
+		t.Errorf("conn1 channel = %s, want task_cancel_task001", n1.Channel)
+	}
+
+	// conn2 should NOT receive (different channel) - use short timeout
+	waitCtx2, cancel2 := context.WithTimeout(ctx, 100*time.Millisecond)
+	defer cancel2()
+
+	_, err2 := conn2.WaitForNotification(waitCtx2)
+	if err2 == nil {
+		t.Error("conn2 should not have received notification for task001")
+	}
+}
+
+// Test 15: Cancel confirmation sent by worker
+func TestCancel_ConfirmationSent(t *testing.T) {
+	pool := setupTestDB(t)
+	defer pool.Close()
+	ctx := context.Background()
+
+	taskID := "confirmtest01"
+
+	// Listen for confirmation
+	conn, err := pgx.Connect(ctx, getTestDBURL(t))
+	if err != nil {
+		t.Fatalf("failed to connect: %v", err)
+	}
+	defer conn.Close(ctx)
+
+	confirmChannel := fmt.Sprintf("task_cancelled_%s", taskID)
+	conn.Exec(ctx, "LISTEN "+confirmChannel)
+
+	// Simulate worker sending confirmation
+	pool.Exec(ctx, fmt.Sprintf("NOTIFY %s", confirmChannel))
+
+	// Should receive confirmation
+	waitCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+
+	notif, err := conn.WaitForNotification(waitCtx)
+	if err != nil {
+		t.Fatalf("failed to receive confirmation: %v", err)
+	}
+	if notif.Channel != confirmChannel {
+		t.Errorf("channel = %s, want %s", notif.Channel, confirmChannel)
+	}
+}
+
+// Test 16: Cancel timeout when worker unresponsive
+func TestCancel_Timeout(t *testing.T) {
+	pool := setupTestDB(t)
+	defer pool.Close()
+	ctx := context.Background()
+
+	taskID := "timeouttest01"
+
+	// Listen for confirmation (but no one will send it)
+	conn, err := pgx.Connect(ctx, getTestDBURL(t))
+	if err != nil {
+		t.Fatalf("failed to connect: %v", err)
+	}
+	defer conn.Close(ctx)
+
+	confirmChannel := fmt.Sprintf("task_cancelled_%s", taskID)
+	conn.Exec(ctx, "LISTEN "+confirmChannel)
+
+	// Send cancel request (no worker to respond)
+	pool.Exec(ctx, fmt.Sprintf("NOTIFY task_cancel_%s", taskID))
+
+	// Wait for confirmation with short timeout
+	waitCtx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
+	defer cancel()
+
+	_, err = conn.WaitForNotification(waitCtx)
+
+	// Should timeout (no confirmation received)
+	if err == nil {
+		t.Error("expected timeout, got notification")
+	}
+	if waitCtx.Err() != context.DeadlineExceeded {
+		t.Errorf("expected DeadlineExceeded, got %v", waitCtx.Err())
+	}
+}
+
+// === Delete Task Tests ===
+
+func TestDeleteTask_Exists(t *testing.T) {
+	pool := setupTestDB(t)
+	defer pool.Close()
+	ctx := context.Background()
+
+	task := &Task{ID: "del001", Command: "echo test", Status: StatusPending, Tags: map[string]string{}}
+	if err := CreateTask(ctx, pool, task); err != nil {
+		t.Fatal(err)
+	}
+
+	deleted, err := DeleteTask(ctx, pool, "del001")
+	if err != nil {
+		t.Fatalf("DeleteTask() error = %v", err)
+	}
+	if !deleted {
+		t.Error("DeleteTask() returned false, want true")
+	}
+
+	// Verify task is gone
+	var count int
+	pool.QueryRow(ctx, "SELECT COUNT(*) FROM tasks WHERE id = $1", "del001").Scan(&count)
+	if count != 0 {
+		t.Errorf("task still exists after delete")
+	}
+}
+
+func TestDeleteTask_NotExists(t *testing.T) {
+	pool := setupTestDB(t)
+	defer pool.Close()
+	ctx := context.Background()
+
+	deleted, err := DeleteTask(ctx, pool, "nonexistent")
+	if err != nil {
+		t.Fatalf("DeleteTask() error = %v", err)
+	}
+	if deleted {
+		t.Error("DeleteTask() returned true for non-existent task")
+	}
+}
+
+func TestDeleteTask_CascadesLogs(t *testing.T) {
+	pool := setupTestDB(t)
+	defer pool.Close()
+	ctx := context.Background()
+
+	task := &Task{ID: "del002", Command: "echo test", Status: StatusRunning, Tags: map[string]string{}}
+	if err := CreateTask(ctx, pool, task); err != nil {
+		t.Fatal(err)
+	}
+
+	// Insert some logs
+	InsertLog(ctx, pool, "del002", "stdout", "line1")
+	InsertLog(ctx, pool, "del002", "stdout", "line2")
+	InsertLog(ctx, pool, "del002", "stderr", "error1")
+
+	// Verify logs exist
+	var logCount int
+	pool.QueryRow(ctx, "SELECT COUNT(*) FROM task_logs WHERE task_id = $1", "del002").Scan(&logCount)
+	if logCount != 3 {
+		t.Fatalf("expected 3 logs, got %d", logCount)
+	}
+
+	// Delete task
+	deleted, err := DeleteTask(ctx, pool, "del002")
+	if err != nil {
+		t.Fatalf("DeleteTask() error = %v", err)
+	}
+	if !deleted {
+		t.Error("DeleteTask() returned false")
+	}
+
+	// Verify logs are also deleted (CASCADE)
+	pool.QueryRow(ctx, "SELECT COUNT(*) FROM task_logs WHERE task_id = $1", "del002").Scan(&logCount)
+	if logCount != 0 {
+		t.Errorf("logs still exist after task delete, count = %d", logCount)
+	}
+}
+
+func TestDeleteTask_DifferentStatuses(t *testing.T) {
+	pool := setupTestDB(t)
+	defer pool.Close()
+	ctx := context.Background()
+
+	statuses := []TaskStatus{StatusPending, StatusRunning, StatusCompleted, StatusFailed, StatusCancelled}
+
+	for _, status := range statuses {
+		taskID := "delstat" + string(status)
+		task := &Task{ID: taskID, Command: "echo test", Status: status, Tags: map[string]string{}}
+		if err := CreateTask(ctx, pool, task); err != nil {
+			t.Fatal(err)
+		}
+
+		deleted, err := DeleteTask(ctx, pool, taskID)
+		if err != nil {
+			t.Fatalf("DeleteTask(%s) error = %v", status, err)
+		}
+		if !deleted {
+			t.Errorf("DeleteTask(%s) returned false", status)
+		}
+	}
+}

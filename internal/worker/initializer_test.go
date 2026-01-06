@@ -154,10 +154,10 @@ func TestExecutor_BashInit_Integration(t *testing.T) {
 	db.CreateTask(ctx, pool, task)
 
 	executor := &Executor{Pool: pool, Workdir: workdir}
-	exitCode := executor.Execute(ctx, task)
+	result := executor.Execute(ctx, task)
 
-	if exitCode != 0 {
-		t.Errorf("exitCode = %d, want 0", exitCode)
+	if result.Code != 0 {
+		t.Errorf("exitCode = %d, want 0", result.Code)
 	}
 
 	if _, err := os.Stat(filepath.Join(taskDir, "setup_ran.txt")); os.IsNotExist(err) {
@@ -182,10 +182,10 @@ func TestExecutor_NoopInit_Integration(t *testing.T) {
 	db.CreateTask(ctx, pool, task)
 
 	executor := &Executor{Pool: pool, Workdir: workdir}
-	exitCode := executor.Execute(ctx, task)
+	result := executor.Execute(ctx, task)
 
-	if exitCode != 0 {
-		t.Errorf("exitCode = %d, want 0", exitCode)
+	if result.Code != 0 {
+		t.Errorf("exitCode = %d, want 0", result.Code)
 	}
 
 	var count int
@@ -211,10 +211,10 @@ func TestExecutor_UnknownInitType_Integration(t *testing.T) {
 	db.CreateTask(ctx, pool, task)
 
 	executor := &Executor{Pool: pool, Workdir: t.TempDir()}
-	exitCode := executor.Execute(ctx, task)
+	result := executor.Execute(ctx, task)
 
-	if exitCode != 1 {
-		t.Errorf("exitCode = %d, want 1", exitCode)
+	if result.Code != 1 {
+		t.Errorf("exitCode = %d, want 1", result.Code)
 	}
 }
 

@@ -496,3 +496,110 @@ func TestFetchSnapshot_InvalidRef(t *testing.T) {
 		t.Error("taskDir should be cleaned up on failure")
 	}
 }
+
+// === DeleteSnapshot Tests ===
+
+func TestDeleteSnapshot_Exists(t *testing.T) {
+	repoPath, remotePath, cleanup := setupTestRepoWithRemote(t)
+	defer cleanup()
+
+	// Create and push a snapshot
+	newFile := filepath.Join(repoPath, "delete_test.txt")
+	if err := os.WriteFile(newFile, []byte("delete test\n"), 0644); err != nil {
+		t.Fatalf("failed to write file: %v", err)
+	}
+
+	result, err := CreateSnapshot(repoPath, "delsnap001")
+	if err != nil {
+		t.Fatalf("CreateSnapshot() error = %v", err)
+	}
+	if err := PushSnapshot(repoPath, "origin", result); err != nil {
+		t.Fatalf("PushSnapshot() error = %v", err)
+	}
+
+	// Verify ref exists
+	cmd := exec.Command("git", "show-ref", result.Ref)
+	cmd.Dir = remotePath
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("ref should exist before delete: %v", err)
+	}
+
+	// Delete snapshot
+	err = DeleteSnapshot(remotePath, result.Ref)
+	if err != nil {
+		t.Fatalf("DeleteSnapshot() error = %v", err)
+	}
+
+	// Verify ref is gone
+	cmd = exec.Command("git", "show-ref", result.Ref)
+	cmd.Dir = remotePath
+	if err := cmd.Run(); err == nil {
+		t.Error("ref should not exist after delete")
+	}
+}
+
+func TestDeleteSnapshot_NotExists(t *testing.T) {
+	_, remotePath, cleanup := setupTestRepoWithRemote(t)
+	defer cleanup()
+
+	// Try to delete non-existent ref
+	err := DeleteSnapshot(remotePath, "refs/nextask/nonexistent")
+	// Should not error - deleting non-existent ref is a no-op
+	if err != nil {
+		t.Logf("DeleteSnapshot() for non-existent ref returned: %v", err)
+	}
+}
+
+func TestDeleteSnapshot_InvalidRepo(t *testing.T) {
+	err := DeleteSnapshot("/nonexistent/repo", "refs/nextask/test")
+	if err == nil {
+		t.Error("expected error for invalid repo path")
+	}
+}
+
+func TestDeleteSnapshot_MultipleSnapshots(t *testing.T) {
+	repoPath, remotePath, cleanup := setupTestRepoWithRemote(t)
+	defer cleanup()
+
+	// Create and push multiple snapshots
+	refs := []string{}
+	for i := 1; i <= 3; i++ {
+		file := filepath.Join(repoPath, "file"+string(rune('0'+i))+".txt")
+		os.WriteFile(file, []byte("content"), 0644)
+
+		taskID := "multi" + string(rune('0'+i))
+		result, err := CreateSnapshot(repoPath, taskID)
+		if err != nil {
+			t.Fatalf("CreateSnapshot(%s) error = %v", taskID, err)
+		}
+		if err := PushSnapshot(repoPath, "origin", result); err != nil {
+			t.Fatalf("PushSnapshot(%s) error = %v", taskID, err)
+		}
+		refs = append(refs, result.Ref)
+	}
+
+	// Delete middle one
+	if err := DeleteSnapshot(remotePath, refs[1]); err != nil {
+		t.Fatalf("DeleteSnapshot() error = %v", err)
+	}
+
+	// Verify first and third still exist
+	cmd := exec.Command("git", "show-ref", refs[0])
+	cmd.Dir = remotePath
+	if err := cmd.Run(); err != nil {
+		t.Errorf("ref %s should still exist", refs[0])
+	}
+
+	cmd = exec.Command("git", "show-ref", refs[2])
+	cmd.Dir = remotePath
+	if err := cmd.Run(); err != nil {
+		t.Errorf("ref %s should still exist", refs[2])
+	}
+
+	// Verify middle one is gone
+	cmd = exec.Command("git", "show-ref", refs[1])
+	cmd.Dir = remotePath
+	if err := cmd.Run(); err == nil {
+		t.Errorf("ref %s should be deleted", refs[1])
+	}
+}

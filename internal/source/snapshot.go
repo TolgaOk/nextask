@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/plumbing"
 )
 
 // SnapshotResult contains the commit hash and ref of a created snapshot.
@@ -145,6 +146,16 @@ func PushSnapshot(repoPath, remoteName string, result *SnapshotResult) error {
 	}
 
 	return nil
+}
+
+// DeleteSnapshot removes a snapshot ref from a bare repository.
+func DeleteSnapshot(remote, ref string) error {
+	repo, err := git.PlainOpen(remote)
+	if err != nil {
+		return fmt.Errorf("failed to open repository: %w", err)
+	}
+
+	return repo.Storer.RemoveReference(plumbing.ReferenceName(ref))
 }
 
 // FetchSnapshot clones a repository and checks out a specific snapshot ref.

@@ -108,10 +108,10 @@ func TestExecutor_NoopSource_Integration(t *testing.T) {
 	db.CreateTask(ctx, pool, task)
 
 	executor := &Executor{Pool: pool, Workdir: workdir}
-	exitCode := executor.Execute(ctx, task)
+	result := executor.Execute(ctx, task)
 
-	if exitCode != 0 {
-		t.Errorf("exitCode = %d, want 0", exitCode)
+	if result.Code != 0 {
+		t.Errorf("exitCode = %d, want 0", result.Code)
 	}
 
 	if _, err := os.Stat(filepath.Join(workdir, task.ID)); os.IsNotExist(err) {
@@ -163,10 +163,10 @@ func TestExecutor_GitSource_Integration(t *testing.T) {
 
 	workdir := t.TempDir()
 	executor := &Executor{Pool: pool, Workdir: workdir}
-	exitCode := executor.Execute(ctx, task)
+	execResult := executor.Execute(ctx, task)
 
-	if exitCode != 0 {
-		t.Errorf("exitCode = %d, want 0", exitCode)
+	if execResult.Code != 0 {
+		t.Errorf("exitCode = %d, want 0", execResult.Code)
 	}
 
 	content, err := os.ReadFile(filepath.Join(workdir, task.ID, "hello.txt"))
@@ -194,9 +194,9 @@ func TestExecutor_UnknownSourceType_Integration(t *testing.T) {
 	db.CreateTask(ctx, pool, task)
 
 	executor := &Executor{Pool: pool, Workdir: t.TempDir()}
-	exitCode := executor.Execute(ctx, task)
+	result := executor.Execute(ctx, task)
 
-	if exitCode != 1 {
-		t.Errorf("exitCode = %d, want 1", exitCode)
+	if result.Code != 1 {
+		t.Errorf("exitCode = %d, want 1", result.Code)
 	}
 }
