@@ -300,6 +300,29 @@ nextask worker list [flags]
       --db-url string   PostgreSQL connection URL
 ```
 
+---
+
+## nextask worker stop
+
+Stop a running worker
+
+```
+nextask worker stop WORKER_ID [flags]
+```
+
+### Options
+
+```
+  -h, --help               help for stop
+      --timeout duration   Timeout waiting for stop confirmation (default 10s)
+```
+
+### Options inherited from parent commands
+
+```
+      --db-url string   PostgreSQL connection URL
+```
+
 
 ---
 

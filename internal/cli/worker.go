@@ -12,6 +12,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/lipgloss/table"
+	"github.com/jackc/pgx/v5"
 	gonanoid "github.com/matoous/go-nanoid/v2"
 	"github.com/TolgaOk/nextask/internal/db"
 	"github.com/TolgaOk/nextask/internal/worker"
@@ -144,6 +145,92 @@ var workerListCmd = &cobra.Command{
 	},
 }
 
+var (
+	workerStopTimeout time.Duration
+)
+
+var workerStopCmd = &cobra.Command{
+	Use:   "stop WORKER_ID",
+	Short: "Stop a running worker",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if cfg.DB.URL == "" {
+			return errDBRequired()
+		}
+
+		ctx := context.Background()
+		workerID := args[0]
+
+		pool, err := db.Connect(ctx, cfg.DB.URL)
+		if err != nil {
+			return err
+		}
+		defer pool.Close()
+
+		// Verify worker exists and is running
+		workers, err := db.ListWorkers(ctx, pool, nil)
+		if err != nil {
+			return err
+		}
+
+		var found *db.WorkerRecord
+		for _, w := range workers {
+			if w.ID == workerID {
+				found = &w
+				break
+			}
+		}
+
+		if found == nil {
+			return errWithHints(
+				fmt.Sprintf("worker not found: %s", workerID),
+				"Run "+codeStyle.Render("nextask worker list")+" to see available workers",
+			)
+		}
+
+		if found.Status == db.WorkerStatusStopped {
+			fmt.Printf("Worker %s is already stopped\n", workerID)
+			return nil
+		}
+
+		// Set up listener for confirmation before sending stop signal
+		listenConn, err := pgx.Connect(ctx, cfg.DB.URL)
+		if err != nil {
+			return err
+		}
+		defer listenConn.Close(ctx)
+
+		fromWorkerCh := db.FromWorkerChannel(workerID)
+		if _, err := listenConn.Exec(ctx, `LISTEN "`+fromWorkerCh+`"`); err != nil {
+			return err
+		}
+
+		// Send stop notification
+		toWorkerCh := db.ToWorkerChannel(workerID)
+		if _, err := pool.Exec(ctx, "SELECT pg_notify($1, '')", toWorkerCh); err != nil {
+			return fmt.Errorf("failed to send stop signal: %w", err)
+		}
+
+		// Wait for confirmation with timeout
+		waitCtx, waitCancel := context.WithTimeout(ctx, workerStopTimeout)
+		defer waitCancel()
+
+		_, err = listenConn.WaitForNotification(waitCtx)
+		if err != nil {
+			if waitCtx.Err() == context.DeadlineExceeded {
+				return errWithHints("stop signal sent but worker did not confirm",
+					"Worker may be unresponsive or processing a task",
+					"Check worker status with "+codeStyle.Render("nextask worker list"),
+				)
+			}
+			return err
+		}
+
+		fmt.Printf("Worker %s stopped\n", workerID)
+		return nil
+	},
+}
+
 func init() {
 	workerCmd.Flags().StringVar(&workdir, "workdir", "", "Base directory for task execution (default /tmp/nextask)")
 	workerCmd.Flags().StringVar(&workerName, "name", "", "Worker identifier (default: random)")
@@ -152,6 +239,9 @@ func init() {
 
 	workerListCmd.Flags().String("status", "", "Filter by status (running, stopped)")
 	workerCmd.AddCommand(workerListCmd)
+
+	workerStopCmd.Flags().DurationVar(&workerStopTimeout, "timeout", 10*time.Second, "Timeout waiting for stop confirmation")
+	workerCmd.AddCommand(workerStopCmd)
 
 	RootCmd.AddCommand(workerCmd)
 }

@@ -18,6 +18,16 @@ func ToTaskChannel(taskID string) string {
 	return fmt.Sprintf("to_task_%s", taskID)
 }
 
+// ToWorkerChannel returns the channel name for commands to a worker (CLI → worker).
+func ToWorkerChannel(workerID string) string {
+	return fmt.Sprintf("to_worker_%s", workerID)
+}
+
+// FromWorkerChannel returns the channel name for events from a worker (worker → CLI).
+func FromWorkerChannel(workerID string) string {
+	return fmt.Sprintf("from_worker_%s", workerID)
+}
+
 // TaskLogEvent is sent from worker to consumer when a log line is inserted.
 type TaskLogEvent struct {
 	ID int `json:"id"` // log row ID for incremental fetch

@@ -49,15 +49,15 @@ func New(ctx context.Context, cfg Config) (*Worker, error) {
 		return nil, fmt.Errorf("failed to connect for listen: %w", err)
 	}
 
+	workerID := cfg.Name
+	if workerID == "" {
+		workerID, _ = gonanoid.Generate("0123456789abcdefghijklmnopqrstuvwxyz", 8)
+	}
+
 	if _, err := listenConn.Exec(ctx, "LISTEN new_task"); err != nil {
 		listenConn.Close(ctx)
 		pool.Close()
 		return nil, fmt.Errorf("failed to listen for new_task: %w", err)
-	}
-
-	workerID := cfg.Name
-	if workerID == "" {
-		workerID, _ = gonanoid.Generate("0123456789abcdefghijklmnopqrstuvwxyz", 8)
 	}
 
 	hostname, _ := os.Hostname()
@@ -87,7 +87,11 @@ func (w *Worker) Close(ctx context.Context) {
 }
 
 // Run starts the worker loop, processing tasks until context is cancelled.
-func (w *Worker) Run(ctx context.Context) error {
+func (w *Worker) Run(parentCtx context.Context) error {
+	// Create internal cancellable context for stop signal handling
+	ctx, cancel := context.WithCancel(parentCtx)
+	defer cancel()
+
 	hostname, _ := os.Hostname()
 
 	// Register worker in DB
@@ -96,9 +100,34 @@ func (w *Worker) Run(ctx context.Context) error {
 	}
 	defer func() {
 		// Use background context for cleanup
-		unregCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
+		unregCtx, unregCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer unregCancel()
+
+		// Notify that worker is stopping (for CLI waiting on stop confirmation)
+		fromWorkerCh := db.FromWorkerChannel(w.ID)
+		w.Pool.Exec(unregCtx, "SELECT pg_notify($1, 'stopped')", fromWorkerCh)
+
 		db.UnregisterWorker(unregCtx, w.Pool, w.ID)
+	}()
+
+	// Start stop listener goroutine
+	stopConn, err := pgx.Connect(ctx, w.dbURL)
+	if err != nil {
+		return fmt.Errorf("failed to connect for stop listener: %w", err)
+	}
+	toWorkerCh := db.ToWorkerChannel(w.ID)
+	if _, err := stopConn.Exec(ctx, `LISTEN "`+toWorkerCh+`"`); err != nil {
+		stopConn.Close(context.Background())
+		return fmt.Errorf("failed to listen for stop: %w", err)
+	}
+	stopDone := make(chan struct{})
+	go func() {
+		defer close(stopDone)
+		w.listenForStop(ctx, stopConn, cancel)
+	}()
+	defer func() {
+		stopConn.Close(context.Background())
+		<-stopDone
 	}()
 
 	// Start heartbeat goroutine
@@ -137,6 +166,7 @@ func (w *Worker) Run(ctx context.Context) error {
 
 		select {
 		case <-waitForNotification(ctx, w.ListenConn):
+			// new_task notification received, loop to claim
 		case <-ctx.Done():
 			return nil
 		}
@@ -179,6 +209,17 @@ func waitForNotification(ctx context.Context, conn *pgx.Conn) <-chan struct{} {
 		close(ch)
 	}()
 	return ch
+}
+
+// listenForStop listens for worker stop signals and cancels the context when received.
+// Satisfies invariants: A (ctx.Done via conn.Close), B (WaitForNotification accepts ctx).
+func (w *Worker) listenForStop(ctx context.Context, conn *pgx.Conn, cancel context.CancelFunc) {
+	_, err := conn.WaitForNotification(ctx)
+	if err != nil {
+		return // context cancelled or connection closed
+	}
+	fmt.Println("Received stop signal, shutting down...")
+	cancel()
 }
 
 func (w *Worker) processTask(ctx context.Context, task *db.Task) {
@@ -237,13 +278,17 @@ func (w *Worker) processTask(ctx context.Context, task *db.Task) {
 		log.Log(logCtx, "nextask", fmt.Sprintf("[info] %s", result))
 	}
 
-	if err := db.CompleteTask(ctx, w.Pool, task.ID, status, exitCode); err != nil {
+	// Use background context for DB cleanup - ensures task is marked complete even if worker is stopping
+	completeCtx, completeCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer completeCancel()
+
+	if err := db.CompleteTask(completeCtx, w.Pool, task.ID, status, exitCode); err != nil {
 		fmt.Fprintf(os.Stderr, "failed to complete task: %v\n", err)
 	}
 
 	fromChannel := db.FromTaskChannel(task.ID)
 	event := db.TaskStatusEvent{Status: string(status), ExitCode: exitCode}
-	if err := db.Notify(ctx, w.Pool, fromChannel, event); err != nil {
+	if err := db.Notify(completeCtx, w.Pool, fromChannel, event); err != nil {
 		fmt.Fprintf(os.Stderr, "failed to notify status: %v\n", err)
 	}
 
