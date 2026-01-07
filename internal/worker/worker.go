@@ -3,7 +3,6 @@ package worker
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"runtime"
@@ -15,33 +14,15 @@ import (
 	"github.com/TolgaOk/nextask/internal/db"
 )
 
-// CancelRequest is the JSON payload for task_cancel notifications.
-type CancelRequest struct {
-	TaskID string `json:"task_id"`
-}
-
-// TaskEvent is the JSON payload for task_event notifications.
-type TaskEvent struct {
-	TaskID string `json:"task_id"`
-	Event  string `json:"event"`
-}
-
-type cancelReg struct {
-	taskID string
-	cancel context.CancelFunc
-}
-
 // Worker processes tasks from the queue.
 type Worker struct {
-	ID           string
-	Info         *db.WorkerInfo
-	Pool         *pgxpool.Pool
-	ListenConn   *pgx.Conn
-	CancelConn   *pgx.Conn
-	Executor     *Executor
-	Once         bool
-	registerCh   chan cancelReg
-	unregisterCh chan string
+	ID         string
+	Info       *db.WorkerInfo
+	Pool       *pgxpool.Pool
+	ListenConn *pgx.Conn
+	Executor   *Executor
+	Once       bool
+	dbURL      string
 }
 
 // Config contains worker configuration options.
@@ -65,27 +46,10 @@ func New(ctx context.Context, cfg Config) (*Worker, error) {
 		return nil, fmt.Errorf("failed to connect for listen: %w", err)
 	}
 
-	cancelConn, err := pgx.Connect(ctx, cfg.DBURL)
-	if err != nil {
-		listenConn.Close(ctx)
-		pool.Close()
-		return nil, fmt.Errorf("failed to connect for cancel: %w", err)
-	}
-
-	cleanup := func() {
-		cancelConn.Close(ctx)
-		listenConn.Close(ctx)
-		pool.Close()
-	}
-
 	if _, err := listenConn.Exec(ctx, "LISTEN new_task"); err != nil {
-		cleanup()
+		listenConn.Close(ctx)
+		pool.Close()
 		return nil, fmt.Errorf("failed to listen for new_task: %w", err)
-	}
-
-	if _, err := cancelConn.Exec(ctx, "LISTEN task_cancel"); err != nil {
-		cleanup()
-		return nil, fmt.Errorf("failed to listen for task_cancel: %w", err)
 	}
 
 	workerID := cfg.Name
@@ -101,103 +65,27 @@ func New(ctx context.Context, cfg Config) (*Worker, error) {
 	}
 
 	return &Worker{
-		ID:           workerID,
-		Info:         workerInfo,
-		Pool:         pool,
-		ListenConn:   listenConn,
-		CancelConn:   cancelConn,
-		Executor:     &Executor{Pool: pool, Workdir: cfg.Workdir},
-		Once:         cfg.Once,
-		registerCh:   make(chan cancelReg, 64),
-		unregisterCh: make(chan string, 64),
+		ID:         workerID,
+		Info:       workerInfo,
+		Pool:       pool,
+		ListenConn: listenConn,
+		Executor:   &Executor{Pool: pool, Workdir: cfg.Workdir},
+		Once:       cfg.Once,
+		dbURL:      cfg.DBURL,
 	}, nil
 }
 
 // Close releases database connections.
 func (w *Worker) Close(ctx context.Context) {
-	w.CancelConn.Close(ctx)
 	w.ListenConn.Close(ctx)
 	w.Pool.Close()
-}
-
-// runCancelDispatcher handles all task cancellation notifications.
-func (w *Worker) runCancelDispatcher(ctx context.Context) error {
-	cancelMap := make(map[string]context.CancelFunc)
-
-	notifyCh := make(chan string, 128)
-	bridgeErr := make(chan error, 1)
-
-	go func() {
-		defer close(notifyCh)
-		for {
-			notif, err := w.CancelConn.WaitForNotification(ctx)
-			if err != nil {
-				if ctx.Err() == nil {
-					bridgeErr <- fmt.Errorf("cancel conn died: %w", err)
-				}
-				return
-			}
-			select {
-			case notifyCh <- notif.Payload:
-			case <-ctx.Done():
-				return
-			}
-		}
-	}()
-
-	for {
-		select {
-		case reg := <-w.registerCh:
-			cancelMap[reg.taskID] = reg.cancel
-
-		case taskID := <-w.unregisterCh:
-			delete(cancelMap, taskID)
-
-		case payload, ok := <-notifyCh:
-			if !ok {
-				select {
-				case err := <-bridgeErr:
-					return err
-				default:
-					return ctx.Err()
-				}
-			}
-			var req CancelRequest
-			if err := json.Unmarshal([]byte(payload), &req); err != nil {
-				fmt.Fprintf(os.Stderr, "invalid cancel payload: %v\n", err)
-				continue
-			}
-			if cancel, ok := cancelMap[req.TaskID]; ok {
-				delete(cancelMap, req.TaskID)
-				cancel()
-			}
-
-		case err := <-bridgeErr:
-			return err
-
-		case <-ctx.Done():
-			return ctx.Err()
-		}
-	}
 }
 
 // Run starts the worker loop, processing tasks until context is cancelled.
 func (w *Worker) Run(ctx context.Context) error {
 	fmt.Printf("Worker %s started\n", w.ID)
 
-	dispErr := make(chan error, 1)
-	go func() { dispErr <- w.runCancelDispatcher(ctx) }()
-
 	for {
-		select {
-		case err := <-dispErr:
-			if err != nil && ctx.Err() == nil {
-				return fmt.Errorf("cancel dispatcher stopped: %w", err)
-			}
-			return nil
-		default:
-		}
-
 		if ctx.Err() != nil {
 			return nil
 		}
@@ -222,17 +110,7 @@ func (w *Worker) Run(ctx context.Context) error {
 		}
 
 		select {
-		case _, ok := <-waitForNotification(ctx, w.ListenConn):
-			if !ok {
-				if ctx.Err() != nil {
-					return nil
-				}
-			}
-		case err := <-dispErr:
-			if err != nil && ctx.Err() == nil {
-				return fmt.Errorf("cancel dispatcher stopped: %w", err)
-			}
-			return nil
+		case <-waitForNotification(ctx, w.ListenConn):
 		case <-ctx.Done():
 			return nil
 		}
@@ -257,21 +135,33 @@ func (w *Worker) processTask(ctx context.Context, task *db.Task) {
 	taskCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	select {
-	case w.registerCh <- cancelReg{taskID: task.ID, cancel: cancel}:
-	case <-ctx.Done():
+	cancelConn, err := pgx.Connect(ctx, w.dbURL)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "failed to connect for cancel listener: %v\n", err)
 		return
 	}
-	defer func() {
-		select {
-		case w.unregisterCh <- task.ID:
-		case <-ctx.Done():
-		}
+
+	toChannel := db.ToTaskChannel(task.ID)
+	if _, err := cancelConn.Exec(ctx, "LISTEN "+toChannel); err != nil {
+		cancelConn.Close(context.Background())
+		fmt.Fprintf(os.Stderr, "failed to listen on %s: %v\n", toChannel, err)
+		return
+	}
+
+	cancelDone := make(chan bool, 1)
+	go func() {
+		w.listenForCancel(taskCtx, cancelConn, cancel)
+		cancelDone <- true
 	}()
 
 	result := w.Executor.Execute(taskCtx, task)
 
+	// Check if user cancelled BEFORE defer cancel() runs
 	wasCancelled := taskCtx.Err() == context.Canceled && ctx.Err() == nil
+
+	// Stop listener goroutine by closing connection (unblocks WaitForNotification)
+	cancelConn.Close(context.Background())
+	<-cancelDone
 
 	logCtx, logCancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer logCancel()
@@ -299,14 +189,29 @@ func (w *Worker) processTask(ctx context.Context, task *db.Task) {
 		fmt.Fprintf(os.Stderr, "failed to complete task: %v\n", err)
 	}
 
-	w.notifyTaskEvent(ctx, task.ID, string(status))
+	fromChannel := db.FromTaskChannel(task.ID)
+	event := db.TaskStatusEvent{Status: string(status), ExitCode: exitCode}
+	if err := db.Notify(ctx, w.Pool, fromChannel, event); err != nil {
+		fmt.Fprintf(os.Stderr, "failed to notify status: %v\n", err)
+	}
 
 	fmt.Printf("Task %s %s (exit %d)\n", task.ID, status, exitCode)
 }
 
-func (w *Worker) notifyTaskEvent(ctx context.Context, taskID, event string) {
-	payload, _ := json.Marshal(TaskEvent{TaskID: taskID, Event: event})
-	if _, err := w.Pool.Exec(ctx, "SELECT pg_notify('task_event', $1)", string(payload)); err != nil {
-		fmt.Fprintf(os.Stderr, "failed to notify task_event: %v\n", err)
+func (w *Worker) listenForCancel(ctx context.Context, conn *pgx.Conn, cancel context.CancelFunc) {
+	for {
+		notif, err := conn.WaitForNotification(ctx)
+		if err != nil {
+			return
+		}
+
+		eventType, _, err := db.ParseEvent(notif.Payload)
+		if err != nil {
+			continue
+		}
+		if eventType == db.EventTypeCancel {
+			cancel()
+			return
+		}
 	}
 }

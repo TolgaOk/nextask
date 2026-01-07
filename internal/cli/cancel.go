@@ -4,6 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/TolgaOk/nextask/internal/db"
@@ -67,21 +70,51 @@ func waitForCancel(ctx context.Context, pool *pgxpool.Pool, taskID string) error
 	}
 	defer conn.Close(ctx)
 
-	if _, err := conn.Exec(ctx, "LISTEN task_event"); err != nil {
+	fromChannel := db.FromTaskChannel(taskID)
+	if _, err := conn.Exec(ctx, "LISTEN "+fromChannel); err != nil {
 		return err
 	}
 
-	payload, _ := json.Marshal(map[string]string{"task_id": taskID})
-	if _, err := pool.Exec(ctx, "SELECT pg_notify('task_cancel', $1)", string(payload)); err != nil {
+	toChannel := db.ToTaskChannel(taskID)
+	if err := db.Notify(ctx, pool, toChannel, db.TaskCancelEvent{}); err != nil {
 		return err
 	}
 
-	waitCtx, cancel := context.WithTimeout(ctx, cancelTimeout)
-	defer cancel()
+	// Create contexts: sigCtx for signal, waitCtx with timeout
+	sigCtx, sigCancel := context.WithCancelCause(ctx)
+	waitCtx, waitCancel := context.WithTimeout(sigCtx, cancelTimeout)
+	defer sigCancel(nil)
+
+	// Signal handler for graceful interrupt
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		defer signal.Stop(sigCh)
+		select {
+		case <-sigCh:
+			sigCancel(context.Canceled)
+		case <-waitCtx.Done():
+		}
+	}()
+
+	// Ensure goroutine exits before function returns
+	defer func() {
+		waitCancel() // Unblock goroutine if waiting on waitCtx.Done()
+		<-done       // Wait for goroutine to cleanup
+	}()
 
 	for {
 		notif, err := conn.WaitForNotification(waitCtx)
 		if err != nil {
+			cause := context.Cause(sigCtx)
+			if cause == context.Canceled {
+				fmt.Fprintln(os.Stderr, "\nInterrupted - cancel request already sent")
+				fmt.Fprintf(os.Stderr, "Check task status with %s\n", codeStyle.Render("nextask show "+taskID))
+				return nil
+			}
 			if waitCtx.Err() == context.DeadlineExceeded {
 				return errWithHints("cancel requested but worker did not confirm",
 					"Worker may be unresponsive or disconnected",
@@ -91,16 +124,19 @@ func waitForCancel(ctx context.Context, pool *pgxpool.Pool, taskID string) error
 			return err
 		}
 
-		var event struct {
-			TaskID string `json:"task_id"`
-			Event  string `json:"event"`
+		eventType, data, err := db.ParseEvent(notif.Payload)
+		if err != nil {
+			return fmt.Errorf("failed to parse event: %w", err)
 		}
-		if err := json.Unmarshal([]byte(notif.Payload), &event); err != nil {
-			continue
-		}
-		if event.TaskID == taskID && event.Event == "cancelled" {
-			fmt.Println("Task cancelled")
-			return nil
+		if eventType == db.EventTypeStatus {
+			var status db.TaskStatusEvent
+			if err := json.Unmarshal(data, &status); err != nil {
+				return fmt.Errorf("failed to parse status event: %w", err)
+			}
+			if status.Status == string(db.StatusCancelled) {
+				fmt.Println("Task cancelled")
+				return nil
+			}
 		}
 	}
 }

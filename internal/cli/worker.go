@@ -40,9 +40,13 @@ var workerCmd = &cobra.Command{
 		sigCh := make(chan os.Signal, 1)
 		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 		go func() {
-			sig := <-sigCh
-			fmt.Printf("\nReceived %s, shutting down...\n", sig)
-			cancel()
+			select {
+			case sig := <-sigCh:
+				fmt.Printf("\nReceived %s, shutting down...\n", sig)
+				cancel()
+			case <-ctx.Done():
+				signal.Stop(sigCh)
+			}
 		}()
 
 		w, err := worker.New(ctx, worker.Config{

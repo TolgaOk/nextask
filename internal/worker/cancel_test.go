@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -48,9 +49,10 @@ func TestWorker_CancelDuringExecution(t *testing.T) {
 	time.Sleep(500 * time.Millisecond)
 
 	// Send cancel notification
-	conn, _ := pgx.Connect(ctx, getTestDBURL(t))
-	defer conn.Close(ctx)
-	conn.Exec(ctx, fmt.Sprintf("NOTIFY task_cancel_%s", task.ID))
+	toChannel := db.ToTaskChannel(task.ID)
+	if err := db.Notify(ctx, pool, toChannel, db.TaskCancelEvent{}); err != nil {
+		t.Fatalf("failed to send cancel: %v", err)
+	}
 
 	// Wait for worker to finish
 	select {
@@ -160,10 +162,9 @@ func TestWorker_CancelAfterComplete(t *testing.T) {
 		t.Errorf("status = %s, want completed", status)
 	}
 
-	// Now send cancel notification (should be ignored because UNLISTEN already happened)
-	conn, _ := pgx.Connect(ctx, getTestDBURL(t))
-	defer conn.Close(ctx)
-	conn.Exec(ctx, fmt.Sprintf("NOTIFY task_cancel_%s", task.ID))
+	// Now send cancel notification (should be ignored because task already completed)
+	toChannel := db.ToTaskChannel(task.ID)
+	_ = db.Notify(ctx, pool, toChannel, db.TaskCancelEvent{})
 
 	// Verify status didn't change
 	time.Sleep(100 * time.Millisecond)
@@ -291,27 +292,38 @@ func TestCancel_EndToEnd(t *testing.T) {
 	}
 	defer confirmConn.Close(ctx)
 
-	confirmChannel := fmt.Sprintf("task_cancelled_%s", task.ID)
-	confirmConn.Exec(ctx, "LISTEN "+confirmChannel)
+	fromChannel := db.FromTaskChannel(task.ID)
+	_, _ = confirmConn.Exec(ctx, "LISTEN "+fromChannel)
 
 	// 5. Send cancel notification to worker (like CLI does)
-	cancelConn, err := pgx.Connect(ctx, getTestDBURL(t))
-	if err != nil {
-		t.Fatalf("failed to connect for cancel: %v", err)
+	toChannel := db.ToTaskChannel(task.ID)
+	if err := db.Notify(ctx, pool, toChannel, db.TaskCancelEvent{}); err != nil {
+		t.Fatalf("failed to send cancel: %v", err)
 	}
-	defer cancelConn.Close(ctx)
-	cancelConn.Exec(ctx, fmt.Sprintf("NOTIFY task_cancel_%s", task.ID))
 
 	// 6. Wait for confirmation from worker
 	waitCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	notif, err := confirmConn.WaitForNotification(waitCtx)
-	if err != nil {
-		t.Fatalf("failed to receive cancel confirmation: %v", err)
-	}
-	if notif.Channel != confirmChannel {
-		t.Errorf("unexpected channel: %s", notif.Channel)
+	for {
+		notif, err := confirmConn.WaitForNotification(waitCtx)
+		if err != nil {
+			t.Fatalf("failed to receive cancel confirmation: %v", err)
+		}
+
+		eventType, data, err := db.ParseEvent(notif.Payload)
+		if err != nil {
+			t.Fatalf("failed to parse event: %v", err)
+		}
+		if eventType == db.EventTypeStatus {
+			var status db.TaskStatusEvent
+			if err := json.Unmarshal(data, &status); err != nil {
+				t.Fatalf("failed to parse status: %v", err)
+			}
+			if status.Status == string(db.StatusCancelled) {
+				break
+			}
+		}
 	}
 
 	// 7. Wait for worker to finish
@@ -362,10 +374,6 @@ func TestWorker_CancelRaceWithCompletion(t *testing.T) {
 	}
 	defer w.Close(ctx)
 
-	// Send cancel notification immediately (before or during execution)
-	conn, _ := pgx.Connect(ctx, getTestDBURL(t))
-	defer conn.Close(ctx)
-
 	// Start worker
 	done := make(chan error)
 	go func() {
@@ -374,7 +382,8 @@ func TestWorker_CancelRaceWithCompletion(t *testing.T) {
 
 	// Race: send cancel while task might be running
 	time.Sleep(50 * time.Millisecond)
-	conn.Exec(ctx, fmt.Sprintf("NOTIFY task_cancel_%s", task.ID))
+	toChannel := db.ToTaskChannel(task.ID)
+	_ = db.Notify(ctx, pool, toChannel, db.TaskCancelEvent{})
 
 	select {
 	case <-done:
@@ -437,9 +446,8 @@ func TestWorker_CancelKillsChildProcesses(t *testing.T) {
 	}
 
 	// Send cancel notification
-	conn, _ := pgx.Connect(ctx, getTestDBURL(t))
-	defer conn.Close(ctx)
-	conn.Exec(ctx, fmt.Sprintf("NOTIFY task_cancel_%s", task.ID))
+	toChannel := db.ToTaskChannel(task.ID)
+	_ = db.Notify(ctx, pool, toChannel, db.TaskCancelEvent{})
 
 	// Wait for worker to finish
 	start := time.Now()
@@ -511,9 +519,8 @@ func TestWorker_CancelFallbackToSIGKILL(t *testing.T) {
 	time.Sleep(500 * time.Millisecond)
 
 	// Send cancel notification
-	conn, _ := pgx.Connect(ctx, getTestDBURL(t))
-	defer conn.Close(ctx)
-	conn.Exec(ctx, fmt.Sprintf("NOTIFY task_cancel_%s", task.ID))
+	toChannel := db.ToTaskChannel(task.ID)
+	_ = db.Notify(ctx, pool, toChannel, db.TaskCancelEvent{})
 
 	// Should complete within WaitDelay (5s) + buffer
 	// SIGINT is ignored, so Go falls back to SIGKILL after WaitDelay
