@@ -147,14 +147,39 @@ func CompleteTask(ctx context.Context, pool *pgxpool.Pool, taskID string, status
 	return err
 }
 
-// InsertLog stores a log line from task execution.
-func InsertLog(ctx context.Context, pool *pgxpool.Pool, taskID, stream, data string) error {
+// InsertLog stores a log line from task execution and returns the inserted log ID.
+func InsertLog(ctx context.Context, pool *pgxpool.Pool, taskID, stream, data string) (int, error) {
 	sql, err := migrations.FS.ReadFile("insert_log.sql")
 	if err != nil {
-		return fmt.Errorf("failed to read insert_log.sql: %w", err)
+		return 0, fmt.Errorf("failed to read insert_log.sql: %w", err)
 	}
-	_, err = pool.Exec(ctx, string(sql), taskID, stream, data)
-	return err
+	var id int
+	err = pool.QueryRow(ctx, string(sql), taskID, stream, data).Scan(&id)
+	return id, err
+}
+
+// GetLogsSince retrieves logs for a task with ID greater than lastLogID.
+func GetLogsSince(ctx context.Context, pool *pgxpool.Pool, taskID string, lastLogID int) ([]TaskLog, error) {
+	sql, err := migrations.FS.ReadFile("get_logs_since.sql")
+	if err != nil {
+		return nil, fmt.Errorf("failed to read get_logs_since.sql: %w", err)
+	}
+
+	rows, err := pool.Query(ctx, string(sql), taskID, lastLogID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var logs []TaskLog
+	for rows.Next() {
+		var log TaskLog
+		if err := rows.Scan(&log.ID, &log.TaskID, &log.Stream, &log.Data, &log.CreatedAt); err != nil {
+			return nil, err
+		}
+		logs = append(logs, log)
+	}
+	return logs, rows.Err()
 }
 
 // GetTask retrieves a single task by ID.
