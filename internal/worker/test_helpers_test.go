@@ -48,6 +48,6 @@ type testLogger struct {
 	logs []string
 }
 
-func (l *testLogger) Log(stream, data string) {
+func (l *testLogger) Log(_ context.Context, stream, data string) {
 	l.logs = append(l.logs, stream+": "+data)
 }

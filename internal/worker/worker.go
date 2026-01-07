@@ -165,7 +165,7 @@ func (w *Worker) processTask(ctx context.Context, task *db.Task) {
 
 	logCtx, logCancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer logCancel()
-	log := NewDBLogger(logCtx, w.Pool, task.ID)
+	log := NewDBLogger(w.Pool, task.ID)
 
 	var status db.TaskStatus
 	exitCode := result.Code
@@ -173,16 +173,16 @@ func (w *Worker) processTask(ctx context.Context, task *db.Task) {
 		status = db.StatusCancelled
 		exitCode = -1
 		if result.Signal != nil {
-			log.Log("nextask", fmt.Sprintf("[info] task cancelled (%s)", result.Signal))
+			log.Log(logCtx, "nextask", fmt.Sprintf("[info] task cancelled (%s)", result.Signal))
 		} else {
-			log.Log("nextask", "[info] task cancelled")
+			log.Log(logCtx, "nextask", "[info] task cancelled")
 		}
 	} else if exitCode != 0 {
 		status = db.StatusFailed
-		log.Log("nextask", fmt.Sprintf("[info] %s", result))
+		log.Log(logCtx, "nextask", fmt.Sprintf("[info] %s", result))
 	} else {
 		status = db.StatusCompleted
-		log.Log("nextask", fmt.Sprintf("[info] %s", result))
+		log.Log(logCtx, "nextask", fmt.Sprintf("[info] %s", result))
 	}
 
 	if err := db.CompleteTask(ctx, w.Pool, task.ID, status, exitCode); err != nil {

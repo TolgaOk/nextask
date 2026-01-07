@@ -39,19 +39,27 @@ func (r *ExitResult) String() string {
 // Execute runs a task and returns the exit result.
 func (e *Executor) Execute(ctx context.Context, task *db.Task) *ExitResult {
 	taskDir := filepath.Join(e.Workdir, task.ID)
-	log := NewDBLogger(context.Background(), e.Pool, task.ID)
+	dbLog := NewDBLogger(e.Pool, task.ID)
 
 	src, err := GetSource(task.SourceType)
 	if err != nil {
-		log.Log("nextask", fmt.Sprintf("[error] unable to instantiate source '%s': %v", task.SourceType, err))
+		dbLog.Log(ctx, "nextask", fmt.Sprintf("[error] unable to instantiate source '%s': %v", task.SourceType, err))
 		return &ExitResult{Code: 1, Err: err}
 	}
-	if err := src.Fetch(ctx, task.SourceConfig, taskDir, log); err != nil {
-		log.Log("nextask", fmt.Sprintf("[error] source fetch failed: %v", err))
+	if err := src.Fetch(ctx, task.SourceConfig, taskDir, dbLog); err != nil {
+		dbLog.Log(ctx, "nextask", fmt.Sprintf("[error] source fetch failed: %v", err))
 		return &ExitResult{Code: 1, Err: err}
 	}
 
-	log.Log("nextask", fmt.Sprintf("[info] running: %s", task.Command))
+	// Create task logger with file output now that taskDir exists
+	log, err := NewTaskLogger(e.Pool, task.ID, taskDir)
+	if err != nil {
+		dbLog.Log(ctx, "nextask", fmt.Sprintf("[error] create task logger: %v", err))
+		return &ExitResult{Code: 1, Err: err}
+	}
+	defer log.Close()
+
+	log.Log(ctx, "nextask", fmt.Sprintf("[info] running: %s", task.Command))
 	return e.runCommand(ctx, task, taskDir, log)
 }
 
@@ -118,10 +126,10 @@ func (e *Executor) runCommand(ctx context.Context, task *db.Task, taskDir string
 		buf := make([]byte, 64*1024)
 		scanner.Buffer(buf, 1024*1024)
 		for scanner.Scan() {
-			log.Log("stdout", scanner.Text())
+			log.Log(ctx, "stdout", scanner.Text())
 		}
 		if err := scanner.Err(); err != nil && !errors.Is(err, os.ErrClosed) {
-			log.Log("nextask", fmt.Sprintf("[warn] stdout scan: %v", err))
+			log.Log(ctx, "nextask", fmt.Sprintf("[warn] stdout scan: %v", err))
 		}
 	}()
 
@@ -131,10 +139,10 @@ func (e *Executor) runCommand(ctx context.Context, task *db.Task, taskDir string
 		buf := make([]byte, 64*1024)
 		scanner.Buffer(buf, 1024*1024)
 		for scanner.Scan() {
-			log.Log("stderr", scanner.Text())
+			log.Log(ctx, "stderr", scanner.Text())
 		}
 		if err := scanner.Err(); err != nil && !errors.Is(err, os.ErrClosed) {
-			log.Log("nextask", fmt.Sprintf("[warn] stderr scan: %v", err))
+			log.Log(ctx, "nextask", fmt.Sprintf("[warn] stderr scan: %v", err))
 		}
 	}()
 
@@ -144,7 +152,7 @@ func (e *Executor) runCommand(ctx context.Context, task *db.Task, taskDir string
 	wg.Wait()
 
 	if errors.Is(err, exec.ErrWaitDelay) {
-		log.Log("nextask", "[warn] pipes forced closed after WaitDelay (orphaned child?)")
+		log.Log(ctx, "nextask", "[warn] pipes forced closed after WaitDelay (orphaned child?)")
 		if cmd.ProcessState != nil && cmd.ProcessState.ExitCode() == 0 {
 			return &ExitResult{Code: 0, Err: err}
 		}
