@@ -266,8 +266,8 @@ nextask worker [flags]
 ```
       --daemon           Run as background daemon
   -h, --help             help for worker
-      --name string      Worker identifier (default: random)
       --once             Run single task and exit
+      --timeout string   Stop worker after duration (e.g., 1h, 24h, 7d)
       --workdir string   Base directory for task execution (default /tmp/nextask)
 ```
 

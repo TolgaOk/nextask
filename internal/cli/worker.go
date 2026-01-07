@@ -17,13 +17,15 @@ import (
 	"github.com/TolgaOk/nextask/internal/db"
 	"github.com/TolgaOk/nextask/internal/worker"
 	"github.com/spf13/cobra"
+	str2duration "github.com/xhit/go-str2duration/v2"
 )
 
 var (
-	workdir    string
-	workerName string
-	once       bool
-	daemon     bool
+	workdir       string
+	once          bool
+	daemon        bool
+	workerID      string // hidden, used by daemon mode
+	workerTimeout string
 )
 
 var workerCmd = &cobra.Command{
@@ -48,8 +50,32 @@ var workerCmd = &cobra.Command{
 			return daemonize()
 		}
 
+		// Parse timeout if provided
+		var timeout time.Duration
+		if workerTimeout != "" {
+			var err error
+			timeout, err = str2duration.ParseDuration(workerTimeout)
+			if err != nil {
+				return errWithHints(fmt.Sprintf("invalid timeout: %s", workerTimeout),
+					"Examples: "+codeStyle.Render("1h")+", "+codeStyle.Render("24h")+", "+codeStyle.Render("7d"),
+				)
+			}
+		}
+
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
+
+		// Start timeout goroutine if specified
+		if timeout > 0 {
+			go func() {
+				select {
+				case <-time.After(timeout):
+					fmt.Printf("\nTimeout reached (%s), shutting down...\n", workerTimeout)
+					cancel()
+				case <-ctx.Done():
+				}
+			}()
+		}
 
 		sigCh := make(chan os.Signal, 1)
 		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
@@ -66,7 +92,7 @@ var workerCmd = &cobra.Command{
 		w, err := worker.New(ctx, worker.Config{
 			DBURL:             cfg.DB.URL,
 			Workdir:           cfg.Worker.Workdir,
-			Name:              workerName,
+			Name:              workerID,
 			Once:              once,
 			HeartbeatInterval: cfg.Worker.HeartbeatInterval,
 		})
@@ -233,9 +259,11 @@ var workerStopCmd = &cobra.Command{
 
 func init() {
 	workerCmd.Flags().StringVar(&workdir, "workdir", "", "Base directory for task execution (default /tmp/nextask)")
-	workerCmd.Flags().StringVar(&workerName, "name", "", "Worker identifier (default: random)")
 	workerCmd.Flags().BoolVar(&once, "once", false, "Run single task and exit")
 	workerCmd.Flags().BoolVar(&daemon, "daemon", false, "Run as background daemon")
+	workerCmd.Flags().StringVar(&workerTimeout, "timeout", "", "Stop worker after duration (e.g., 1h, 24h, 7d)")
+	workerCmd.Flags().StringVar(&workerID, "_id", "", "Worker ID (internal use)")
+	workerCmd.Flags().MarkHidden("_id")
 
 	workerListCmd.Flags().String("status", "", "Filter by status (running, stopped)")
 	workerCmd.AddCommand(workerListCmd)
@@ -247,18 +275,14 @@ func init() {
 }
 
 func daemonize() error {
-	// Generate worker ID if not provided (needed for log directory)
-	name := workerName
-	if name == "" {
-		var err error
-		name, err = gonanoid.Generate("0123456789abcdefghijklmnopqrstuvwxyz", 8)
-		if err != nil {
-			return fmt.Errorf("failed to generate worker id: %w", err)
-		}
+	// Generate worker ID for log directory and child process
+	id, err := gonanoid.Generate("0123456789abcdefghijklmnopqrstuvwxyz", 8)
+	if err != nil {
+		return fmt.Errorf("failed to generate worker id: %w", err)
 	}
 
 	// Create log directory: <workdir>/.nextask/<worker_id>/
-	logDir := filepath.Join(cfg.Worker.Workdir, ".nextask", name)
+	logDir := filepath.Join(cfg.Worker.Workdir, ".nextask", id)
 	if err := os.MkdirAll(logDir, 0755); err != nil {
 		return fmt.Errorf("failed to create log directory: %w", err)
 	}
@@ -271,15 +295,18 @@ func daemonize() error {
 	}
 	defer logFile.Close()
 
-	// Build child command args (without --daemon, with explicit --name)
+	// Build child command args (without --daemon, with hidden --_id)
 	exe, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("failed to get executable: %w", err)
 	}
 
-	args := []string{"worker", "--name", name, "--workdir", cfg.Worker.Workdir, "--db-url", cfg.DB.URL}
+	args := []string{"worker", "--_id", id, "--workdir", cfg.Worker.Workdir, "--db-url", cfg.DB.URL}
 	if once {
 		args = append(args, "--once")
+	}
+	if workerTimeout != "" {
+		args = append(args, "--timeout", workerTimeout)
 	}
 
 	cmd := exec.Command(exe, args...)
@@ -298,7 +325,7 @@ func daemonize() error {
 		return fmt.Errorf("failed to release daemon process: %w", err)
 	}
 
-	fmt.Printf("Worker %s started as daemon (pid %d)\n", name, pid)
+	fmt.Printf("Worker %s started as daemon (pid %d)\n", id, pid)
 	fmt.Printf("Logs: %s\n", logPath)
 
 	return nil
