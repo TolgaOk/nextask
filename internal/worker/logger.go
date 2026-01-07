@@ -30,9 +30,16 @@ func NewDBLogger(ctx context.Context, pool *pgxpool.Pool, taskID string) *DBLogg
 	}
 }
 
-// Log writes a line to the specified stream (stdout/stderr).
+// Log writes a line to the specified stream (stdout/stderr) and notifies listeners.
 func (l *DBLogger) Log(stream, data string) {
-	if err := db.InsertLog(l.ctx, l.pool, l.taskID, stream, data); err != nil {
+	id, err := db.InsertLog(l.ctx, l.pool, l.taskID, stream, data)
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to insert log: %v\n", err)
+		return
+	}
+
+	channel := db.FromTaskChannel(l.taskID)
+	if err := db.Notify(l.ctx, l.pool, channel, db.TaskLogEvent{ID: id}); err != nil {
+		fmt.Fprintf(os.Stderr, "failed to notify log: %v\n", err)
 	}
 }

@@ -503,10 +503,10 @@ func TestInsertLog(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := InsertLog(ctx, pool, "log001", "stdout", "hello"); err != nil {
+	if _, err := InsertLog(ctx, pool, "log001", "stdout", "hello"); err != nil {
 		t.Fatalf("InsertLog(stdout) error = %v", err)
 	}
-	if err := InsertLog(ctx, pool, "log001", "stderr", "world"); err != nil {
+	if _, err := InsertLog(ctx, pool, "log001", "stderr", "world"); err != nil {
 		t.Fatalf("InsertLog(stderr) error = %v", err)
 	}
 
