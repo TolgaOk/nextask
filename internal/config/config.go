@@ -23,6 +23,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/BurntSushi/toml"
 )
@@ -39,8 +40,12 @@ type SourceConfig struct {
 
 // WorkerConfig holds worker configuration.
 type WorkerConfig struct {
-	Workdir string `toml:"workdir"`
+	Workdir           string        `toml:"workdir"`
+	HeartbeatInterval time.Duration `toml:"heartbeat_interval"`
 }
+
+// DefaultHeartbeatInterval is the default heartbeat interval if not configured.
+const DefaultHeartbeatInterval = 1 * time.Minute
 
 // Config holds the complete nextask configuration.
 type Config struct {
@@ -96,6 +101,10 @@ func applyEnv(cfg *Config) {
 	}
 	if v := os.Getenv("NEXTASK_WORKER_WORKDIR"); v != "" {
 		cfg.Worker.Workdir = v
+	}
+	// Apply defaults
+	if cfg.Worker.HeartbeatInterval == 0 {
+		cfg.Worker.HeartbeatInterval = DefaultHeartbeatInterval
 	}
 	normalizePaths(cfg)
 }

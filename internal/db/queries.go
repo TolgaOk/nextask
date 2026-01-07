@@ -258,3 +258,63 @@ func GetLogs(ctx context.Context, pool *pgxpool.Pool, taskID, stream string, lim
 
 	return logs, rows.Err()
 }
+
+// RegisterWorker adds a worker to the registry.
+func RegisterWorker(ctx context.Context, pool *pgxpool.Pool, id string, pid int, hostname, workdir string) error {
+	sql, err := migrations.FS.ReadFile("register_worker.sql")
+	if err != nil {
+		return fmt.Errorf("failed to read register_worker.sql: %w", err)
+	}
+	_, err = pool.Exec(ctx, string(sql), id, pid, hostname, workdir)
+	return err
+}
+
+// UnregisterWorker marks a worker as stopped.
+func UnregisterWorker(ctx context.Context, pool *pgxpool.Pool, id string) error {
+	sql, err := migrations.FS.ReadFile("unregister_worker.sql")
+	if err != nil {
+		return fmt.Errorf("failed to read unregister_worker.sql: %w", err)
+	}
+	_, err = pool.Exec(ctx, string(sql), id)
+	return err
+}
+
+// UpdateHeartbeat updates the last_heartbeat timestamp for a worker.
+func UpdateHeartbeat(ctx context.Context, pool *pgxpool.Pool, id string) error {
+	sql, err := migrations.FS.ReadFile("update_heartbeat.sql")
+	if err != nil {
+		return fmt.Errorf("failed to read update_heartbeat.sql: %w", err)
+	}
+	_, err = pool.Exec(ctx, string(sql), id)
+	return err
+}
+
+// ListWorkers retrieves all workers, optionally filtered by status.
+func ListWorkers(ctx context.Context, pool *pgxpool.Pool, status *WorkerStatus) ([]WorkerRecord, error) {
+	sql, err := migrations.FS.ReadFile("list_workers.sql")
+	if err != nil {
+		return nil, fmt.Errorf("failed to read list_workers.sql: %w", err)
+	}
+
+	var statusArg *string
+	if status != nil {
+		s := string(*status)
+		statusArg = &s
+	}
+
+	rows, err := pool.Query(ctx, string(sql), statusArg)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var workers []WorkerRecord
+	for rows.Next() {
+		var w WorkerRecord
+		if err := rows.Scan(&w.ID, &w.PID, &w.Hostname, &w.Workdir, &w.Status, &w.StartedAt, &w.LastHeartbeat, &w.StoppedAt); err != nil {
+			return nil, err
+		}
+		workers = append(workers, w)
+	}
+	return workers, rows.Err()
+}

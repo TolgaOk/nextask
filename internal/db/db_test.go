@@ -30,6 +30,7 @@ func setupTestDB(t *testing.T) *pgxpool.Pool {
 	// Drop tables to ensure fresh schema
 	pool.Exec(ctx, "DROP TABLE IF EXISTS task_logs")
 	pool.Exec(ctx, "DROP TABLE IF EXISTS tasks")
+	pool.Exec(ctx, "DROP TABLE IF EXISTS workers")
 
 	if err := Migrate(ctx, pool); err != nil {
 		pool.Close()
@@ -1219,5 +1220,132 @@ func TestDeleteTask_DifferentStatuses(t *testing.T) {
 		if !deleted {
 			t.Errorf("DeleteTask(%s) returned false", status)
 		}
+	}
+}
+
+func TestRegisterWorker(t *testing.T) {
+	pool := setupTestDB(t)
+	defer pool.Close()
+	ctx := context.Background()
+
+	err := RegisterWorker(ctx, pool, "worker01", 1234, "testhost", "/tmp/workdir")
+	if err != nil {
+		t.Fatalf("RegisterWorker() error = %v", err)
+	}
+
+	// Verify worker was registered
+	workers, err := ListWorkers(ctx, pool, nil)
+	if err != nil {
+		t.Fatalf("ListWorkers() error = %v", err)
+	}
+	if len(workers) != 1 {
+		t.Fatalf("len(workers) = %d, want 1", len(workers))
+	}
+	if workers[0].ID != "worker01" {
+		t.Errorf("worker.ID = %s, want worker01", workers[0].ID)
+	}
+	if workers[0].PID != 1234 {
+		t.Errorf("worker.PID = %d, want 1234", workers[0].PID)
+	}
+	if workers[0].Hostname != "testhost" {
+		t.Errorf("worker.Hostname = %s, want testhost", workers[0].Hostname)
+	}
+	if workers[0].Status != WorkerStatusRunning {
+		t.Errorf("worker.Status = %s, want running", workers[0].Status)
+	}
+}
+
+func TestUnregisterWorker(t *testing.T) {
+	pool := setupTestDB(t)
+	defer pool.Close()
+	ctx := context.Background()
+
+	// Register worker
+	if err := RegisterWorker(ctx, pool, "worker02", 5678, "testhost", "/tmp/workdir"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Unregister worker
+	if err := UnregisterWorker(ctx, pool, "worker02"); err != nil {
+		t.Fatalf("UnregisterWorker() error = %v", err)
+	}
+
+	// Verify worker was marked as stopped
+	workers, err := ListWorkers(ctx, pool, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(workers) != 1 {
+		t.Fatal("expected 1 worker")
+	}
+	if workers[0].Status != WorkerStatusStopped {
+		t.Errorf("worker.Status = %s, want stopped", workers[0].Status)
+	}
+	if workers[0].StoppedAt == nil {
+		t.Error("worker.StoppedAt should not be nil")
+	}
+}
+
+func TestUpdateHeartbeat(t *testing.T) {
+	pool := setupTestDB(t)
+	defer pool.Close()
+	ctx := context.Background()
+
+	// Register worker
+	if err := RegisterWorker(ctx, pool, "worker03", 9999, "testhost", "/tmp/workdir"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Get initial heartbeat
+	workers, _ := ListWorkers(ctx, pool, nil)
+	initialHeartbeat := workers[0].LastHeartbeat
+
+	// Wait a moment and update heartbeat
+	time.Sleep(10 * time.Millisecond)
+	if err := UpdateHeartbeat(ctx, pool, "worker03"); err != nil {
+		t.Fatalf("UpdateHeartbeat() error = %v", err)
+	}
+
+	// Verify heartbeat was updated
+	workers, _ = ListWorkers(ctx, pool, nil)
+	if !workers[0].LastHeartbeat.After(initialHeartbeat) {
+		t.Error("heartbeat was not updated")
+	}
+}
+
+func TestListWorkers_FilterByStatus(t *testing.T) {
+	pool := setupTestDB(t)
+	defer pool.Close()
+	ctx := context.Background()
+
+	// Register two workers, unregister one
+	RegisterWorker(ctx, pool, "worker04", 1111, "host1", "/tmp/1")
+	RegisterWorker(ctx, pool, "worker05", 2222, "host2", "/tmp/2")
+	UnregisterWorker(ctx, pool, "worker05")
+
+	// List running workers only
+	running := WorkerStatusRunning
+	workers, err := ListWorkers(ctx, pool, &running)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(workers) != 1 {
+		t.Errorf("len(running workers) = %d, want 1", len(workers))
+	}
+	if workers[0].ID != "worker04" {
+		t.Errorf("worker.ID = %s, want worker04", workers[0].ID)
+	}
+
+	// List stopped workers only
+	stopped := WorkerStatusStopped
+	workers, err = ListWorkers(ctx, pool, &stopped)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(workers) != 1 {
+		t.Errorf("len(stopped workers) = %d, want 1", len(workers))
+	}
+	if workers[0].ID != "worker05" {
+		t.Errorf("worker.ID = %s, want worker05", workers[0].ID)
 	}
 }

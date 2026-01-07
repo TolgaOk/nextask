@@ -50,10 +50,11 @@ var workerCmd = &cobra.Command{
 		}()
 
 		w, err := worker.New(ctx, worker.Config{
-			DBURL:   cfg.DB.URL,
-			Workdir: cfg.Worker.Workdir,
-			Name:    workerName,
-			Once:    once,
+			DBURL:             cfg.DB.URL,
+			Workdir:           cfg.Worker.Workdir,
+			Name:              workerName,
+			Once:              once,
+			HeartbeatInterval: cfg.Worker.HeartbeatInterval,
 		})
 		if err != nil {
 			return err

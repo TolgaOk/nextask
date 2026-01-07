@@ -48,3 +48,23 @@ type TaskLog struct {
 	Data      string
 	CreatedAt time.Time
 }
+
+// WorkerStatus represents the state of a worker.
+type WorkerStatus string
+
+const (
+	WorkerStatusRunning WorkerStatus = "running"
+	WorkerStatusStopped WorkerStatus = "stopped"
+)
+
+// WorkerRecord represents a registered worker in the database.
+type WorkerRecord struct {
+	ID            string
+	PID           int
+	Hostname      string
+	Workdir       string
+	Status        WorkerStatus
+	StartedAt     time.Time
+	LastHeartbeat time.Time
+	StoppedAt     *time.Time
+}

@@ -16,21 +16,24 @@ import (
 
 // Worker processes tasks from the queue.
 type Worker struct {
-	ID         string
-	Info       *db.WorkerInfo
-	Pool       *pgxpool.Pool
-	ListenConn *pgx.Conn
-	Executor   *Executor
-	Once       bool
-	dbURL      string
+	ID                string
+	Info              *db.WorkerInfo
+	Pool              *pgxpool.Pool
+	ListenConn        *pgx.Conn
+	Executor          *Executor
+	Once              bool
+	dbURL             string
+	workdir           string
+	heartbeatInterval time.Duration
 }
 
 // Config contains worker configuration options.
 type Config struct {
-	DBURL   string
-	Workdir string
-	Name    string
-	Once    bool
+	DBURL             string
+	Workdir           string
+	Name              string
+	Once              bool
+	HeartbeatInterval time.Duration
 }
 
 // New creates a worker with the given configuration.
@@ -65,13 +68,15 @@ func New(ctx context.Context, cfg Config) (*Worker, error) {
 	}
 
 	return &Worker{
-		ID:         workerID,
-		Info:       workerInfo,
-		Pool:       pool,
-		ListenConn: listenConn,
-		Executor:   &Executor{Pool: pool, Workdir: cfg.Workdir},
-		Once:       cfg.Once,
-		dbURL:      cfg.DBURL,
+		ID:                workerID,
+		Info:              workerInfo,
+		Pool:              pool,
+		ListenConn:        listenConn,
+		Executor:          &Executor{Pool: pool, Workdir: cfg.Workdir},
+		Once:              cfg.Once,
+		dbURL:             cfg.DBURL,
+		workdir:           cfg.Workdir,
+		heartbeatInterval: cfg.HeartbeatInterval,
 	}, nil
 }
 
@@ -83,6 +88,27 @@ func (w *Worker) Close(ctx context.Context) {
 
 // Run starts the worker loop, processing tasks until context is cancelled.
 func (w *Worker) Run(ctx context.Context) error {
+	hostname, _ := os.Hostname()
+
+	// Register worker in DB
+	if err := db.RegisterWorker(ctx, w.Pool, w.ID, os.Getpid(), hostname, w.workdir); err != nil {
+		return fmt.Errorf("failed to register worker: %w", err)
+	}
+	defer func() {
+		// Use background context for cleanup
+		unregCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		db.UnregisterWorker(unregCtx, w.Pool, w.ID)
+	}()
+
+	// Start heartbeat goroutine
+	heartbeatDone := make(chan struct{})
+	go func() {
+		defer close(heartbeatDone)
+		w.runHeartbeat(ctx)
+	}()
+	defer func() { <-heartbeatDone }()
+
 	fmt.Printf("Worker %s started\n", w.ID)
 
 	for {
@@ -113,6 +139,32 @@ func (w *Worker) Run(ctx context.Context) error {
 		case <-waitForNotification(ctx, w.ListenConn):
 		case <-ctx.Done():
 			return nil
+		}
+	}
+}
+
+// runHeartbeat periodically updates the worker's heartbeat timestamp.
+// Satisfies invariants: A (ctx.Done), B (context timeout), C (defer ticker.Stop).
+func (w *Worker) runHeartbeat(ctx context.Context) {
+	if w.heartbeatInterval <= 0 {
+		return
+	}
+
+	ticker := time.NewTicker(w.heartbeatInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			hbCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+			if err := db.UpdateHeartbeat(hbCtx, w.Pool, w.ID); err != nil {
+				if ctx.Err() == nil {
+					fmt.Fprintf(os.Stderr, "heartbeat failed: %v\n", err)
+				}
+			}
+			cancel()
+		case <-ctx.Done():
+			return
 		}
 	}
 }

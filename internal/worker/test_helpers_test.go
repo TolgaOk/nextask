@@ -35,6 +35,7 @@ func setupTestDB(t *testing.T) *pgxpool.Pool {
 
 	_, _ = pool.Exec(ctx, "DROP TABLE IF EXISTS task_logs")
 	_, _ = pool.Exec(ctx, "DROP TABLE IF EXISTS tasks")
+	_, _ = pool.Exec(ctx, "DROP TABLE IF EXISTS workers")
 
 	if err := db.Migrate(ctx, pool); err != nil {
 		pool.Close()
