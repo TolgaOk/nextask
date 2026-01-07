@@ -79,6 +79,7 @@ nextask enqueue COMMAND [flags]
 ### Options
 
 ```
+  -a, --attach          Watch task output and wait for completion
   -h, --help            help for enqueue
       --remote string   Git remote name or path for snapshot (required if --snapshot)
       --snapshot        Create and push source snapshot
@@ -263,6 +264,7 @@ nextask worker [flags]
 ### Options
 
 ```
+      --daemon           Run as background daemon
   -h, --help             help for worker
       --name string      Worker identifier (default: random)
       --once             Run single task and exit
