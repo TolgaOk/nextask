@@ -277,6 +277,29 @@ nextask worker [flags]
       --db-url string   PostgreSQL connection URL
 ```
 
+---
+
+## nextask worker list
+
+List registered workers
+
+```
+nextask worker list [flags]
+```
+
+### Options
+
+```
+  -h, --help            help for list
+      --status string   Filter by status (running, stopped)
+```
+
+### Options inherited from parent commands
+
+```
+      --db-url string   PostgreSQL connection URL
+```
+
 
 ---
 

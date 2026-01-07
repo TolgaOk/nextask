@@ -8,8 +8,12 @@ import (
 	"os/signal"
 	"path/filepath"
 	"syscall"
+	"time"
 
+	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/lipgloss/table"
 	gonanoid "github.com/matoous/go-nanoid/v2"
+	"github.com/TolgaOk/nextask/internal/db"
 	"github.com/TolgaOk/nextask/internal/worker"
 	"github.com/spf13/cobra"
 )
@@ -74,11 +78,81 @@ var workerCmd = &cobra.Command{
 	},
 }
 
+var workerListCmd = &cobra.Command{
+	Use:   "list",
+	Short: "List registered workers",
+	Args:  cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if cfg.DB.URL == "" {
+			return errDBRequired()
+		}
+
+		ctx := context.Background()
+		pool, err := db.Connect(ctx, cfg.DB.URL)
+		if err != nil {
+			return err
+		}
+		defer pool.Close()
+
+		statusFlag, _ := cmd.Flags().GetString("status")
+		var statusFilter *db.WorkerStatus
+		if statusFlag != "" {
+			s := db.WorkerStatus(statusFlag)
+			statusFilter = &s
+		}
+
+		workers, err := db.ListWorkers(ctx, pool, statusFilter)
+		if err != nil {
+			return err
+		}
+
+		if len(workers) == 0 {
+			fmt.Println("No workers found")
+			return nil
+		}
+
+		rows := [][]string{}
+		for _, w := range workers {
+			heartbeat := time.Since(w.LastHeartbeat).Truncate(time.Second).String() + " ago"
+			rows = append(rows, []string{
+				w.ID,
+				fmt.Sprintf("%d", w.PID),
+				w.Hostname,
+				string(w.Status),
+				w.StartedAt.Format("2006-01-02 15:04"),
+				heartbeat,
+			})
+		}
+
+		headerStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("15"))
+		rowStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
+
+		t := table.New().
+			Border(lipgloss.NormalBorder()).
+			BorderStyle(lipgloss.NewStyle().Foreground(lipgloss.Color("240"))).
+			Headers("ID", "PID", "HOSTNAME", "STATUS", "STARTED", "HEARTBEAT").
+			Rows(rows...).
+			StyleFunc(func(row, col int) lipgloss.Style {
+				if row == 0 {
+					return headerStyle
+				}
+				return rowStyle
+			})
+
+		fmt.Fprintln(os.Stdout, t)
+		return nil
+	},
+}
+
 func init() {
 	workerCmd.Flags().StringVar(&workdir, "workdir", "", "Base directory for task execution (default /tmp/nextask)")
 	workerCmd.Flags().StringVar(&workerName, "name", "", "Worker identifier (default: random)")
 	workerCmd.Flags().BoolVar(&once, "once", false, "Run single task and exit")
 	workerCmd.Flags().BoolVar(&daemon, "daemon", false, "Run as background daemon")
+
+	workerListCmd.Flags().String("status", "", "Filter by status (running, stopped)")
+	workerCmd.AddCommand(workerListCmd)
+
 	RootCmd.AddCommand(workerCmd)
 }
 
