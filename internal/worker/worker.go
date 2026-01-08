@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -25,6 +26,7 @@ type Worker struct {
 	dbURL             string
 	workdir           string
 	heartbeatInterval time.Duration
+	tagFilter         map[string]string
 }
 
 // Config contains worker configuration options.
@@ -34,6 +36,7 @@ type Config struct {
 	Name              string
 	Once              bool
 	HeartbeatInterval time.Duration
+	TagFilter         map[string]string
 }
 
 // New creates a worker with the given configuration.
@@ -77,6 +80,7 @@ func New(ctx context.Context, cfg Config) (*Worker, error) {
 		dbURL:             cfg.DBURL,
 		workdir:           cfg.Workdir,
 		heartbeatInterval: cfg.HeartbeatInterval,
+		tagFilter:         cfg.TagFilter,
 	}, nil
 }
 
@@ -90,44 +94,31 @@ func (w *Worker) Close(ctx context.Context) {
 func (w *Worker) Run(parentCtx context.Context) error {
 	// Create internal cancellable context for stop signal handling
 	ctx, cancel := context.WithCancel(parentCtx)
-	defer cancel()
 
 	hostname, _ := os.Hostname()
 
 	// Register worker in DB
 	if err := db.RegisterWorker(ctx, w.Pool, w.ID, os.Getpid(), hostname, w.workdir); err != nil {
+		cancel()
 		return fmt.Errorf("failed to register worker: %w", err)
 	}
-	defer func() {
-		// Use background context for cleanup
-		unregCtx, unregCancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer unregCancel()
-
-		// Notify that worker is stopping (for CLI waiting on stop confirmation)
-		fromWorkerCh := db.FromWorkerChannel(w.ID)
-		w.Pool.Exec(unregCtx, "SELECT pg_notify($1, 'stopped')", fromWorkerCh)
-
-		db.UnregisterWorker(unregCtx, w.Pool, w.ID)
-	}()
 
 	// Start stop listener goroutine
 	stopConn, err := pgx.Connect(ctx, w.dbURL)
 	if err != nil {
+		cancel()
 		return fmt.Errorf("failed to connect for stop listener: %w", err)
 	}
 	toWorkerCh := db.ToWorkerChannel(w.ID)
 	if _, err := stopConn.Exec(ctx, `LISTEN "`+toWorkerCh+`"`); err != nil {
 		stopConn.Close(context.Background())
+		cancel()
 		return fmt.Errorf("failed to listen for stop: %w", err)
 	}
 	stopDone := make(chan struct{})
 	go func() {
 		defer close(stopDone)
 		w.listenForStop(ctx, stopConn, cancel)
-	}()
-	defer func() {
-		stopConn.Close(context.Background())
-		<-stopDone
 	}()
 
 	// Start heartbeat goroutine
@@ -136,7 +127,23 @@ func (w *Worker) Run(parentCtx context.Context) error {
 		defer close(heartbeatDone)
 		w.runHeartbeat(ctx)
 	}()
-	defer func() { <-heartbeatDone }()
+
+	// Cleanup: cancel context first to signal goroutines, then wait for them
+	defer func() {
+		cancel() // Signal all goroutines to stop
+
+		// Wait for goroutines to finish
+		stopConn.Close(context.Background())
+		<-stopDone
+		<-heartbeatDone
+
+		// Notify and unregister
+		unregCtx, unregCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer unregCancel()
+		fromWorkerCh := db.FromWorkerChannel(w.ID)
+		w.Pool.Exec(unregCtx, "SELECT pg_notify($1, 'stopped')", fromWorkerCh)
+		db.UnregisterWorker(unregCtx, w.Pool, w.ID)
+	}()
 
 	fmt.Printf("Worker %s started\n", w.ID)
 
@@ -145,7 +152,7 @@ func (w *Worker) Run(parentCtx context.Context) error {
 			return nil
 		}
 
-		task, err := db.ClaimTask(ctx, w.Pool, w.ID, w.Info)
+		task, err := db.ClaimTask(ctx, w.Pool, w.ID, w.Info, w.tagFilter)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "failed to claim task: %v\n", err)
 			continue
@@ -160,7 +167,15 @@ func (w *Worker) Run(parentCtx context.Context) error {
 		}
 
 		if w.Once {
-			fmt.Println("No pending tasks")
+			if len(w.tagFilter) > 0 {
+				filters := make([]string, 0, len(w.tagFilter))
+				for k, v := range w.tagFilter {
+					filters = append(filters, k+"="+v)
+				}
+				fmt.Printf("No pending tasks matching filter: %s\n", strings.Join(filters, ", "))
+			} else {
+				fmt.Println("No pending tasks")
+			}
 			return nil
 		}
 

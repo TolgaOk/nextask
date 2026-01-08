@@ -122,10 +122,19 @@ func scanTask(row scannable) (*Task, error) {
 }
 
 // ClaimTask atomically claims the next pending task for a worker.
-func ClaimTask(ctx context.Context, pool *pgxpool.Pool, workerID string, workerInfo *WorkerInfo) (*Task, error) {
+// If tagFilter is non-empty, only tasks matching all specified tags are claimed.
+func ClaimTask(ctx context.Context, pool *pgxpool.Pool, workerID string, workerInfo *WorkerInfo, tagFilter map[string]string) (*Task, error) {
 	workerInfoJSON, err := json.Marshal(workerInfo)
 	if err != nil {
 		return nil, err
+	}
+
+	var tagFilterJSON []byte
+	if len(tagFilter) > 0 {
+		tagFilterJSON, err = json.Marshal(tagFilter)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	sql, err := migrations.FS.ReadFile("claim_task.sql")
@@ -133,7 +142,7 @@ func ClaimTask(ctx context.Context, pool *pgxpool.Pool, workerID string, workerI
 		return nil, fmt.Errorf("failed to read claim_task.sql: %w", err)
 	}
 
-	row := pool.QueryRow(ctx, string(sql), StatusRunning, workerID, workerInfoJSON)
+	row := pool.QueryRow(ctx, string(sql), StatusRunning, workerID, workerInfoJSON, tagFilterJSON)
 	return scanTask(row)
 }
 

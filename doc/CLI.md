@@ -265,6 +265,7 @@ nextask worker [flags]
 
 ```
       --daemon           Run as background daemon
+      --filter strings   Only claim tasks with tag (key=value, repeatable)
   -h, --help             help for worker
       --once             Run single task and exit
       --timeout string   Stop worker after duration (e.g., 1h, 24h, 7d)

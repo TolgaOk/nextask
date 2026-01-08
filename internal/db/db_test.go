@@ -309,7 +309,7 @@ func TestClaimTask_Basic(t *testing.T) {
 	}
 
 	workerInfo := &WorkerInfo{Hostname: "test-host", OS: "linux", PID: 12345}
-	claimed, err := ClaimTask(ctx, pool, "worker-1", workerInfo)
+	claimed, err := ClaimTask(ctx, pool, "worker-1", workerInfo, nil)
 	if err != nil {
 		t.Fatalf("ClaimTask() error = %v", err)
 	}
@@ -344,7 +344,7 @@ func TestClaimTask_WithSourceConfig(t *testing.T) {
 		t.Fatalf("CreateTask() error = %v", err)
 	}
 
-	claimed, err := ClaimTask(ctx, pool, "worker-1", &WorkerInfo{Hostname: "test"})
+	claimed, err := ClaimTask(ctx, pool, "worker-1", &WorkerInfo{Hostname: "test"}, nil)
 	if err != nil {
 		t.Fatalf("ClaimTask() error = %v", err)
 	}
@@ -368,7 +368,7 @@ func TestClaimTask_NoTasks(t *testing.T) {
 	defer pool.Close()
 	ctx := context.Background()
 
-	claimed, err := ClaimTask(ctx, pool, "worker-1", &WorkerInfo{Hostname: "test"})
+	claimed, err := ClaimTask(ctx, pool, "worker-1", &WorkerInfo{Hostname: "test"}, nil)
 	if err != nil {
 		t.Fatalf("ClaimTask() error = %v", err)
 	}
@@ -389,7 +389,7 @@ func TestClaimTask_SkipsNonPending(t *testing.T) {
 		}
 	}
 
-	claimed, err := ClaimTask(ctx, pool, "worker-1", &WorkerInfo{Hostname: "test"})
+	claimed, err := ClaimTask(ctx, pool, "worker-1", &WorkerInfo{Hostname: "test"}, nil)
 	if err != nil {
 		t.Fatalf("ClaimTask() error = %v", err)
 	}
@@ -412,8 +412,8 @@ func TestClaimTask_FIFO(t *testing.T) {
 	}
 
 	wi := &WorkerInfo{Hostname: "test"}
-	c1, _ := ClaimTask(ctx, pool, "w1", wi)
-	c2, _ := ClaimTask(ctx, pool, "w2", wi)
+	c1, _ := ClaimTask(ctx, pool, "w1", wi, nil)
+	c2, _ := ClaimTask(ctx, pool, "w2", wi, nil)
 
 	if c1 == nil || c1.ID != "fifo01" {
 		t.Errorf("first claim got %v, want fifo01", c1)
@@ -441,7 +441,7 @@ func TestClaimTask_Concurrent(t *testing.T) {
 	for i := 0; i < numWorkers; i++ {
 		go func(workerID int) {
 			wi := &WorkerInfo{Hostname: "test"}
-			task, err := ClaimTask(ctx, pool, fmt.Sprintf("worker-%d", workerID), wi)
+			task, err := ClaimTask(ctx, pool, fmt.Sprintf("worker-%d", workerID), wi, nil)
 			if err != nil {
 				errors <- err
 				return
@@ -474,6 +474,61 @@ func TestClaimTask_Concurrent(t *testing.T) {
 	}
 }
 
+func TestClaimTask_TagFilter(t *testing.T) {
+	pool := setupTestDB(t)
+	defer pool.Close()
+	ctx := context.Background()
+
+	// Create tasks with different tags
+	if err := CreateTask(ctx, pool, &Task{ID: "tag01", Command: "gpu-job", Status: StatusPending, Tags: map[string]string{"gpu": "a100"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := CreateTask(ctx, pool, &Task{ID: "tag02", Command: "cpu-job", Status: StatusPending, Tags: map[string]string{"gpu": "cpu"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := CreateTask(ctx, pool, &Task{ID: "tag03", Command: "any-job", Status: StatusPending, Tags: map[string]string{}}); err != nil {
+		t.Fatal(err)
+	}
+
+	wi := &WorkerInfo{Hostname: "test"}
+
+	// Worker with gpu=a100 filter should only get tag01
+	task, err := ClaimTask(ctx, pool, "w1", wi, map[string]string{"gpu": "a100"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if task == nil || task.ID != "tag01" {
+		t.Errorf("expected tag01, got %v", task)
+	}
+
+	// Worker with gpu=cpu filter should only get tag02
+	task, err = ClaimTask(ctx, pool, "w2", wi, map[string]string{"gpu": "cpu"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if task == nil || task.ID != "tag02" {
+		t.Errorf("expected tag02, got %v", task)
+	}
+
+	// Worker with no filter should get tag03 (remaining pending task)
+	task, err = ClaimTask(ctx, pool, "w3", wi, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if task == nil || task.ID != "tag03" {
+		t.Errorf("expected tag03, got %v", task)
+	}
+
+	// Worker with non-matching filter should get nothing
+	task, err = ClaimTask(ctx, pool, "w4", wi, map[string]string{"gpu": "h100"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if task != nil {
+		t.Errorf("expected nil, got %v", task)
+	}
+}
+
 func TestCompleteTask(t *testing.T) {
 	pool := setupTestDB(t)
 	defer pool.Close()
@@ -482,7 +537,7 @@ func TestCompleteTask(t *testing.T) {
 	if err := CreateTask(ctx, pool, &Task{ID: "comp01", Command: "test", Status: StatusPending, Tags: map[string]string{}}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := ClaimTask(ctx, pool, "w1", &WorkerInfo{Hostname: "test"}); err != nil {
+	if _, err := ClaimTask(ctx, pool, "w1", &WorkerInfo{Hostname: "test"}, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := CompleteTask(ctx, pool, "comp01", StatusCompleted, 0); err != nil {
@@ -863,7 +918,7 @@ func TestRequestCancel_RunningTask(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Claim to make it running
-	if _, err := ClaimTask(ctx, pool, "worker1", &WorkerInfo{Hostname: "test"}); err != nil {
+	if _, err := ClaimTask(ctx, pool, "worker1", &WorkerInfo{Hostname: "test"}, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -899,7 +954,7 @@ func TestRequestCancel_CompletedTask(t *testing.T) {
 	if err := CreateTask(ctx, pool, task); err != nil {
 		t.Fatal(err)
 	}
-	ClaimTask(ctx, pool, "worker1", &WorkerInfo{Hostname: "test"})
+	ClaimTask(ctx, pool, "worker1", &WorkerInfo{Hostname: "test"}, nil)
 	CompleteTask(ctx, pool, "cancel03", StatusCompleted, 0)
 
 	status, err := RequestCancel(ctx, pool, "cancel03")
@@ -927,7 +982,7 @@ func TestRequestCancel_FailedTask(t *testing.T) {
 	if err := CreateTask(ctx, pool, task); err != nil {
 		t.Fatal(err)
 	}
-	ClaimTask(ctx, pool, "worker1", &WorkerInfo{Hostname: "test"})
+	ClaimTask(ctx, pool, "worker1", &WorkerInfo{Hostname: "test"}, nil)
 	CompleteTask(ctx, pool, "cancel04", StatusFailed, 1)
 
 	status, err := RequestCancel(ctx, pool, "cancel04")
@@ -970,7 +1025,7 @@ func TestRequestCancel_RunningTwice(t *testing.T) {
 	if err := CreateTask(ctx, pool, task); err != nil {
 		t.Fatal(err)
 	}
-	ClaimTask(ctx, pool, "worker1", &WorkerInfo{Hostname: "test"})
+	ClaimTask(ctx, pool, "worker1", &WorkerInfo{Hostname: "test"}, nil)
 
 	// First cancel
 	status1, _ := RequestCancel(ctx, pool, "cancel06")

@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -26,11 +27,13 @@ var (
 	daemon        bool
 	workerID      string // hidden, used by daemon mode
 	workerTimeout string
+	workerFilters []string
 )
 
 var workerCmd = &cobra.Command{
 	Use:   "worker",
 	Short: "Start a worker to process tasks",
+	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if cfg.DB.URL == "" {
 			return errDBRequired()
@@ -89,12 +92,25 @@ var workerCmd = &cobra.Command{
 			}
 		}()
 
+		// Parse tag filters
+		tagFilter := make(map[string]string)
+		for _, f := range workerFilters {
+			parts := strings.SplitN(f, "=", 2)
+			if len(parts) != 2 {
+				return errWithHints(fmt.Sprintf("invalid filter format: %s", f),
+					"Expected format: "+codeStyle.Render("key=value"),
+				)
+			}
+			tagFilter[parts[0]] = parts[1]
+		}
+
 		w, err := worker.New(ctx, worker.Config{
 			DBURL:             cfg.DB.URL,
 			Workdir:           cfg.Worker.Workdir,
 			Name:              workerID,
 			Once:              once,
 			HeartbeatInterval: cfg.Worker.HeartbeatInterval,
+			TagFilter:         tagFilter,
 		})
 		if err != nil {
 			return err
@@ -262,6 +278,7 @@ func init() {
 	workerCmd.Flags().BoolVar(&once, "once", false, "Run single task and exit")
 	workerCmd.Flags().BoolVar(&daemon, "daemon", false, "Run as background daemon")
 	workerCmd.Flags().StringVar(&workerTimeout, "timeout", "", "Stop worker after duration (e.g., 1h, 24h, 7d)")
+	workerCmd.Flags().StringSliceVar(&workerFilters, "filter", nil, "Only claim tasks with tag (key=value, repeatable)")
 	workerCmd.Flags().StringVar(&workerID, "_id", "", "Worker ID (internal use)")
 	workerCmd.Flags().MarkHidden("_id")
 
@@ -307,6 +324,9 @@ func daemonize() error {
 	}
 	if workerTimeout != "" {
 		args = append(args, "--timeout", workerTimeout)
+	}
+	for _, f := range workerFilters {
+		args = append(args, "--filter", f)
 	}
 
 	cmd := exec.Command(exe, args...)
