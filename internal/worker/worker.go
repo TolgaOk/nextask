@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -16,21 +17,26 @@ import (
 
 // Worker processes tasks from the queue.
 type Worker struct {
-	ID         string
-	Info       *db.WorkerInfo
-	Pool       *pgxpool.Pool
-	ListenConn *pgx.Conn
-	Executor   *Executor
-	Once       bool
-	dbURL      string
+	ID                string
+	Info              *db.WorkerInfo
+	Pool              *pgxpool.Pool
+	ListenConn        *pgx.Conn
+	Executor          *Executor
+	Once              bool
+	dbURL             string
+	workdir           string
+	heartbeatInterval time.Duration
+	tagFilter         map[string]string
 }
 
 // Config contains worker configuration options.
 type Config struct {
-	DBURL   string
-	Workdir string
-	Name    string
-	Once    bool
+	DBURL             string
+	Workdir           string
+	Name              string
+	Once              bool
+	HeartbeatInterval time.Duration
+	TagFilter         map[string]string
 }
 
 // New creates a worker with the given configuration.
@@ -46,15 +52,15 @@ func New(ctx context.Context, cfg Config) (*Worker, error) {
 		return nil, fmt.Errorf("failed to connect for listen: %w", err)
 	}
 
+	workerID := cfg.Name
+	if workerID == "" {
+		workerID, _ = gonanoid.Generate("0123456789abcdefghijklmnopqrstuvwxyz", 8)
+	}
+
 	if _, err := listenConn.Exec(ctx, "LISTEN new_task"); err != nil {
 		listenConn.Close(ctx)
 		pool.Close()
 		return nil, fmt.Errorf("failed to listen for new_task: %w", err)
-	}
-
-	workerID := cfg.Name
-	if workerID == "" {
-		workerID, _ = gonanoid.Generate("0123456789abcdefghijklmnopqrstuvwxyz", 8)
 	}
 
 	hostname, _ := os.Hostname()
@@ -65,13 +71,16 @@ func New(ctx context.Context, cfg Config) (*Worker, error) {
 	}
 
 	return &Worker{
-		ID:         workerID,
-		Info:       workerInfo,
-		Pool:       pool,
-		ListenConn: listenConn,
-		Executor:   &Executor{Pool: pool, Workdir: cfg.Workdir},
-		Once:       cfg.Once,
-		dbURL:      cfg.DBURL,
+		ID:                workerID,
+		Info:              workerInfo,
+		Pool:              pool,
+		ListenConn:        listenConn,
+		Executor:          &Executor{Pool: pool, Workdir: cfg.Workdir},
+		Once:              cfg.Once,
+		dbURL:             cfg.DBURL,
+		workdir:           cfg.Workdir,
+		heartbeatInterval: cfg.HeartbeatInterval,
+		tagFilter:         cfg.TagFilter,
 	}, nil
 }
 
@@ -82,7 +91,60 @@ func (w *Worker) Close(ctx context.Context) {
 }
 
 // Run starts the worker loop, processing tasks until context is cancelled.
-func (w *Worker) Run(ctx context.Context) error {
+func (w *Worker) Run(parentCtx context.Context) error {
+	// Create internal cancellable context for stop signal handling
+	ctx, cancel := context.WithCancel(parentCtx)
+
+	hostname, _ := os.Hostname()
+
+	// Register worker in DB
+	if err := db.RegisterWorker(ctx, w.Pool, w.ID, os.Getpid(), hostname, w.workdir); err != nil {
+		cancel()
+		return fmt.Errorf("failed to register worker: %w", err)
+	}
+
+	// Start stop listener goroutine
+	stopConn, err := pgx.Connect(ctx, w.dbURL)
+	if err != nil {
+		cancel()
+		return fmt.Errorf("failed to connect for stop listener: %w", err)
+	}
+	toWorkerCh := db.ToWorkerChannel(w.ID)
+	if _, err := stopConn.Exec(ctx, `LISTEN "`+toWorkerCh+`"`); err != nil {
+		stopConn.Close(context.Background())
+		cancel()
+		return fmt.Errorf("failed to listen for stop: %w", err)
+	}
+	stopDone := make(chan struct{})
+	go func() {
+		defer close(stopDone)
+		w.listenForStop(ctx, stopConn, cancel)
+	}()
+
+	// Start heartbeat goroutine
+	heartbeatDone := make(chan struct{})
+	go func() {
+		defer close(heartbeatDone)
+		w.runHeartbeat(ctx)
+	}()
+
+	// Cleanup: cancel context first to signal goroutines, then wait for them
+	defer func() {
+		cancel() // Signal all goroutines to stop
+
+		// Wait for goroutines to finish
+		stopConn.Close(context.Background())
+		<-stopDone
+		<-heartbeatDone
+
+		// Notify and unregister
+		unregCtx, unregCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer unregCancel()
+		fromWorkerCh := db.FromWorkerChannel(w.ID)
+		w.Pool.Exec(unregCtx, "SELECT pg_notify($1, 'stopped')", fromWorkerCh)
+		db.UnregisterWorker(unregCtx, w.Pool, w.ID)
+	}()
+
 	fmt.Printf("Worker %s started\n", w.ID)
 
 	for {
@@ -90,7 +152,7 @@ func (w *Worker) Run(ctx context.Context) error {
 			return nil
 		}
 
-		task, err := db.ClaimTask(ctx, w.Pool, w.ID, w.Info)
+		task, err := db.ClaimTask(ctx, w.Pool, w.ID, w.Info, w.tagFilter)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "failed to claim task: %v\n", err)
 			continue
@@ -105,14 +167,49 @@ func (w *Worker) Run(ctx context.Context) error {
 		}
 
 		if w.Once {
-			fmt.Println("No pending tasks")
+			if len(w.tagFilter) > 0 {
+				filters := make([]string, 0, len(w.tagFilter))
+				for k, v := range w.tagFilter {
+					filters = append(filters, k+"="+v)
+				}
+				fmt.Printf("No pending tasks matching filter: %s\n", strings.Join(filters, ", "))
+			} else {
+				fmt.Println("No pending tasks")
+			}
 			return nil
 		}
 
 		select {
 		case <-waitForNotification(ctx, w.ListenConn):
+			// new_task notification received, loop to claim
 		case <-ctx.Done():
 			return nil
+		}
+	}
+}
+
+// runHeartbeat periodically updates the worker's heartbeat timestamp.
+// Satisfies invariants: A (ctx.Done), B (context timeout), C (defer ticker.Stop).
+func (w *Worker) runHeartbeat(ctx context.Context) {
+	if w.heartbeatInterval <= 0 {
+		return
+	}
+
+	ticker := time.NewTicker(w.heartbeatInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			hbCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+			if err := db.UpdateHeartbeat(hbCtx, w.Pool, w.ID); err != nil {
+				if ctx.Err() == nil {
+					fmt.Fprintf(os.Stderr, "heartbeat failed: %v\n", err)
+				}
+			}
+			cancel()
+		case <-ctx.Done():
+			return
 		}
 	}
 }
@@ -127,6 +224,17 @@ func waitForNotification(ctx context.Context, conn *pgx.Conn) <-chan struct{} {
 		close(ch)
 	}()
 	return ch
+}
+
+// listenForStop listens for worker stop signals and cancels the context when received.
+// Satisfies invariants: A (ctx.Done via conn.Close), B (WaitForNotification accepts ctx).
+func (w *Worker) listenForStop(ctx context.Context, conn *pgx.Conn, cancel context.CancelFunc) {
+	_, err := conn.WaitForNotification(ctx)
+	if err != nil {
+		return // context cancelled or connection closed
+	}
+	fmt.Println("Received stop signal, shutting down...")
+	cancel()
 }
 
 func (w *Worker) processTask(ctx context.Context, task *db.Task) {
@@ -165,7 +273,7 @@ func (w *Worker) processTask(ctx context.Context, task *db.Task) {
 
 	logCtx, logCancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer logCancel()
-	log := NewDBLogger(logCtx, w.Pool, task.ID)
+	log := NewDBLogger(w.Pool, task.ID)
 
 	var status db.TaskStatus
 	exitCode := result.Code
@@ -173,25 +281,29 @@ func (w *Worker) processTask(ctx context.Context, task *db.Task) {
 		status = db.StatusCancelled
 		exitCode = -1
 		if result.Signal != nil {
-			log.Log("nextask", fmt.Sprintf("[info] task cancelled (%s)", result.Signal))
+			log.Log(logCtx, "nextask", fmt.Sprintf("[info] task cancelled (%s)", result.Signal))
 		} else {
-			log.Log("nextask", "[info] task cancelled")
+			log.Log(logCtx, "nextask", "[info] task cancelled")
 		}
 	} else if exitCode != 0 {
 		status = db.StatusFailed
-		log.Log("nextask", fmt.Sprintf("[info] %s", result))
+		log.Log(logCtx, "nextask", fmt.Sprintf("[info] %s", result))
 	} else {
 		status = db.StatusCompleted
-		log.Log("nextask", fmt.Sprintf("[info] %s", result))
+		log.Log(logCtx, "nextask", fmt.Sprintf("[info] %s", result))
 	}
 
-	if err := db.CompleteTask(ctx, w.Pool, task.ID, status, exitCode); err != nil {
+	// Use background context for DB cleanup - ensures task is marked complete even if worker is stopping
+	completeCtx, completeCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer completeCancel()
+
+	if err := db.CompleteTask(completeCtx, w.Pool, task.ID, status, exitCode); err != nil {
 		fmt.Fprintf(os.Stderr, "failed to complete task: %v\n", err)
 	}
 
 	fromChannel := db.FromTaskChannel(task.ID)
 	event := db.TaskStatusEvent{Status: string(status), ExitCode: exitCode}
-	if err := db.Notify(ctx, w.Pool, fromChannel, event); err != nil {
+	if err := db.Notify(completeCtx, w.Pool, fromChannel, event); err != nil {
 		fmt.Fprintf(os.Stderr, "failed to notify status: %v\n", err)
 	}
 

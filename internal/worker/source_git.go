@@ -33,13 +33,13 @@ func (g GitSource) Fetch(ctx context.Context, rawConfig json.RawMessage, taskDir
 		return fmt.Errorf("git source config: ref is required")
 	}
 
-	log.Log("nextask", fmt.Sprintf("[info] fetching source from %s", cfg.Remote))
+	log.Log(ctx, "nextask", fmt.Sprintf("[info] fetching source from %s", cfg.Remote))
 
 	commit, err := source.FetchSnapshot(ctx, cfg.Remote, cfg.Ref, taskDir)
 	if err != nil {
 		return err
 	}
 
-	log.Log("nextask", fmt.Sprintf("[info] checked out %s", commit))
+	log.Log(ctx, "nextask", fmt.Sprintf("[info] checked out %s", commit))
 	return nil
 }

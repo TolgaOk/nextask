@@ -79,6 +79,7 @@ nextask enqueue COMMAND [flags]
 ### Options
 
 ```
+  -a, --attach          Watch task output and wait for completion
   -h, --help            help for enqueue
       --remote string   Git remote name or path for snapshot (required if --snapshot)
       --snapshot        Create and push source snapshot
@@ -263,10 +264,58 @@ nextask worker [flags]
 ### Options
 
 ```
+      --daemon           Run as background daemon
+      --filter strings   Only claim tasks with tag (key=value, repeatable)
   -h, --help             help for worker
-      --name string      Worker identifier (default: random)
       --once             Run single task and exit
+      --timeout string   Stop worker after duration (e.g., 1h, 24h, 7d)
       --workdir string   Base directory for task execution (default /tmp/nextask)
+```
+
+### Options inherited from parent commands
+
+```
+      --db-url string   PostgreSQL connection URL
+```
+
+---
+
+## nextask worker list
+
+List registered workers
+
+```
+nextask worker list [flags]
+```
+
+### Options
+
+```
+  -h, --help            help for list
+      --status string   Filter by status (running, stopped)
+```
+
+### Options inherited from parent commands
+
+```
+      --db-url string   PostgreSQL connection URL
+```
+
+---
+
+## nextask worker stop
+
+Stop a running worker
+
+```
+nextask worker stop WORKER_ID [flags]
+```
+
+### Options
+
+```
+  -h, --help               help for stop
+      --timeout duration   Timeout waiting for stop confirmation (default 10s)
 ```
 
 ### Options inherited from parent commands
