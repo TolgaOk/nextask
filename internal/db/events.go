@@ -8,6 +8,11 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+// --- Channel Names ---
+
+// Generic worker channel (broadcast to all workers)
+const ToWorkersChannel = "to_workers"
+
 // FromTaskChannel returns the channel name for events from a task (worker → consumer).
 func FromTaskChannel(taskID string) string {
 	return fmt.Sprintf("from_task_%s", taskID)
@@ -28,6 +33,10 @@ func FromWorkerChannel(workerID string) string {
 	return fmt.Sprintf("from_worker_%s", workerID)
 }
 
+// --- Event Types ---
+
+// Task events
+
 // TaskLogEvent is sent from worker to consumer when a log line is inserted.
 type TaskLogEvent struct {
 	ID int `json:"id"` // log row ID for incremental fetch
@@ -42,11 +51,19 @@ type TaskStatusEvent struct {
 // TaskCancelEvent is sent from consumer to worker to request cancellation.
 type TaskCancelEvent struct{}
 
+// Worker events
+
+// WorkerWakeEvent signals workers that new tasks are available.
+type WorkerWakeEvent struct{}
+
 // Event type constants for JSON dispatch.
 const (
+	// Task events
 	EventTypeLog    = "log"
 	EventTypeStatus = "status"
 	EventTypeCancel = "cancel"
+	// Worker events
+	EventTypeWake = "wake"
 )
 
 // eventWrapper wraps an event with its type for JSON serialization.
@@ -59,12 +76,16 @@ type eventWrapper struct {
 func Notify(ctx context.Context, pool *pgxpool.Pool, channel string, event any) error {
 	var eventType string
 	switch event.(type) {
+	// Task events
 	case TaskLogEvent:
 		eventType = EventTypeLog
 	case TaskStatusEvent:
 		eventType = EventTypeStatus
 	case TaskCancelEvent:
 		eventType = EventTypeCancel
+	// Worker events
+	case WorkerWakeEvent:
+		eventType = EventTypeWake
 	default:
 		return fmt.Errorf("unknown event type: %T", event)
 	}

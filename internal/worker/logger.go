@@ -69,7 +69,7 @@ func (l *TaskLogger) Log(ctx context.Context, stream, data string) {
 	id, err := db.InsertLog(ctx, l.pool, l.taskID, stream, data)
 	if err != nil {
 		if ctx.Err() == nil {
-			fmt.Fprintf(os.Stderr, "failed to insert log: %v\n", err)
+			fmt.Fprintf(os.Stderr, "log insert failed: %s\n", db.HumanError(err))
 		}
 		return
 	}
@@ -77,7 +77,7 @@ func (l *TaskLogger) Log(ctx context.Context, stream, data string) {
 	channel := db.FromTaskChannel(l.taskID)
 	if err := db.Notify(ctx, l.pool, channel, db.TaskLogEvent{ID: id}); err != nil {
 		if ctx.Err() == nil {
-			fmt.Fprintf(os.Stderr, "failed to notify log: %v\n", err)
+			fmt.Fprintf(os.Stderr, "log notify failed: %s\n", db.HumanError(err))
 		}
 	}
 }
@@ -117,7 +117,7 @@ func (l *DBLogger) Log(ctx context.Context, stream, data string) {
 	id, err := db.InsertLog(ctx, l.pool, l.taskID, stream, data)
 	if err != nil {
 		if ctx.Err() == nil {
-			fmt.Fprintf(os.Stderr, "failed to insert log: %v\n", err)
+			fmt.Fprintf(os.Stderr, "log insert failed: %s\n", db.HumanError(err))
 		}
 		return
 	}
@@ -125,7 +125,7 @@ func (l *DBLogger) Log(ctx context.Context, stream, data string) {
 	channel := db.FromTaskChannel(l.taskID)
 	if err := db.Notify(ctx, l.pool, channel, db.TaskLogEvent{ID: id}); err != nil {
 		if ctx.Err() == nil {
-			fmt.Fprintf(os.Stderr, "failed to notify log: %v\n", err)
+			fmt.Fprintf(os.Stderr, "log notify failed: %s\n", db.HumanError(err))
 		}
 	}
 }

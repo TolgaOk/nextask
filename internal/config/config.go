@@ -44,6 +44,12 @@ type WorkerConfig struct {
 	HeartbeatInterval time.Duration `toml:"heartbeat_interval"`
 }
 
+// RetryConfig holds retry/backoff configuration for DB operations.
+type RetryConfig struct {
+	InitialInterval time.Duration `toml:"initial_interval"`
+	MaxInterval     time.Duration `toml:"max_interval"`
+}
+
 // DefaultHeartbeatInterval is the default heartbeat interval if not configured.
 const DefaultHeartbeatInterval = 1 * time.Minute
 
@@ -52,6 +58,7 @@ type Config struct {
 	DB     DBConfig     `toml:"db"`
 	Source SourceConfig `toml:"source"`
 	Worker WorkerConfig `toml:"worker"`
+	Retry  RetryConfig  `toml:"retry"`
 }
 
 // GlobalPath returns the path to the global config file.
@@ -105,6 +112,12 @@ func applyEnv(cfg *Config) {
 	// Apply defaults
 	if cfg.Worker.HeartbeatInterval == 0 {
 		cfg.Worker.HeartbeatInterval = DefaultHeartbeatInterval
+	}
+	if cfg.Retry.InitialInterval == 0 {
+		cfg.Retry.InitialInterval = 500 * time.Millisecond
+	}
+	if cfg.Retry.MaxInterval == 0 {
+		cfg.Retry.MaxInterval = 30 * time.Second
 	}
 	normalizePaths(cfg)
 }

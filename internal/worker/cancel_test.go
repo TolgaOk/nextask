@@ -37,7 +37,7 @@ func TestWorker_CancelDuringExecution(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create worker: %v", err)
 	}
-	defer w.Close(ctx)
+	defer w.Close()
 
 	// Run worker in goroutine
 	done := make(chan error)
@@ -150,7 +150,7 @@ func TestWorker_CancelAfterComplete(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create worker: %v", err)
 	}
-	defer w.Close(ctx)
+	defer w.Close()
 
 	// Run worker - task will complete quickly
 	w.Run(ctx)
@@ -200,7 +200,7 @@ func TestWorker_ParentContextCancelled(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create worker: %v", err)
 	}
-	defer w.Close(ctx)
+	defer w.Close()
 
 	done := make(chan error)
 	go func() {
@@ -259,7 +259,7 @@ func TestCancel_EndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create worker: %v", err)
 	}
-	defer w.Close(ctx)
+	defer w.Close()
 
 	workerDone := make(chan error)
 	go func() {
@@ -372,7 +372,7 @@ func TestWorker_CancelRaceWithCompletion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create worker: %v", err)
 	}
-	defer w.Close(ctx)
+	defer w.Close()
 
 	// Start worker
 	done := make(chan error)
@@ -429,7 +429,7 @@ func TestWorker_CancelKillsChildProcesses(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create worker: %v", err)
 	}
-	defer w.Close(ctx)
+	defer w.Close()
 
 	done := make(chan error)
 	go func() {
@@ -508,7 +508,7 @@ func TestWorker_CancelFallbackToSIGKILL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create worker: %v", err)
 	}
-	defer w.Close(ctx)
+	defer w.Close()
 
 	done := make(chan error)
 	go func() {
