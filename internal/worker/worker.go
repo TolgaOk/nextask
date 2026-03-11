@@ -9,10 +9,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/TolgaOk/nextask/internal/db"
 	"github.com/cenkalti/backoff/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	gonanoid "github.com/matoous/go-nanoid/v2"
-	"github.com/TolgaOk/nextask/internal/db"
 )
 
 // Worker processes tasks from the queue.

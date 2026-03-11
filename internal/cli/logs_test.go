@@ -72,7 +72,7 @@ func TestLogsAttach_CompletedTask(t *testing.T) {
 	db.InsertLog(ctx, pool, task.ID, "stdout", "test output")
 
 	// Fetch task to check status
-	fetched, err := db.GetTask(ctx, pool, task.ID)
+	fetched, err := db.GetTask(ctx, pool, task.ID, 3*time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}

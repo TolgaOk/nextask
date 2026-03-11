@@ -29,6 +29,8 @@ func statusStyle(status db.TaskStatus) lipgloss.Style {
 		return lipgloss.NewStyle().Foreground(lipgloss.Color("11")).Bold(true)
 	case db.StatusCancelled:
 		return lipgloss.NewStyle().Foreground(lipgloss.Color("243"))
+	case db.StatusStale:
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("208")).Bold(true)
 	default:
 		return lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
 	}
@@ -51,7 +53,7 @@ var showCmd = &cobra.Command{
 		}
 		defer pool.Close()
 
-		task, err := db.GetTask(ctx, pool, args[0])
+		task, err := db.GetTask(ctx, pool, args[0], cfg.Worker.StaleDuration())
 		if err != nil {
 			return err
 		}

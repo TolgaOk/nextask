@@ -42,6 +42,7 @@ type SourceConfig struct {
 type WorkerConfig struct {
 	Workdir           string        `toml:"workdir"`
 	HeartbeatInterval time.Duration `toml:"heartbeat_interval"`
+	StaleThreshold    int           `toml:"stale_threshold"`
 }
 
 // RetryConfig holds retry/backoff configuration for DB operations.
@@ -52,6 +53,14 @@ type RetryConfig struct {
 
 // DefaultHeartbeatInterval is the default heartbeat interval if not configured.
 const DefaultHeartbeatInterval = 1 * time.Minute
+
+// DefaultStaleThreshold is the number of missed heartbeats before a task is marked stale.
+const DefaultStaleThreshold = 3
+
+// StaleDuration returns the duration after which a task is considered stale.
+func (w WorkerConfig) StaleDuration() time.Duration {
+	return w.HeartbeatInterval * time.Duration(w.StaleThreshold)
+}
 
 // Config holds the complete nextask configuration.
 type Config struct {
@@ -112,6 +121,9 @@ func applyEnv(cfg *Config) {
 	// Apply defaults
 	if cfg.Worker.HeartbeatInterval == 0 {
 		cfg.Worker.HeartbeatInterval = DefaultHeartbeatInterval
+	}
+	if cfg.Worker.StaleThreshold == 0 {
+		cfg.Worker.StaleThreshold = DefaultStaleThreshold
 	}
 	if cfg.Retry.InitialInterval == 0 {
 		cfg.Retry.InitialInterval = 500 * time.Millisecond

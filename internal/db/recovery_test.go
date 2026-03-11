@@ -305,7 +305,7 @@ func TestRetry_CompleteTaskAfterPoolRecovery(t *testing.T) {
 	}
 
 	// Verify completion
-	updatedTask, _ := GetTask(ctx, pool, "retry_complete")
+	updatedTask, _ := GetTask(ctx, pool, "retry_complete", 3*time.Minute)
 	if updatedTask.Status != StatusCompleted {
 		t.Errorf("status = %s, want completed", updatedTask.Status)
 	}
@@ -457,7 +457,7 @@ func TestPool_RecoverFromMassTermination(t *testing.T) {
 	}
 
 	// Verify task was created
-	created, _ := GetTask(ctx, pool, "mass_term")
+	created, _ := GetTask(ctx, pool, "mass_term", 3*time.Minute)
 	if created == nil {
 		t.Error("task not found after recovery")
 	}

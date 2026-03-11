@@ -253,7 +253,7 @@ func enqueueFetchLogs(ctx context.Context, pool *pgxpool.Pool, taskID string, la
 }
 
 func enqueueCheckCompletion(ctx context.Context, pool *pgxpool.Pool, taskID string, lastLogID *int) error {
-	task, err := db.GetTask(ctx, pool, taskID)
+	task, err := db.GetTask(ctx, pool, taskID, cfg.Worker.StaleDuration())
 	if err != nil || task == nil {
 		return fmt.Errorf("not done")
 	}
@@ -266,6 +266,10 @@ func enqueueCheckCompletion(ctx context.Context, pool *pgxpool.Pool, taskID stri
 			exitCode = *task.ExitCode
 		}
 		fmt.Printf("\nTask %s (exit %d)\n", task.Status, exitCode)
+		return nil
+	}
+	if task.Status == db.StatusStale {
+		fmt.Printf("\nTask %s (worker heartbeat expired)\n", task.Status)
 		return nil
 	}
 	return fmt.Errorf("not done")

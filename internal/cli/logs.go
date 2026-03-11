@@ -49,7 +49,7 @@ var logsCmd = &cobra.Command{
 		}
 		defer pool.Close()
 
-		task, err := db.GetTask(ctx, pool, args[0])
+		task, err := db.GetTask(ctx, pool, args[0], cfg.Worker.StaleDuration())
 		if err != nil {
 			return err
 		}
@@ -220,7 +220,7 @@ func logsFetchLogs(ctx context.Context, pool *pgxpool.Pool, taskID string, lastL
 }
 
 func logsCheckCompletion(ctx context.Context, pool *pgxpool.Pool, taskID string, lastLogID *int) error {
-	task, err := db.GetTask(ctx, pool, taskID)
+	task, err := db.GetTask(ctx, pool, taskID, cfg.Worker.StaleDuration())
 	if err != nil || task == nil {
 		return fmt.Errorf("not done")
 	}
@@ -233,6 +233,10 @@ func logsCheckCompletion(ctx context.Context, pool *pgxpool.Pool, taskID string,
 			exitCode = *task.ExitCode
 		}
 		fmt.Printf("\nTask %s (exit %d)\n", task.Status, exitCode)
+		return nil
+	}
+	if task.Status == db.StatusStale {
+		fmt.Printf("\nTask %s (worker heartbeat expired)\n", task.Status)
 		return nil
 	}
 	return fmt.Errorf("not done")

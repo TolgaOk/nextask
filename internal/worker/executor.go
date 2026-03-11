@@ -12,8 +12,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/TolgaOk/nextask/internal/db"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // Executor handles task execution including source fetching and command running.

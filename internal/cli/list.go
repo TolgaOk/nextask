@@ -68,11 +68,12 @@ var listCmd = &cobra.Command{
 		}
 
 		filter := db.ListFilter{
-			Statuses: listStatuses,
-			Tags:     parsedTags,
-			Commands: listCommands,
-			Since:    since,
-			Limit:    uint64(listLimit),
+			Statuses:       listStatuses,
+			Tags:           parsedTags,
+			Commands:       listCommands,
+			Since:          since,
+			Limit:          uint64(listLimit),
+			StaleThreshold: cfg.Worker.StaleDuration(),
 		}
 
 		tasks, err := db.ListTasks(ctx, pool, filter)
