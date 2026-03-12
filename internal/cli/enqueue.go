@@ -52,7 +52,7 @@ var enqueueCmd = &cobra.Command{
 
 		// Apply command-specific flag
 		if remote != "" {
-			cfg.Source.Remote = config.ToAbsPath(remote)
+			cfg.Source.Remote = config.NormalizeRemote(remote)
 		}
 
 		command := args[0]
