@@ -31,33 +31,41 @@ func CreateTask(ctx context.Context, pool *pgxpool.Pool, task *Task) error {
 
 // ListFilter specifies criteria for filtering tasks.
 type ListFilter struct {
-	Statuses []string
-	Tags     map[string]string
-	Commands []string
-	Since    time.Time
-	Limit    uint64
+	Statuses       []string
+	Tags           map[string]string
+	Commands       []string
+	Since          time.Time
+	Limit          uint64
+	StaleThreshold time.Duration
 }
 
 // ListTasks retrieves tasks matching the given filter criteria.
 func ListTasks(ctx context.Context, pool *pgxpool.Pool, filter ListFilter) ([]Task, error) {
-	query := psql.Select("id", "command", "status", "tags", "created_at").
-		From("tasks").
-		OrderBy("created_at DESC")
+	staleInterval := fmt.Sprintf("%d seconds", int(filter.StaleThreshold.Seconds()))
+	statusExpr := fmt.Sprintf(
+		"CASE WHEN t.status = 'running' AND w.last_heartbeat < NOW() - '%s'::interval THEN 'stale' ELSE t.status END",
+		staleInterval,
+	)
+
+	query := psql.Select("t.id", "t.command", statusExpr, "t.tags", "t.created_at").
+		From("tasks t").
+		LeftJoin("workers w ON t.worker_id = w.id").
+		OrderBy("t.created_at DESC")
 
 	if len(filter.Statuses) > 0 {
-		query = query.Where(sq.Eq{"status": filter.Statuses})
+		query = query.Where(sq.Eq{statusExpr: filter.Statuses})
 	}
 
 	for k, v := range filter.Tags {
-		query = query.Where("tags @> ?::jsonb", fmt.Sprintf(`{"%s": "%s"}`, k, v))
+		query = query.Where("t.tags @> ?::jsonb", fmt.Sprintf(`{"%s": "%s"}`, k, v))
 	}
 
 	for _, cmd := range filter.Commands {
-		query = query.Where("command ILIKE ?", "%"+cmd+"%")
+		query = query.Where("t.command ILIKE ?", "%"+cmd+"%")
 	}
 
 	if !filter.Since.IsZero() {
-		query = query.Where(sq.GtOrEq{"created_at": filter.Since})
+		query = query.Where(sq.GtOrEq{"t.created_at": filter.Since})
 	}
 
 	if filter.Limit > 0 {
@@ -192,12 +200,14 @@ func GetLogsSince(ctx context.Context, pool *pgxpool.Pool, taskID string, lastLo
 }
 
 // GetTask retrieves a single task by ID.
-func GetTask(ctx context.Context, pool *pgxpool.Pool, taskID string) (*Task, error) {
+// staleThreshold is the duration after which a running task with no worker heartbeat is considered stale.
+func GetTask(ctx context.Context, pool *pgxpool.Pool, taskID string, staleThreshold time.Duration) (*Task, error) {
 	sql, err := migrations.FS.ReadFile("get_task.sql")
 	if err != nil {
 		return nil, fmt.Errorf("failed to read get_task.sql: %w", err)
 	}
-	row := pool.QueryRow(ctx, string(sql), taskID)
+	interval := fmt.Sprintf("%d seconds", int(staleThreshold.Seconds()))
+	row := pool.QueryRow(ctx, string(sql), taskID, interval)
 	return scanTask(row)
 }
 

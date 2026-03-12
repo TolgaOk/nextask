@@ -585,12 +585,12 @@ func TestNotifyNewTask(t *testing.T) {
 	}
 	defer listenConn.Close(ctx)
 
-	if _, err := listenConn.Exec(ctx, "LISTEN new_task"); err != nil {
+	if _, err := listenConn.Exec(ctx, "LISTEN "+ToWorkersChannel); err != nil {
 		t.Fatalf("LISTEN failed: %v", err)
 	}
 
 	// Send NOTIFY
-	if _, err := pool.Exec(ctx, "NOTIFY new_task"); err != nil {
+	if err := Notify(ctx, pool, ToWorkersChannel, WorkerWakeEvent{}); err != nil {
 		t.Fatalf("NOTIFY failed: %v", err)
 	}
 
@@ -603,8 +603,8 @@ func TestNotifyNewTask(t *testing.T) {
 		t.Fatalf("WaitForNotification failed: %v", err)
 	}
 
-	if notification.Channel != "new_task" {
-		t.Errorf("channel = %s, want new_task", notification.Channel)
+	if notification.Channel != ToWorkersChannel {
+		t.Errorf("channel = %s, want %s", notification.Channel, ToWorkersChannel)
 	}
 }
 
@@ -626,11 +626,11 @@ func TestNotifyMultipleListeners(t *testing.T) {
 	}
 	defer conn2.Close(ctx)
 
-	conn1.Exec(ctx, "LISTEN new_task")
-	conn2.Exec(ctx, "LISTEN new_task")
+	conn1.Exec(ctx, "LISTEN "+ToWorkersChannel)
+	conn2.Exec(ctx, "LISTEN "+ToWorkersChannel)
 
 	// Send NOTIFY
-	pool.Exec(ctx, "NOTIFY new_task")
+	Notify(ctx, pool, ToWorkersChannel, WorkerWakeEvent{})
 
 	// Both should receive
 	waitCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
@@ -645,11 +645,11 @@ func TestNotifyMultipleListeners(t *testing.T) {
 	if err2 != nil {
 		t.Errorf("conn2 failed to receive: %v", err2)
 	}
-	if n1 != nil && n1.Channel != "new_task" {
-		t.Errorf("conn1 channel = %s, want new_task", n1.Channel)
+	if n1 != nil && n1.Channel != ToWorkersChannel {
+		t.Errorf("conn1 channel = %s, want %s", n1.Channel, ToWorkersChannel)
 	}
-	if n2 != nil && n2.Channel != "new_task" {
-		t.Errorf("conn2 channel = %s, want new_task", n2.Channel)
+	if n2 != nil && n2.Channel != ToWorkersChannel {
+		t.Errorf("conn2 channel = %s, want %s", n2.Channel, ToWorkersChannel)
 	}
 }
 

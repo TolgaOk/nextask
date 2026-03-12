@@ -24,7 +24,7 @@ func TestWorker_StopWhileIdle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create worker: %v", err)
 	}
-	defer w.Close(ctx)
+	defer w.Close()
 
 	// Run worker in goroutine
 	done := make(chan error)
@@ -107,7 +107,7 @@ func TestWorker_StopDuringTaskExecution(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create worker: %v", err)
 	}
-	defer w.Close(ctx)
+	defer w.Close()
 
 	done := make(chan error)
 	go func() {
@@ -172,7 +172,7 @@ func TestWorker_StopEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create worker: %v", err)
 	}
-	defer w.Close(ctx)
+	defer w.Close()
 
 	done := make(chan error)
 	go func() {

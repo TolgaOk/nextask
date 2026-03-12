@@ -28,7 +28,7 @@ var removeCmd = &cobra.Command{
 		}
 		defer pool.Close()
 
-		task, err := db.GetTask(ctx, pool, taskID)
+		task, err := db.GetTask(ctx, pool, taskID, cfg.Worker.StaleDuration())
 		if err != nil {
 			return err
 		}

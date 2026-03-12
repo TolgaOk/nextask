@@ -8,8 +8,8 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	gonanoid "github.com/matoous/go-nanoid/v2"
 	"github.com/spf13/cobra"
@@ -127,7 +127,7 @@ var enqueueCmd = &cobra.Command{
 			return enqueueAndAttach(ctx, pool, id)
 		}
 
-		if _, err := pool.Exec(ctx, "NOTIFY new_task"); err != nil {
+		if err := db.Notify(ctx, pool, db.ToWorkersChannel, db.WorkerWakeEvent{}); err != nil {
 			fmt.Fprintf(os.Stderr, "warning: notify failed: %v\n", err)
 		}
 
@@ -145,20 +145,17 @@ func init() {
 }
 
 func enqueueAndAttach(ctx context.Context, pool *pgxpool.Pool, taskID string) error {
-	conn, err := pgx.Connect(ctx, cfg.DB.URL)
-	if err != nil {
-		return err
-	}
-	defer conn.Close(context.Background())
-
-	// LISTEN before notifying new_task to not miss events
+	// Create listener with auto-reconnect before notifying workers
 	fromChannel := db.FromTaskChannel(taskID)
-	if _, err := conn.Exec(ctx, "LISTEN "+fromChannel); err != nil {
-		return err
+	backoff := db.NewBackOff(cfg.Retry.InitialInterval, cfg.Retry.MaxInterval)
+	listener, err := db.Listen(ctx, cfg.DB.URL, backoff, fromChannel)
+	if err != nil {
+		return fmt.Errorf("listen failed: %w", err)
 	}
+	defer listener.Close(context.Background())
 
 	// Notify workers
-	if _, err := pool.Exec(ctx, "NOTIFY new_task"); err != nil {
+	if err := db.Notify(ctx, pool, db.ToWorkersChannel, db.WorkerWakeEvent{}); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: notify failed: %v\n", err)
 	}
 
@@ -199,52 +196,83 @@ func enqueueAndAttach(ctx context.Context, pool *pgxpool.Pool, taskID string) er
 		}
 	}()
 
+	// Poll ticker for status check (handles missed events during reconnect)
+	pollTicker := time.NewTicker(5 * time.Second)
+	defer pollTicker.Stop()
+
 	var lastLogID int
 	for {
-		notif, err := conn.WaitForNotification(cancelCtx)
-		if err != nil {
-			if cancelCtx.Err() != nil {
+		select {
+		case notif, ok := <-listener.C:
+			if !ok {
+				// Listener closed - check final status
+				return enqueueCheckCompletion(ctx, pool, taskID, &lastLogID)
+			}
+
+			eventType, data, err := db.ParseEvent(notif.Payload)
+			if err != nil {
+				continue
+			}
+
+			switch eventType {
+			case db.EventTypeLog:
+				enqueueFetchLogs(ctx, pool, taskID, &lastLogID)
+
+			case db.EventTypeStatus:
+				var status db.TaskStatusEvent
+				if err := json.Unmarshal(data, &status); err != nil {
+					continue
+				}
+				enqueueFetchLogs(ctx, pool, taskID, &lastLogID)
+				fmt.Printf("\nTask %s (exit %d)\n", status.Status, status.ExitCode)
 				return nil
 			}
-			return err
-		}
 
-		eventType, data, err := db.ParseEvent(notif.Payload)
-		if err != nil {
-			return fmt.Errorf("failed to parse event: %w", err)
-		}
-
-		switch eventType {
-		case db.EventTypeLog:
-			var logEvent db.TaskLogEvent
-			if err := json.Unmarshal(data, &logEvent); err != nil {
-				return fmt.Errorf("failed to parse log event: %w", err)
-			}
-			logs, err := db.GetLogsSince(ctx, pool, taskID, lastLogID)
-			if err != nil {
-				return fmt.Errorf("failed to fetch logs: %w", err)
-			}
-			for _, log := range logs {
-				printLogLine(log)
-				if log.ID > lastLogID {
-					lastLogID = log.ID
-				}
+		case <-pollTicker.C:
+			if err := enqueueCheckCompletion(ctx, pool, taskID, &lastLogID); err == nil {
+				return nil
 			}
 
-		case db.EventTypeStatus:
-			var status db.TaskStatusEvent
-			if err := json.Unmarshal(data, &status); err != nil {
-				return fmt.Errorf("failed to parse status event: %w", err)
-			}
-			// Fetch any remaining logs
-			logs, _ := db.GetLogsSince(ctx, pool, taskID, lastLogID)
-			for _, log := range logs {
-				printLogLine(log)
-			}
-			fmt.Printf("\nTask %s (exit %d)\n", status.Status, status.ExitCode)
+		case <-cancelCtx.Done():
 			return nil
 		}
 	}
+}
+
+func enqueueFetchLogs(ctx context.Context, pool *pgxpool.Pool, taskID string, lastLogID *int) {
+	logs, err := db.GetLogsSince(ctx, pool, taskID, *lastLogID)
+	if err != nil {
+		return
+	}
+	for _, log := range logs {
+		printLogLine(log)
+		if log.ID > *lastLogID {
+			*lastLogID = log.ID
+		}
+	}
+}
+
+func enqueueCheckCompletion(ctx context.Context, pool *pgxpool.Pool, taskID string, lastLogID *int) error {
+	task, err := db.GetTask(ctx, pool, taskID, cfg.Worker.StaleDuration())
+	if err != nil || task == nil {
+		return fmt.Errorf("not done")
+	}
+
+	enqueueFetchLogs(ctx, pool, taskID, lastLogID)
+
+	if task.Status == db.StatusCompleted || task.Status == db.StatusFailed || task.Status == db.StatusCancelled {
+		exitCode := 0
+		if task.ExitCode != nil {
+			exitCode = *task.ExitCode
+		}
+		fmt.Printf("\nTask %s (exit %d)\n", task.Status, exitCode)
+		return nil
+	}
+	if task.Status == db.StatusStale {
+		fmt.Printf("\nTask %s (worker heartbeat expired)\n", task.Status)
+		return nil
+	}
+	return fmt.Errorf("not done")
 }
 
 func printLogLine(log db.TaskLog) {

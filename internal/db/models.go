@@ -15,6 +15,7 @@ const (
 	StatusCompleted TaskStatus = "completed"
 	StatusFailed    TaskStatus = "failed"
 	StatusCancelled TaskStatus = "cancelled"
+	StatusStale     TaskStatus = "stale"
 )
 
 // WorkerInfo contains metadata about the worker processing a task.
