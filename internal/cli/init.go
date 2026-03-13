@@ -3,15 +3,10 @@ package cli
 import (
 	"context"
 	"fmt"
-	"os"
-	"path/filepath"
 
 	"github.com/TolgaOk/nextask/internal/db"
-	"github.com/go-git/go-git/v5"
 	"github.com/spf13/cobra"
 )
-
-var sourcePath string
 
 var initCmd = &cobra.Command{
 	Use:   "init",
@@ -43,45 +38,7 @@ var initDBCmd = &cobra.Command{
 	},
 }
 
-var initSourceCmd = &cobra.Command{
-	Use:   "source",
-	Short: "Create a local bare git remote for source snapshots",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		path := sourcePath
-		if path == "" {
-			home, err := os.UserHomeDir()
-			if err != nil {
-				return fmt.Errorf("failed to get home directory: %w", err)
-			}
-			path = filepath.Join(home, ".nextask", "source.git")
-		}
-
-		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
-			return withHints(fmt.Errorf("failed to create directory: %w", err),
-				"Check path is writable: "+codeStyle.Render(filepath.Dir(path)),
-			)
-		}
-
-		if _, err := os.Stat(path); err == nil {
-			return errWithHints(fmt.Sprintf("remote already exists: %s", path),
-				"Remove it first or use a different path",
-			)
-		}
-
-		_, err := git.PlainInit(path, true)
-		if err != nil {
-			return fmt.Errorf("failed to initialize remote: %w", err)
-		}
-
-		fmt.Printf("Source remote initialized: %s\n", path)
-		return nil
-	},
-}
-
 func init() {
-	initSourceCmd.Flags().StringVar(&sourcePath, "path", "", "Path for bare remote (default: ~/.nextask/source.git)")
-
 	initCmd.AddCommand(initDBCmd)
-	initCmd.AddCommand(initSourceCmd)
 	RootCmd.AddCommand(initCmd)
 }

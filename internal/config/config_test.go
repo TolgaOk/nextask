@@ -183,6 +183,158 @@ func TestToAbsPath(t *testing.T) {
 	}
 }
 
+func TestDecodeIfExists_TracksLoadedFiles(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+
+	if err := os.WriteFile(path, []byte(`[db]
+url = "postgres://test@localhost/db"
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := &Config{}
+	if err := decodeIfExists(path, cfg); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(cfg.LoadedFiles) != 1 || cfg.LoadedFiles[0] != path {
+		t.Errorf("expected LoadedFiles = [%q], got %v", path, cfg.LoadedFiles)
+	}
+}
+
+func TestDecodeIfExists_SkipsMissing(t *testing.T) {
+	cfg := &Config{}
+	if err := decodeIfExists("/nonexistent/file.toml", cfg); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(cfg.LoadedFiles) != 0 {
+		t.Errorf("expected no LoadedFiles, got %v", cfg.LoadedFiles)
+	}
+}
+
+func TestLocalOverridesGlobal(t *testing.T) {
+	dir := t.TempDir()
+
+	globalPath := filepath.Join(dir, "global.toml")
+	globalContent := `
+[db]
+url = "postgres://global@localhost/globaldb"
+
+[source]
+remote = "/global/remote.git"
+
+[worker]
+workdir = "/global/workdir"
+`
+	if err := os.WriteFile(globalPath, []byte(globalContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	localPath := filepath.Join(dir, ".nextask.toml")
+	localContent := `
+[db]
+url = "postgres://local@localhost/localdb"
+`
+	if err := os.WriteFile(localPath, []byte(localContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Simulate layered loading: global then local
+	cfg := &Config{}
+	if err := decodeIfExists(globalPath, cfg); err != nil {
+		t.Fatal(err)
+	}
+	if err := decodeIfExists(localPath, cfg); err != nil {
+		t.Fatal(err)
+	}
+	applyEnv(cfg)
+
+	// Local overrides db.url
+	if cfg.DB.URL != "postgres://local@localhost/localdb" {
+		t.Errorf("expected local DB.URL, got %q", cfg.DB.URL)
+	}
+	// Global values preserved where local doesn't override
+	if cfg.Source.Remote != "/global/remote.git" {
+		t.Errorf("expected global Source.Remote, got %q", cfg.Source.Remote)
+	}
+	if cfg.Worker.Workdir != "/global/workdir" {
+		t.Errorf("expected global Worker.Workdir, got %q", cfg.Worker.Workdir)
+	}
+	// Both files tracked
+	if len(cfg.LoadedFiles) != 2 {
+		t.Errorf("expected 2 LoadedFiles, got %d", len(cfg.LoadedFiles))
+	}
+}
+
+func TestLocalOnly_NoGlobal(t *testing.T) {
+	dir := t.TempDir()
+
+	localPath := filepath.Join(dir, ".nextask.toml")
+	localContent := `
+[db]
+url = "postgres://local@localhost/localdb"
+`
+	if err := os.WriteFile(localPath, []byte(localContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := &Config{}
+	// Global doesn't exist — no error
+	if err := decodeIfExists(filepath.Join(dir, "global.toml"), cfg); err != nil {
+		t.Fatal(err)
+	}
+	if err := decodeIfExists(localPath, cfg); err != nil {
+		t.Fatal(err)
+	}
+	applyEnv(cfg)
+
+	if cfg.DB.URL != "postgres://local@localhost/localdb" {
+		t.Errorf("expected local DB.URL, got %q", cfg.DB.URL)
+	}
+	if len(cfg.LoadedFiles) != 1 {
+		t.Errorf("expected 1 LoadedFile, got %d", len(cfg.LoadedFiles))
+	}
+}
+
+func TestEnvOverridesLocal(t *testing.T) {
+	dir := t.TempDir()
+
+	localPath := filepath.Join(dir, ".nextask.toml")
+	if err := os.WriteFile(localPath, []byte(`
+[db]
+url = "postgres://local@localhost/localdb"
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("NEXTASK_DB_URL", "postgres://env@localhost/envdb")
+
+	cfg := &Config{}
+	if err := decodeIfExists(localPath, cfg); err != nil {
+		t.Fatal(err)
+	}
+	applyEnv(cfg)
+
+	if cfg.DB.URL != "postgres://env@localhost/envdb" {
+		t.Errorf("expected env DB.URL, got %q", cfg.DB.URL)
+	}
+}
+
+func TestInvalidLocalTOML(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".nextask.toml")
+
+	if err := os.WriteFile(path, []byte(`invalid [[[`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := &Config{}
+	err := decodeIfExists(path, cfg)
+	if err == nil {
+		t.Fatal("expected error for invalid TOML")
+	}
+}
+
 func TestLoadFrom_TildeExpansion(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.toml")
