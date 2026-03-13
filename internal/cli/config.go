@@ -17,30 +17,38 @@ var configCmd = &cobra.Command{
 	Use:   "config",
 	Short: "Show configuration",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		path, err := config.GlobalPath()
+		globalPath, err := config.GlobalPath()
 		if err != nil {
 			return err
 		}
+		localPath := config.LocalPath()
 
-		fmt.Printf("%s %s\n", hintStyle.Render("Config file:"), codeStyle.Render(path))
-
-		file, err := os.Open(path)
-		if os.IsNotExist(err) {
-			fmt.Println(hintStyle.Render("(file not found)"))
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-		defer file.Close()
-
+		printConfigFile("Global config:", globalPath)
 		fmt.Println()
-		scanner := bufio.NewScanner(file)
-		for scanner.Scan() {
-			fmt.Println(formatTOMLLine(scanner.Text()))
-		}
-		return scanner.Err()
+		printConfigFile("Local config:", localPath)
+		return nil
 	},
+}
+
+func printConfigFile(label, path string) {
+	fmt.Printf("%s %s\n", hintStyle.Render(label), codeStyle.Render(path))
+
+	file, err := os.Open(path)
+	if os.IsNotExist(err) {
+		fmt.Println(hintStyle.Render("  (file not found)"))
+		return
+	}
+	if err != nil {
+		fmt.Printf("  %s\n", errStyle.Render(err.Error()))
+		return
+	}
+	defer file.Close()
+
+	fmt.Println()
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		fmt.Println(formatTOMLLine(scanner.Text()))
+	}
 }
 
 func formatTOMLLine(line string) string {

@@ -46,7 +46,7 @@ func errDBRequired() error {
 	return errWithHints("database URL is required",
 		"Provide "+codeStyle.Render("--db-url \"postgres://user@localhost:5432/dbname\""),
 		"Or set "+codeStyle.Render("NEXTASK_DB_URL")+" environment variable",
-		"Or set "+codeStyle.Render("db.url")+" in config file",
+		"Or set "+codeStyle.Render("db.url")+" in "+codeStyle.Render(".nextask.toml")+" (project) or global config",
 	)
 }
 
@@ -70,12 +70,10 @@ a remote git server, preserving the exact source code for execution by available
 		var err error
 		cfg, err = config.Load()
 		if err != nil {
-			path, _ := config.GlobalPath()
 			return withHints(err,
-				"Check TOML syntax in "+codeStyle.Render(path),
-				"Example format:",
-				"  [db]",
-				"  url = \"postgres://user@localhost/dbname\"",
+				"Check TOML syntax in your config files",
+				"Global: "+codeStyle.Render("~/.config/nextask/global.toml"),
+				"Local:  "+codeStyle.Render(".nextask.toml"),
 			)
 		}
 		// Apply persistent flag

@@ -52,7 +52,7 @@ var enqueueCmd = &cobra.Command{
 
 		// Apply command-specific flag
 		if remote != "" {
-			cfg.Source.Remote = config.ToAbsPath(remote)
+			cfg.Source.Remote = config.NormalizeRemote(remote)
 		}
 
 		command := args[0]
@@ -103,9 +103,15 @@ var enqueueCmd = &cobra.Command{
 				)
 			}
 
+			// Resolve remote name (e.g. "origin") to URL for storage
+			resolvedRemote, err := source.ResolveRemote(".", cfg.Source.Remote)
+			if err != nil {
+				resolvedRemote = cfg.Source.Remote
+			}
+
 			task.SourceType = "git"
 			task.SourceConfig, _ = json.Marshal(worker.GitSourceConfig{
-				Remote: cfg.Source.Remote,
+				Remote: resolvedRemote,
 				Ref:    result.Ref,
 				Commit: result.Commit,
 			})

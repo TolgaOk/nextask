@@ -1,6 +1,10 @@
 // Package config handles configuration loading from files and environment variables.
 //
-// Configuration is loaded from ~/.config/nextask/global.toml with the following format:
+// Configuration is loaded with the following precedence (highest wins):
+//
+//	CLI flags > env vars > .nextask.toml (project-local) > ~/.config/nextask/global.toml > defaults
+//
+// Config file format (same for both global and local):
 //
 //	[db]
 //	url = "postgres://user@localhost:5432/nextask"
@@ -11,7 +15,7 @@
 //	[worker]
 //	workdir = "/tmp/nextask"
 //
-// Environment variables override config file values:
+// Environment variables:
 //   - NEXTASK_DB_URL
 //   - NEXTASK_SOURCE_REMOTE
 //   - NEXTASK_WORKER_WORKDIR
@@ -68,7 +72,13 @@ type Config struct {
 	Source SourceConfig `toml:"source"`
 	Worker WorkerConfig `toml:"worker"`
 	Retry  RetryConfig  `toml:"retry"`
+
+	// LoadedFiles tracks which config files were loaded (not serialized to TOML).
+	LoadedFiles []string `toml:"-"`
 }
+
+// LocalFileName is the name of the per-project config file.
+const LocalFileName = ".nextask.toml"
 
 // GlobalPath returns the path to the global config file.
 func GlobalPath() (string, error) {
@@ -79,14 +89,33 @@ func GlobalPath() (string, error) {
 	return filepath.Join(home, ".config", "nextask", "global.toml"), nil
 }
 
-// Load reads configuration from the global config file and applies env var overrides.
-// Returns an empty Config if the file doesn't exist.
+// LocalPath returns the path to the per-project config file in the current directory.
+func LocalPath() string {
+	return LocalFileName
+}
+
+// Load reads configuration from the global and local config files, then applies
+// env var overrides. Local config values override global values.
+// Returns an empty Config if neither file exists.
 func Load() (*Config, error) {
-	path, err := GlobalPath()
-	if err != nil {
-		return &Config{}, nil
+	cfg := &Config{}
+
+	// Layer 1: global config
+	globalPath, err := GlobalPath()
+	if err == nil {
+		if err := decodeIfExists(globalPath, cfg); err != nil {
+			return nil, err
+		}
 	}
-	return LoadFrom(path)
+
+	// Layer 2: local config (overrides global)
+	if err := decodeIfExists(LocalPath(), cfg); err != nil {
+		return nil, err
+	}
+
+	// Layer 3: env vars (override both)
+	applyEnv(cfg)
+	return cfg, nil
 }
 
 // LoadFrom reads configuration from a specific file path and applies env var overrides.
@@ -94,17 +123,25 @@ func Load() (*Config, error) {
 func LoadFrom(path string) (*Config, error) {
 	cfg := &Config{}
 
-	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
-		applyEnv(cfg)
-		return cfg, nil
-	}
-
-	if _, err := toml.DecodeFile(path, cfg); err != nil {
-		return nil, fmt.Errorf("%s: %w", path, err)
+	if err := decodeIfExists(path, cfg); err != nil {
+		return nil, err
 	}
 
 	applyEnv(cfg)
 	return cfg, nil
+}
+
+// decodeIfExists decodes a TOML file into cfg if the file exists.
+// It appends to cfg.LoadedFiles on success.
+func decodeIfExists(path string, cfg *Config) error {
+	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if _, err := toml.DecodeFile(path, cfg); err != nil {
+		return fmt.Errorf("%s: %w", path, err)
+	}
+	cfg.LoadedFiles = append(cfg.LoadedFiles, path)
+	return nil
 }
 
 // applyEnv overrides config values with environment variables if set.
@@ -135,8 +172,40 @@ func applyEnv(cfg *Config) {
 }
 
 func normalizePaths(cfg *Config) {
-	cfg.Source.Remote = ToAbsPath(cfg.Source.Remote)
+	cfg.Source.Remote = NormalizeRemote(cfg.Source.Remote)
 	cfg.Worker.Workdir = ToAbsPath(cfg.Worker.Workdir)
+}
+
+// isGitURL returns true if s looks like a git remote URL (SSH or protocol://).
+func isGitURL(s string) bool {
+	// HTTPS, git://, ssh:// protocols
+	if strings.Contains(s, "://") {
+		return true
+	}
+	// SCP-like SSH syntax: user@host:path
+	atIdx := strings.IndexByte(s, '@')
+	colonIdx := strings.IndexByte(s, ':')
+	if atIdx >= 0 && colonIdx > atIdx {
+		return true
+	}
+	return false
+}
+
+// NormalizeRemote normalizes a git remote value.
+// Local paths (starting with / ~ . or ..) get expanded; URLs and remote names pass through.
+func NormalizeRemote(remote string) string {
+	if remote == "" {
+		return remote
+	}
+	if isGitURL(remote) {
+		return remote
+	}
+	// Only normalize values that look like filesystem paths
+	if remote[0] == '/' || remote[0] == '~' || remote[0] == '.' {
+		return ToAbsPath(remote)
+	}
+	// Bare name like "origin" — pass through for git to resolve
+	return remote
 }
 
 // ToAbsPath expands ~ and converts to absolute path.

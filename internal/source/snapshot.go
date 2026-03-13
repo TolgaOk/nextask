@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	"github.com/go-git/go-git/v5"
-	"github.com/go-git/go-git/v5/plumbing"
 )
 
 // SnapshotResult contains the commit hash and ref of a created snapshot.
@@ -133,15 +132,28 @@ func createSnapshotCommit(repoPath, taskID string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
+// ResolveRemote resolves a git remote name (e.g. "origin") to its URL.
+// If the value is already a URL or path, it is returned unchanged.
+func ResolveRemote(repoPath, remote string) (string, error) {
+	cmd := exec.Command("git", "remote", "get-url", remote)
+	cmd.Dir = repoPath
+	out, err := cmd.Output()
+	if err != nil {
+		// Not a remote name — already a URL or path
+		return remote, nil
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
 // PushSnapshot pushes a snapshot commit to a remote repository.
 func PushSnapshot(repoPath, remoteName string, result *SnapshotResult) error {
 	refSpec := result.Commit + ":" + result.Ref
 
 	cmd := exec.Command("git", "push", remoteName, refSpec)
 	cmd.Dir = repoPath
-	if err := cmd.Run(); err != nil {
+	if _, err := cmd.Output(); err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
-			return fmt.Errorf("git push: %s", string(exitErr.Stderr))
+			return fmt.Errorf("git push: %s", strings.TrimSpace(string(exitErr.Stderr)))
 		}
 		return fmt.Errorf("failed to push: %w", err)
 	}
@@ -149,14 +161,14 @@ func PushSnapshot(repoPath, remoteName string, result *SnapshotResult) error {
 	return nil
 }
 
-// DeleteSnapshot removes a snapshot ref from a bare repository.
+// DeleteSnapshot removes a snapshot ref from a git remote.
 func DeleteSnapshot(remote, ref string) error {
-	repo, err := git.PlainOpen(remote)
+	cmd := exec.Command("git", "push", remote, "--delete", ref)
+	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("failed to open repository: %w", err)
+		return fmt.Errorf("git push --delete: %s", strings.TrimSpace(string(out)))
 	}
-
-	return repo.Storer.RemoveReference(plumbing.ReferenceName(ref))
+	return nil
 }
 
 // FetchSnapshot clones a repository and checks out a specific snapshot ref.
