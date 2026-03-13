@@ -1,47 +1,87 @@
 # nextask
 
-Distributed task queue providing full reproducibility with non-intrusive source snapshotting.
+[![Go 1.25](https://img.shields.io/badge/go-1.25-00ADD8?logo=go&logoColor=white)](https://go.dev) [![v0.1.0](https://img.shields.io/badge/v0.1.0-green)](https://github.com/TolgaOk/nextask) [![macOS | Linux](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-lightgrey)](https://github.com/TolgaOk/nextask)
 
-Tasks are stored and managed in *PostgreSQL* with full stdout/stderr capture from _workers_. During `enqueue`, *nextask* can snapshot the working repository—including unstaged changes—to a remote git server, preserving the exact source code for execution by available _workers_.
+Distributed task queue with source snapshotting for full reproducibility.
 
-## Installation
+## Install
 
-```bash
+```sh
+curl -fsSL https://raw.githubusercontent.com/TolgaOk/nextask/main/scripts/install.sh | bash
+```
+
+Or with Go:
+
+```sh
 go install github.com/TolgaOk/nextask/cmd/nextask@latest
 ```
 
-Or build from source:
+## Usage
 
-```bash
-git clone https://github.com/TolgaOk/nextask
-cd nextask
-go build -o nextask ./cmd/nextask
+```sh
+nextask init db                                                    # setup database tables
+
+nextask enqueue "python train.py --lr 0.001" --snapshot            # enqueue with source snapshot
+nextask enqueue "bash run.sh" --tag gpu=a100,sweep=exp3            # enqueue with tags
+nextask enqueue "python eval.py" --snapshot --attach               # enqueue and watch live output
+
+nextask worker                                                     # start picking up tasks
+nextask worker --filter gpu=a100 --daemon                          # background worker with tag filter
+nextask worker --once --timeout 2h                                 # single task, max 2 hours
+
+nextask list --status running --tag sweep=exp3                     # filter tasks
+nextask log <id> --attach                                          # stream live output
+nextask log <id> --tail 50                                         # last 50 lines
+nextask show <id>                                                  # task details
+nextask cancel <id>                                                # cancel pending or running
 ```
 
-## Quick Start
+## How it works
 
-```bash
-# Initialize database
-$ nextask init db
+Simplified architecture:
 
-# Initialize source repository for snapshots (default: `~/.nextask/source.git`)
-$ nextask init source
-
-# Enqueue a task with source snapshot (optional)
-$ nextask enqueue "python train.py" --snapshot
-
-# Start a worker (potentially in a remote machine)
-$ nextask worker
-
-# View task logs
-$ nextask log <task-id> [--stream stdout|stderr|nextask] [--head N] [--tail N]
-
-# List tasks
-$ nextask list
-
-# Remove a task (including logs and snapshot)
-$ nextask remove <task-id>
+```
+ ┌──────────────┐    logs     ┌────────────┐    logs     ┌──────────────┐
+ │              │◀────────────│ PostgreSQL │◀────────────│    worker    │
+ │    nextask   │             │   queue    │             │   (remote)   │
+ │      CLI     │   enqueue   │            │   claim     │              │
+ │              │──────────┬─▶│  ○ tasks   │──┬─────────▶│   execute    │
+ └──────────────┘          │  │  ○ logs    │  │          └──────────────┘
+                           │  │  ○ workers │  │
+                           │  └────────────┘  │
+                --snapshot │                  │ clone
+                           │  ┌────────────┐  │
+                           └─▶│ git remote │──┘
+                              └────────────┘
 ```
 
-See `doc/CLI.md` for further details.
+> **Snapshots** capture the full working tree, including uncommitted changes, and push to configured remote, without modifying the local repository. Workers then clone from the remote, so the exact source is preserved and reproducible.
 
+> **Workers** claim tasks from the queue via atomic operations if they match the filters. Workers implement a heartbeat system to detect stale workers.
+
+>**Outputs** (logs) are written per-line to PostgreSQL with stream separation (stdout/stderr).
+
+## Configuration
+
+
+Config files:
+
+```
+~/.config/nextask/global.toml            # global defaults
+.nextask.toml                            # per-project (higher priority)
+```
+
+
+```toml
+[db]
+url = "postgres://user@localhost:5432/nextask"   # or NEXTASK_DB_URL
+
+[source]
+remote = "~/.nextask/source.git"                 # or NEXTASK_SOURCE_REMOTE
+                                                 # supports: local path, git URL, remote name
+
+[worker]
+workdir = "/tmp/nextask"                         # or NEXTASK_WORKER_WORKDIR
+heartbeat_interval = "1m"                        # how often workers ping
+stale_threshold = 3                              # missed heartbeats before stale
+```
