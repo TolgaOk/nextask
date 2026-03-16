@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/go-git/go-git/v5"
@@ -25,7 +26,13 @@ func CreateSnapshot(repoPath, taskID string) (*SnapshotResult, error) {
 		return nil, fmt.Errorf("not a git repository: %w", err)
 	}
 
-	ref := "refs/nextask/" + taskID
+	toplevel, err := exec.Command("git", "-C", repoPath, "rev-parse", "--show-toplevel").Output()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get repo root: %w", err)
+	}
+	project := filepath.Base(strings.TrimSpace(string(toplevel)))
+
+	ref := "refs/heads/" + project + "/" + taskID
 
 	wt, err := repo.Worktree()
 	if err != nil {
