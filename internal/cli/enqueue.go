@@ -231,6 +231,9 @@ func enqueueAndAttach(ctx context.Context, pool *pgxpool.Pool, taskID string) er
 				}
 				enqueueFetchLogs(ctx, pool, taskID, &lastLogID)
 				fmt.Printf("\nTask %s (exit %d)\n", status.Status, status.ExitCode)
+				if status.ExitCode != 0 {
+					return &exitCodeError{code: status.ExitCode}
+				}
 				return nil
 			}
 
@@ -272,11 +275,14 @@ func enqueueCheckCompletion(ctx context.Context, pool *pgxpool.Pool, taskID stri
 			exitCode = *task.ExitCode
 		}
 		fmt.Printf("\nTask %s (exit %d)\n", task.Status, exitCode)
+		if exitCode != 0 {
+			return &exitCodeError{code: exitCode}
+		}
 		return nil
 	}
 	if task.Status == db.StatusStale {
 		fmt.Printf("\nTask %s (worker heartbeat expired)\n", task.Status)
-		return nil
+		return &exitCodeError{code: 1}
 	}
 	return fmt.Errorf("not done")
 }

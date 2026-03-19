@@ -21,6 +21,14 @@ var (
 	codeStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("12"))
 )
 
+type exitCodeError struct {
+	code int
+}
+
+func (e *exitCodeError) Error() string {
+	return fmt.Sprintf("exit code %d", e.code)
+}
+
 type hintedError struct {
 	err   error
 	hints []string
@@ -82,6 +90,10 @@ var RootCmd = &cobra.Command{
 // Execute runs the root command.
 func Execute() {
 	if err := RootCmd.Execute(); err != nil {
+		var ec *exitCodeError
+		if errors.As(err, &ec) {
+			os.Exit(ec.code)
+		}
 		printError(err)
 		os.Exit(1)
 	}
