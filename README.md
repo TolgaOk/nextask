@@ -2,7 +2,7 @@
 
 [![Go 1.25](https://img.shields.io/badge/go-1.25-00ADD8?logo=go&logoColor=white)](https://go.dev) [![v0.1.0](https://img.shields.io/badge/v0.1.0-green)](https://github.com/TolgaOk/nextask) [![macOS | Linux](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-lightgrey)](https://github.com/TolgaOk/nextask)
 
-Distributed task queue with source snapshotting for full reproducibility.
+Manage your runs from one place. `nextask` is a distributed task queue with CLI control, live log streaming, and git-based source snapshotting.
 
 ## Install
 
@@ -18,34 +18,47 @@ go install github.com/TolgaOk/nextask/cmd/nextask@latest
 
 ## Usage
 
+Enqueue tasks, start workers to pick them up, monitor output.
+
 ```sh
-nextask init db                                                    # setup database tables
+# Enqueue
+nextask enqueue "echo hello"                            # add task to queue
+nextask enqueue "python train.py" --snapshot --attach   # snapshot + watch live
 
-nextask enqueue "python train.py --lr 0.001" --snapshot            # enqueue with source snapshot
-nextask enqueue "bash run.sh" --tag gpu=a100,sweep=exp3            # enqueue with tags
-nextask enqueue "python eval.py" --snapshot --attach               # enqueue and watch live output
+# Workers
+nextask worker                                          # start picking up tasks
+nextask worker --filter gpu=a100                        # only matching tasks
 
-nextask worker                                                     # start picking up tasks
-nextask worker --filter gpu=a100 --daemon                          # background worker with tag filter
-nextask worker --once --timeout 2h                                 # single task, max 2 hours
+# Monitor
+nextask list --status running --tag sweep=exp3          # filter tasks
+nextask log <id> --attach                               # stream live output
+nextask show <id>                                       # task details
+nextask cancel <id>                                     # cancel task
 
-nextask list --status running --tag sweep=exp3                     # filter tasks
-nextask log <id> --attach                                          # stream live output
-nextask log <id> --tail 50                                         # last 50 lines
-nextask show <id>                                                  # task details
-nextask cancel <id>                                                # cancel pending or running
+# Setup
+nextask init db                                         # create tables
 ```
+
+Workers can also run inside containers. Use tags to route tasks to the right image:
+
+```sh
+docker run ml-stack nextask worker --filter image=ml-stack
+```
+
+See `nextask <command> --help` for all options and `nextask --help` for all commands.
 
 ## How it works
 
 Simplified architecture:
 
 ```
- ┌──────────────┐    logs     ┌────────────┐    logs     ┌──────────────┐
- │              │◀────────────│ PostgreSQL │◀────────────│    worker    │
- │    nextask   │             │   queue    │             │   (remote)   │
- │      CLI     │   enqueue   │            │   claim     │              │
- │              │──────────┬─▶│  ○ tasks   │──┬─────────▶│   execute    │
+                                                           ┌──────────────┐
+  ┌──────────────┐                                        ┌──────────────┐│
+ ┌──────────────┐│   logs     ┌────────────┐    logs     ┌──────────────┐││
+ │              ││◀───────────│ PostgreSQL │◀────────────│    worker    │││
+ │    nextask   ││            │   queue    │             │   (remote)   │││
+ │      CLI     ││  enqueue   │            │   claim     │              ││┘
+ │              │┘─────────┬─▶│  ○ tasks   │──┬─────────▶│   execute    │┘
  └──────────────┘          │  │  ○ logs    │  │          └──────────────┘
                            │  │  ○ workers │  │
                            │  └────────────┘  │
@@ -55,14 +68,13 @@ Simplified architecture:
                               └────────────┘
 ```
 
-> **Snapshots** capture the full working tree, including uncommitted changes, and push to configured remote, without modifying the local repository. Workers then clone from the remote, so the exact source is preserved and reproducible.
+>**Workers** claim tasks atomically. Heartbeats detect stale workers. Task statuses: `pending` → `running` → `completed` | `failed` | `cancelled` | `stale`.
 
-> **Workers** claim tasks from the queue via atomic operations if they match the filters. Workers implement a heartbeat system to detect stale workers.
+>**Logs** are captured per-line with stdout/stderr separation.
 
->**Outputs** (logs) are written per-line to PostgreSQL with stream separation (stdout/stderr).
+>**Snapshots** capture the full working tree, including uncommitted changes, and push to a configured git remote **without modifying your local repo**.
 
 ## Configuration
-
 
 Config files:
 
@@ -71,14 +83,16 @@ Config files:
 .nextask.toml                            # per-project (higher priority)
 ```
 
+Example config file.
 
 ```toml
 [db]
 url = "postgres://user@localhost:5432/nextask"   # or NEXTASK_DB_URL
 
 [source]
-remote = "~/.nextask/source.git"                 # or NEXTASK_SOURCE_REMOTE
-                                                 # supports: local path, git URL, remote name
+remote = "~/.nextask/source.git"                                 # bare repo
+# remote = "http://user>:<token>@gitea:3000/user/snapshots.git"  # gitea / github
+# remote = "git://192.168.1.10/snapshots.git"                    # git daemon
 
 [worker]
 workdir = "/tmp/nextask"                         # or NEXTASK_WORKER_WORKDIR
