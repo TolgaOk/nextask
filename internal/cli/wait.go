@@ -182,7 +182,7 @@ func parseCompletionNotify(channel, payload string) (taskID string, exitCode int
 		return "", 0, false
 	}
 	taskID = strings.TrimPrefix(channel, "from_task_")
-	fmt.Printf("task %s %s (exit %d)\n", taskID, status.Status, status.ExitCode)
+	fmt.Fprintf(os.Stderr, "task %s %s (exit %d)\n", taskID, status.Status, status.ExitCode)
 	return taskID, status.ExitCode, true
 }
 
@@ -232,10 +232,10 @@ func taskExitCode(task *db.Task) int {
 
 func printWaitLine(id string, status db.TaskStatus, exitCode int) {
 	if status == db.StatusStale {
-		fmt.Printf("task %s stale (worker heartbeat expired)\n", id)
+		fmt.Fprintf(os.Stderr, "task %s stale (worker heartbeat expired)\n", id)
 		return
 	}
-	fmt.Printf("task %s %s (exit %d)\n", id, status, exitCode)
+	fmt.Fprintf(os.Stderr, "task %s %s (exit %d)\n", id, status, exitCode)
 }
 
 func firstNonZero(current, new int) int {

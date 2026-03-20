@@ -137,7 +137,7 @@ var enqueueCmd = &cobra.Command{
 			fmt.Fprintf(os.Stderr, "warning: notify failed: %v\n", err)
 		}
 
-		fmt.Printf("Task enqueued: %s\n", id)
+		fmt.Fprintf(os.Stderr, "Task enqueued: %s\n", id)
 		return nil
 	},
 }
@@ -165,8 +165,8 @@ func enqueueAndAttach(ctx context.Context, pool *pgxpool.Pool, taskID string) er
 		fmt.Fprintf(os.Stderr, "warning: notify failed: %v\n", err)
 	}
 
-	fmt.Printf("Task enqueued: %s\n", taskID)
-	fmt.Println("Watching output (Ctrl+C to cancel)...")
+	fmt.Fprintf(os.Stderr, "Task enqueued: %s\n", taskID)
+	fmt.Fprintf(os.Stderr, "Watching output (Ctrl+C to cancel)...\n")
 
 	// Signal handler: Ctrl+C cancels the task
 	cancelCtx, cancelFunc := context.WithCancel(ctx)
@@ -177,7 +177,7 @@ func enqueueAndAttach(ctx context.Context, pool *pgxpool.Pool, taskID string) er
 	go func() {
 		select {
 		case <-sigCh:
-			fmt.Println("\nCancelling task...")
+			fmt.Fprintf(os.Stderr, "\nCancelling task...\n")
 
 			originalStatus, err := db.RequestCancel(ctx, pool, taskID)
 			if err != nil {
@@ -187,7 +187,7 @@ func enqueueAndAttach(ctx context.Context, pool *pgxpool.Pool, taskID string) er
 			}
 
 			if originalStatus != nil && *originalStatus == db.StatusPending {
-				fmt.Println("Task cancelled")
+				fmt.Fprintf(os.Stderr, "Task cancelled\n")
 				cancelFunc()
 				return
 			}
@@ -230,7 +230,7 @@ func enqueueAndAttach(ctx context.Context, pool *pgxpool.Pool, taskID string) er
 					continue
 				}
 				enqueueFetchLogs(ctx, pool, taskID, &lastLogID)
-				fmt.Printf("\nTask %s (exit %d)\n", status.Status, status.ExitCode)
+				fmt.Fprintf(os.Stderr, "\nTask %s (exit %d)\n", status.Status, status.ExitCode)
 				if status.ExitCode != 0 {
 					return &exitCodeError{code: status.ExitCode}
 				}
@@ -274,14 +274,14 @@ func enqueueCheckCompletion(ctx context.Context, pool *pgxpool.Pool, taskID stri
 		if task.ExitCode != nil {
 			exitCode = *task.ExitCode
 		}
-		fmt.Printf("\nTask %s (exit %d)\n", task.Status, exitCode)
+		fmt.Fprintf(os.Stderr, "\nTask %s (exit %d)\n", task.Status, exitCode)
 		if exitCode != 0 {
 			return &exitCodeError{code: exitCode}
 		}
 		return nil
 	}
 	if task.Status == db.StatusStale {
-		fmt.Printf("\nTask %s (worker heartbeat expired)\n", task.Status)
+		fmt.Fprintf(os.Stderr, "\nTask %s (worker heartbeat expired)\n", task.Status)
 		return &exitCodeError{code: 1}
 	}
 	return fmt.Errorf("not done")
@@ -289,7 +289,7 @@ func enqueueCheckCompletion(ctx context.Context, pool *pgxpool.Pool, taskID stri
 
 func printLogLine(log db.TaskLog) {
 	if log.Stream == "nextask" {
-		fmt.Printf("%s %s\n", hintStyle.Render("[nextask]"), log.Data)
+		fmt.Fprintf(os.Stderr, "%s %s\n", hintStyle.Render("[nextask]"), log.Data)
 	} else {
 		fmt.Println(log.Data)
 	}

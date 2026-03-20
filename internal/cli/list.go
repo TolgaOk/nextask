@@ -82,7 +82,7 @@ var listCmd = &cobra.Command{
 		}
 
 		if len(tasks) == 0 {
-			fmt.Println("No tasks found")
+			fmt.Fprintln(os.Stderr, "No tasks found")
 			return nil
 		}
 

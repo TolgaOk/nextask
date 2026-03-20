@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"os"
 
 	"github.com/TolgaOk/nextask/internal/db"
 	"github.com/spf13/cobra"
@@ -33,7 +34,7 @@ var initDBCmd = &cobra.Command{
 			return fmt.Errorf("migration failed: %w", err)
 		}
 
-		fmt.Println("Database initialized successfully")
+		fmt.Fprintln(os.Stderr, "Database initialized successfully")
 		return nil
 	},
 }

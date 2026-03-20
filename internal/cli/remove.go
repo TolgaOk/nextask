@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 
 	"github.com/TolgaOk/nextask/internal/db"
 	"github.com/TolgaOk/nextask/internal/source"
@@ -68,9 +69,9 @@ var removeCmd = &cobra.Command{
 		}
 
 		if snapshotDeleted {
-			fmt.Println("Task and snapshot removed")
+			fmt.Fprintln(os.Stderr, "Task and snapshot removed")
 		} else {
-			fmt.Println("Task removed")
+			fmt.Fprintln(os.Stderr, "Task removed")
 		}
 		return nil
 	},
