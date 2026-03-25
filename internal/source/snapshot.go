@@ -202,7 +202,9 @@ func FetchSnapshot(ctx context.Context, remote, ref, taskDir string) (commit str
 		return strings.TrimSpace(string(out)), nil
 	}
 
-	cmd := exec.CommandContext(ctx, "git", "clone", remote, taskDir)
+	branch := strings.TrimPrefix(ref, "refs/heads/")
+
+	cmd := exec.CommandContext(ctx, "git", "clone", "--depth", "1", "--single-branch", "--no-local", "--branch", branch, remote, taskDir)
 	if err = cmd.Run(); err != nil {
 		if ctx.Err() != nil {
 			return "", ctx.Err()
@@ -211,15 +213,6 @@ func FetchSnapshot(ctx context.Context, remote, ref, taskDir string) (commit str
 			return "", fmt.Errorf("git clone: %s", string(exitErr.Stderr))
 		}
 		return "", fmt.Errorf("failed to clone: %w", err)
-	}
-
-	if _, err = runGit("fetch", "origin", ref); err != nil {
-		return "", err
-	}
-
-	branch := strings.TrimPrefix(ref, "refs/heads/")
-	if _, err = runGit("checkout", "-b", branch, "FETCH_HEAD"); err != nil {
-		return "", err
 	}
 
 	commit, err = runGit("rev-parse", "HEAD")
