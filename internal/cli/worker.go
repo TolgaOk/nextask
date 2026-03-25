@@ -73,7 +73,7 @@ var workerCmd = &cobra.Command{
 			go func() {
 				select {
 				case <-time.After(timeout):
-					fmt.Printf("\nTimeout reached (%s), shutting down...\n", workerTimeout)
+					fmt.Fprintf(os.Stderr, "\nTimeout reached (%s), shutting down...\n", workerTimeout)
 					cancel()
 				case <-ctx.Done():
 				}
@@ -85,7 +85,7 @@ var workerCmd = &cobra.Command{
 		go func() {
 			select {
 			case sig := <-sigCh:
-				fmt.Printf("\nReceived %s, shutting down...\n", sig)
+				fmt.Fprintf(os.Stderr, "\nReceived %s, shutting down...\n", sig)
 				cancel()
 			case <-ctx.Done():
 				signal.Stop(sigCh)
@@ -150,7 +150,7 @@ var workerListCmd = &cobra.Command{
 		}
 
 		if len(workers) == 0 {
-			fmt.Println("No workers found")
+			fmt.Fprintln(os.Stderr, "No workers found")
 			return nil
 		}
 
@@ -231,7 +231,7 @@ var workerStopCmd = &cobra.Command{
 		}
 
 		if found.Status == db.WorkerStatusStopped {
-			fmt.Printf("Worker %s is already stopped\n", workerID)
+			fmt.Fprintf(os.Stderr, "Worker %s is already stopped\n", workerID)
 			return nil
 		}
 
@@ -268,7 +268,7 @@ var workerStopCmd = &cobra.Command{
 			return err
 		}
 
-		fmt.Printf("Worker %s stopped\n", workerID)
+		fmt.Fprintf(os.Stderr, "Worker %s stopped\n", workerID)
 		return nil
 	},
 }
@@ -345,8 +345,8 @@ func daemonize() error {
 		return fmt.Errorf("failed to release daemon process: %w", err)
 	}
 
-	fmt.Printf("Worker %s started as daemon (pid %d)\n", id, pid)
-	fmt.Printf("Logs: %s\n", logPath)
+	fmt.Fprintf(os.Stderr, "Worker %s started as daemon (pid %d)\n", id, pid)
+	fmt.Fprintf(os.Stderr, "Logs: %s\n", logPath)
 
 	return nil
 }

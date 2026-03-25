@@ -87,9 +87,9 @@ var logsCmd = &cobra.Command{
 		var lastLogID int
 		if len(logs) == 0 {
 			if logsStream != "" {
-				fmt.Println(hintStyle.Render(fmt.Sprintf("No logs with stream %q", logsStream)))
+				fmt.Fprintln(os.Stderr, hintStyle.Render(fmt.Sprintf("No logs with stream %q", logsStream)))
 			} else if !logsAttach {
-				fmt.Println(hintStyle.Render("No logs available"))
+				fmt.Fprintln(os.Stderr, hintStyle.Render("No logs available"))
 			}
 		} else {
 			for _, log := range logs {
@@ -146,7 +146,7 @@ func logsAndAttach(ctx context.Context, pool *pgxpool.Pool, taskID string, lastL
 	}
 	defer listener.Close(context.Background())
 
-	fmt.Println(hintStyle.Render("Streaming logs (Ctrl+C to stop watching)..."))
+	fmt.Fprintln(os.Stderr, hintStyle.Render("Streaming logs (Ctrl+C to stop watching)..."))
 
 	cancelCtx, cancelFunc := context.WithCancel(ctx)
 	defer cancelFunc()
@@ -190,7 +190,7 @@ func logsAndAttach(ctx context.Context, pool *pgxpool.Pool, taskID string, lastL
 					continue
 				}
 				logsFetchLogs(ctx, pool, taskID, &lastLogID)
-				fmt.Printf("\nTask %s (exit %d)\n", status.Status, status.ExitCode)
+				fmt.Fprintf(os.Stderr, "\nTask %s (exit %d)\n", status.Status, status.ExitCode)
 				return nil
 			}
 
@@ -200,7 +200,7 @@ func logsAndAttach(ctx context.Context, pool *pgxpool.Pool, taskID string, lastL
 			}
 
 		case <-cancelCtx.Done():
-			fmt.Println() // newline after Ctrl+C
+			fmt.Fprintln(os.Stderr) // newline after Ctrl+C
 			return nil
 		}
 	}
@@ -232,11 +232,11 @@ func logsCheckCompletion(ctx context.Context, pool *pgxpool.Pool, taskID string,
 		if task.ExitCode != nil {
 			exitCode = *task.ExitCode
 		}
-		fmt.Printf("\nTask %s (exit %d)\n", task.Status, exitCode)
+		fmt.Fprintf(os.Stderr, "\nTask %s (exit %d)\n", task.Status, exitCode)
 		return nil
 	}
 	if task.Status == db.StatusStale {
-		fmt.Printf("\nTask %s (worker heartbeat expired)\n", task.Status)
+		fmt.Fprintf(os.Stderr, "\nTask %s (worker heartbeat expired)\n", task.Status)
 		return nil
 	}
 	return fmt.Errorf("not done")

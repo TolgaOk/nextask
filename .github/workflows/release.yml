@@ -1,0 +1,32 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build binaries
+        run: |
+          for pair in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64; do
+            GOOS=${pair%/*} GOARCH=${pair#*/} go build -o nextask ./cmd/nextask
+            tar czf "nextask_${pair%/*}_${pair#*/}.tar.gz" nextask
+            rm nextask
+          done
+
+      - name: Create release
+        run: gh release create "${{ github.ref_name }}" nextask_*.tar.gz --generate-notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
