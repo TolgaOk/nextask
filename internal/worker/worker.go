@@ -13,7 +13,7 @@ import (
 	"github.com/TolgaOk/nextask/internal/db"
 	"github.com/cenkalti/backoff/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	gonanoid "github.com/matoous/go-nanoid/v2"
+	"github.com/moby/moby/pkg/namesgenerator"
 )
 
 // Worker processes tasks from the queue.
@@ -55,7 +55,7 @@ func New(ctx context.Context, cfg Config) (*Worker, error) {
 
 	workerID := cfg.Name
 	if workerID == "" {
-		workerID, _ = gonanoid.Generate("0123456789abcdefghijklmnopqrstuvwxyz", 8)
+		workerID = namesgenerator.GetRandomName(0)
 	}
 
 	hostname, _ := os.Hostname()
