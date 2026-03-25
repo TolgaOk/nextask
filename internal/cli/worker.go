@@ -22,13 +22,14 @@ import (
 )
 
 var (
-	workdir       string
-	once          bool
-	daemon        bool
-	rm            bool
-	workerID      string // hidden, used by daemon mode
-	workerTimeout string
-	workerFilters []string
+	workdir        string
+	once           bool
+	daemon         bool
+	rm             bool
+	exitIfIdle     string
+	workerID       string // hidden, used by daemon mode
+	workerTimeout  string
+	workerFilters  []string
 )
 
 var workerCmd = &cobra.Command{
@@ -64,6 +65,18 @@ var workerCmd = &cobra.Command{
 					"Examples: "+codeStyle.Render("1h")+", "+codeStyle.Render("24h")+", "+codeStyle.Render("7d"),
 				)
 			}
+		}
+
+		// Parse exit-if-idle if provided
+		var exitIfIdleDuration *time.Duration
+		if exitIfIdle != "" {
+			d, err := str2duration.ParseDuration(exitIfIdle)
+			if err != nil {
+				return errWithHints(fmt.Sprintf("invalid exit-if-idle: %s", exitIfIdle),
+					"Examples: "+codeStyle.Render("0s")+", "+codeStyle.Render("1m")+", "+codeStyle.Render("5m"),
+				)
+			}
+			exitIfIdleDuration = &d
 		}
 
 		ctx, cancel := context.WithCancel(context.Background())
@@ -111,6 +124,7 @@ var workerCmd = &cobra.Command{
 			Name:              workerID,
 			Once:              once,
 			Rm:                rm,
+			ExitIfIdle:        exitIfIdleDuration,
 			HeartbeatInterval: cfg.Worker.HeartbeatInterval,
 			TagFilter:         tagFilter,
 		})
@@ -281,6 +295,7 @@ func init() {
 	workerCmd.Flags().BoolVar(&rm, "rm", false, "Remove task workdir after completion")
 	workerCmd.Flags().BoolVar(&daemon, "daemon", false, "Run as background daemon")
 	workerCmd.Flags().StringVar(&workerTimeout, "timeout", "", "Stop worker after duration (e.g., 1h, 24h, 7d)")
+	workerCmd.Flags().StringVar(&exitIfIdle, "exit-if-idle", "", "Exit if no tasks claimed within duration (e.g., 0s, 1m, 5m)")
 	workerCmd.Flags().StringSliceVar(&workerFilters, "filter", nil, "Only claim tasks with tag (key=value, repeatable)")
 	workerCmd.Flags().StringVar(&workerID, "_id", "", "Worker ID (internal use)")
 	workerCmd.Flags().MarkHidden("_id")

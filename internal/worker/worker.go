@@ -24,6 +24,7 @@ type Worker struct {
 	Executor          *Executor
 	Once              bool
 	Rm                bool
+	ExitIfIdle        *time.Duration
 	dbURL             string
 	workdir           string
 	heartbeatInterval time.Duration
@@ -38,6 +39,7 @@ type Config struct {
 	Name              string
 	Once              bool
 	Rm                bool
+	ExitIfIdle        *time.Duration
 	HeartbeatInterval time.Duration
 	TagFilter         map[string]string
 	BackoffInitial    time.Duration
@@ -80,6 +82,7 @@ func New(ctx context.Context, cfg Config) (*Worker, error) {
 		Executor:          &Executor{Pool: pool, Workdir: cfg.Workdir},
 		Once:              cfg.Once,
 		Rm:                cfg.Rm,
+		ExitIfIdle:        cfg.ExitIfIdle,  // nil = disabled, 0 = exit immediately, >0 = wait duration
 		dbURL:             cfg.DBURL,
 		workdir:           cfg.Workdir,
 		heartbeatInterval: cfg.HeartbeatInterval,
@@ -161,6 +164,14 @@ func (w *Worker) Run(parentCtx context.Context) error {
 
 	fmt.Printf("Worker %s started\n", w.ID)
 
+	var idleTimer *time.Timer
+	var idleCh <-chan time.Time
+	if w.ExitIfIdle != nil {
+		idleTimer = time.NewTimer(*w.ExitIfIdle)
+		idleCh = idleTimer.C
+		defer idleTimer.Stop()
+	}
+
 	for {
 		if ctx.Err() != nil {
 			return nil
@@ -179,6 +190,9 @@ func (w *Worker) Run(parentCtx context.Context) error {
 				if err := os.RemoveAll(taskDir); err != nil {
 					fmt.Fprintf(os.Stderr, "cleanup failed: %v\n", err)
 				}
+			}
+			if idleTimer != nil {
+				idleTimer.Reset(*w.ExitIfIdle)
 			}
 			if w.Once {
 				return nil
@@ -202,6 +216,9 @@ func (w *Worker) Run(parentCtx context.Context) error {
 		select {
 		case <-taskListener.C:
 			// wake event received, loop to claim task
+		case <-idleCh:
+			fmt.Println("No tasks received, exiting (idle timeout)")
+			return nil
 		case <-ctx.Done():
 			return nil
 		}
