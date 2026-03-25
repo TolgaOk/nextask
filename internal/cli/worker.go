@@ -170,16 +170,20 @@ var workerListCmd = &cobra.Command{
 			return nil
 		}
 
+		staleThreshold := cfg.Worker.StaleDuration()
+
 		rows := [][]string{}
 		for _, w := range workers {
-			heartbeat := time.Since(w.LastHeartbeat).Truncate(time.Second).String() + " ago"
+			status := string(w.Status)
+			if w.Status == db.WorkerStatusRunning && time.Since(w.LastHeartbeat) > staleThreshold {
+				status = "stale"
+			}
 			rows = append(rows, []string{
 				w.ID,
 				fmt.Sprintf("%d", w.PID),
 				w.Hostname,
-				string(w.Status),
+				status,
 				w.StartedAt.Format("2006-01-02 15:04"),
-				heartbeat,
 			})
 		}
 
@@ -189,7 +193,7 @@ var workerListCmd = &cobra.Command{
 		t := table.New().
 			Border(lipgloss.NormalBorder()).
 			BorderStyle(lipgloss.NewStyle().Foreground(lipgloss.Color("240"))).
-			Headers("ID", "PID", "HOSTNAME", "STATUS", "STARTED", "HEARTBEAT").
+			Headers("ID", "PID", "HOSTNAME", "STATUS", "STARTED").
 			Rows(rows...).
 			StyleFunc(func(row, col int) lipgloss.Style {
 				if row == 0 {
