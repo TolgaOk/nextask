@@ -25,6 +25,7 @@ var (
 	workdir       string
 	once          bool
 	daemon        bool
+	rm            bool
 	workerID      string // hidden, used by daemon mode
 	workerTimeout string
 	workerFilters []string
@@ -109,6 +110,7 @@ var workerCmd = &cobra.Command{
 			Workdir:           cfg.Worker.Workdir,
 			Name:              workerID,
 			Once:              once,
+			Rm:                rm,
 			HeartbeatInterval: cfg.Worker.HeartbeatInterval,
 			TagFilter:         tagFilter,
 		})
@@ -276,6 +278,7 @@ var workerStopCmd = &cobra.Command{
 func init() {
 	workerCmd.Flags().StringVar(&workdir, "workdir", "", "Base directory for task execution (default /tmp/nextask)")
 	workerCmd.Flags().BoolVar(&once, "once", false, "Run single task and exit")
+	workerCmd.Flags().BoolVar(&rm, "rm", false, "Remove task workdir after completion")
 	workerCmd.Flags().BoolVar(&daemon, "daemon", false, "Run as background daemon")
 	workerCmd.Flags().StringVar(&workerTimeout, "timeout", "", "Stop worker after duration (e.g., 1h, 24h, 7d)")
 	workerCmd.Flags().StringSliceVar(&workerFilters, "filter", nil, "Only claim tasks with tag (key=value, repeatable)")

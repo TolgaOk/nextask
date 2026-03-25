@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
@@ -22,6 +23,7 @@ type Worker struct {
 	Pool              *pgxpool.Pool
 	Executor          *Executor
 	Once              bool
+	Rm                bool
 	dbURL             string
 	workdir           string
 	heartbeatInterval time.Duration
@@ -35,6 +37,7 @@ type Config struct {
 	Workdir           string
 	Name              string
 	Once              bool
+	Rm                bool
 	HeartbeatInterval time.Duration
 	TagFilter         map[string]string
 	BackoffInitial    time.Duration
@@ -76,6 +79,7 @@ func New(ctx context.Context, cfg Config) (*Worker, error) {
 		Pool:              pool,
 		Executor:          &Executor{Pool: pool, Workdir: cfg.Workdir},
 		Once:              cfg.Once,
+		Rm:                cfg.Rm,
 		dbURL:             cfg.DBURL,
 		workdir:           cfg.Workdir,
 		heartbeatInterval: cfg.HeartbeatInterval,
@@ -170,6 +174,12 @@ func (w *Worker) Run(parentCtx context.Context) error {
 
 		if task != nil {
 			w.processTask(ctx, task)
+			if w.Rm {
+				taskDir := filepath.Join(w.workdir, task.ID)
+				if err := os.RemoveAll(taskDir); err != nil {
+					fmt.Fprintf(os.Stderr, "cleanup failed: %v\n", err)
+				}
+			}
 			if w.Once {
 				return nil
 			}
