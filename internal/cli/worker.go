@@ -22,12 +22,14 @@ import (
 )
 
 var (
-	workdir       string
-	once          bool
-	daemon        bool
-	workerID      string // hidden, used by daemon mode
-	workerTimeout string
-	workerFilters []string
+	workdir        string
+	once           bool
+	daemon         bool
+	rm             bool
+	exitIfIdle     string
+	workerID       string // hidden, used by daemon mode
+	workerTimeout  string
+	workerFilters  []string
 )
 
 var workerCmd = &cobra.Command{
@@ -63,6 +65,18 @@ var workerCmd = &cobra.Command{
 					"Examples: "+codeStyle.Render("1h")+", "+codeStyle.Render("24h")+", "+codeStyle.Render("7d"),
 				)
 			}
+		}
+
+		// Parse exit-if-idle if provided
+		var exitIfIdleDuration *time.Duration
+		if exitIfIdle != "" {
+			d, err := str2duration.ParseDuration(exitIfIdle)
+			if err != nil {
+				return errWithHints(fmt.Sprintf("invalid exit-if-idle: %s", exitIfIdle),
+					"Examples: "+codeStyle.Render("0s")+", "+codeStyle.Render("1m")+", "+codeStyle.Render("5m"),
+				)
+			}
+			exitIfIdleDuration = &d
 		}
 
 		ctx, cancel := context.WithCancel(context.Background())
@@ -109,6 +123,8 @@ var workerCmd = &cobra.Command{
 			Workdir:           cfg.Worker.Workdir,
 			Name:              workerID,
 			Once:              once,
+			Rm:                rm,
+			ExitIfIdle:        exitIfIdleDuration,
 			HeartbeatInterval: cfg.Worker.HeartbeatInterval,
 			TagFilter:         tagFilter,
 		})
@@ -154,16 +170,20 @@ var workerListCmd = &cobra.Command{
 			return nil
 		}
 
+		staleThreshold := cfg.Worker.StaleDuration()
+
 		rows := [][]string{}
 		for _, w := range workers {
-			heartbeat := time.Since(w.LastHeartbeat).Truncate(time.Second).String() + " ago"
+			status := string(w.Status)
+			if w.Status == db.WorkerStatusRunning && time.Since(w.LastHeartbeat) > staleThreshold {
+				status = "stale"
+			}
 			rows = append(rows, []string{
 				w.ID,
 				fmt.Sprintf("%d", w.PID),
 				w.Hostname,
-				string(w.Status),
+				status,
 				w.StartedAt.Format("2006-01-02 15:04"),
-				heartbeat,
 			})
 		}
 
@@ -173,7 +193,7 @@ var workerListCmd = &cobra.Command{
 		t := table.New().
 			Border(lipgloss.NormalBorder()).
 			BorderStyle(lipgloss.NewStyle().Foreground(lipgloss.Color("240"))).
-			Headers("ID", "PID", "HOSTNAME", "STATUS", "STARTED", "HEARTBEAT").
+			Headers("ID", "PID", "HOSTNAME", "STATUS", "STARTED").
 			Rows(rows...).
 			StyleFunc(func(row, col int) lipgloss.Style {
 				if row == 0 {
@@ -276,8 +296,10 @@ var workerStopCmd = &cobra.Command{
 func init() {
 	workerCmd.Flags().StringVar(&workdir, "workdir", "", "Base directory for task execution (default /tmp/nextask)")
 	workerCmd.Flags().BoolVar(&once, "once", false, "Run single task and exit")
+	workerCmd.Flags().BoolVar(&rm, "rm", false, "Remove task workdir after completion")
 	workerCmd.Flags().BoolVar(&daemon, "daemon", false, "Run as background daemon")
 	workerCmd.Flags().StringVar(&workerTimeout, "timeout", "", "Stop worker after duration (e.g., 1h, 24h, 7d)")
+	workerCmd.Flags().StringVar(&exitIfIdle, "exit-if-idle", "", "Exit if no tasks claimed within duration (e.g., 0s, 1m, 5m)")
 	workerCmd.Flags().StringSliceVar(&workerFilters, "filter", nil, "Only claim tasks with tag (key=value, repeatable)")
 	workerCmd.Flags().StringVar(&workerID, "_id", "", "Worker ID (internal use)")
 	workerCmd.Flags().MarkHidden("_id")

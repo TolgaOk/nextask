@@ -10,6 +10,7 @@ require (
 	github.com/go-git/go-git/v5 v5.16.4
 	github.com/jackc/pgx/v5 v5.8.0
 	github.com/matoous/go-nanoid/v2 v2.1.0
+	github.com/moby/moby v28.5.2+incompatible
 	github.com/spf13/cobra v1.10.2
 	github.com/xhit/go-str2duration/v2 v2.1.0
 	go.uber.org/goleak v1.3.0
