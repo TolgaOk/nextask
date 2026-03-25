@@ -217,7 +217,8 @@ func FetchSnapshot(ctx context.Context, remote, ref, taskDir string) (commit str
 		return "", err
 	}
 
-	if _, err = runGit("checkout", "FETCH_HEAD"); err != nil {
+	branch := strings.TrimPrefix(ref, "refs/heads/")
+	if _, err = runGit("checkout", "-b", branch, "FETCH_HEAD"); err != nil {
 		return "", err
 	}
 
