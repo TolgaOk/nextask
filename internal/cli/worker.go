@@ -125,6 +125,9 @@ var workerCmd = &cobra.Command{
 			ExitIfIdle:        exitIfIdleDuration,
 			HeartbeatInterval: cfg.Worker.HeartbeatInterval,
 			TagFilter:         tagFilter,
+			LogFlushLines:     cfg.Worker.LogFlushLines,
+			LogFlushInterval:  cfg.Worker.LogFlushInterval,
+			LogBufferSize:     cfg.Worker.LogBufferSize,
 		})
 		if err != nil {
 			return err

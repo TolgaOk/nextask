@@ -44,6 +44,9 @@ type Config struct {
 	TagFilter         map[string]string
 	BackoffInitial    time.Duration
 	BackoffMax        time.Duration
+	LogFlushLines     int
+	LogFlushInterval  time.Duration
+	LogBufferSize     int
 }
 
 // New creates a worker with the given configuration.
@@ -79,7 +82,7 @@ func New(ctx context.Context, cfg Config) (*Worker, error) {
 		ID:                workerID,
 		Info:              workerInfo,
 		Pool:              pool,
-		Executor:          &Executor{Pool: pool, Workdir: cfg.Workdir},
+		Executor:          &Executor{Pool: pool, Workdir: cfg.Workdir, LogFlushLines: cfg.LogFlushLines, LogFlushInterval: cfg.LogFlushInterval, LogBufferSize: cfg.LogBufferSize},
 		Once:              cfg.Once,
 		Rm:                cfg.Rm,
 		ExitIfIdle:        cfg.ExitIfIdle,  // nil = disabled, 0 = exit immediately, >0 = wait duration

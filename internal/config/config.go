@@ -47,6 +47,9 @@ type WorkerConfig struct {
 	Workdir           string        `toml:"workdir"`
 	HeartbeatInterval time.Duration `toml:"heartbeat_interval"`
 	StaleThreshold    int           `toml:"stale_threshold"`
+	LogFlushLines     int           `toml:"log_flush_lines"`
+	LogFlushInterval  time.Duration `toml:"log_flush_interval"`
+	LogBufferSize     int           `toml:"log_buffer_size"`
 }
 
 // RetryConfig holds retry/backoff configuration for DB operations.
@@ -60,6 +63,10 @@ const DefaultHeartbeatInterval = 1 * time.Minute
 
 // DefaultStaleThreshold is the number of missed heartbeats before a task is marked stale.
 const DefaultStaleThreshold = 3
+
+const DefaultLogFlushLines = 100
+const DefaultLogFlushInterval = 50 * time.Millisecond
+const DefaultLogBufferSize = 1000
 
 // StaleDuration returns the duration after which a task is considered stale.
 func (w WorkerConfig) StaleDuration() time.Duration {
@@ -161,6 +168,15 @@ func applyEnv(cfg *Config) {
 	}
 	if cfg.Worker.StaleThreshold == 0 {
 		cfg.Worker.StaleThreshold = DefaultStaleThreshold
+	}
+	if cfg.Worker.LogFlushLines == 0 {
+		cfg.Worker.LogFlushLines = DefaultLogFlushLines
+	}
+	if cfg.Worker.LogFlushInterval == 0 {
+		cfg.Worker.LogFlushInterval = DefaultLogFlushInterval
+	}
+	if cfg.Worker.LogBufferSize == 0 {
+		cfg.Worker.LogBufferSize = DefaultLogBufferSize
 	}
 	if cfg.Retry.InitialInterval == 0 {
 		cfg.Retry.InitialInterval = 500 * time.Millisecond

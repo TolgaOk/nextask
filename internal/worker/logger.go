@@ -12,11 +12,12 @@ import (
 	"github.com/TolgaOk/nextask/internal/db"
 )
 
-const (
-	flushLines    = 100
-	flushInterval = 50 * time.Millisecond
-	bufferSize    = 1000
-)
+// LogConfig holds batching parameters for the task logger.
+type LogConfig struct {
+	FlushLines    int
+	FlushInterval time.Duration
+	BufferSize    int
+}
 
 // Logger defines the interface for capturing task output.
 type Logger interface {
@@ -36,6 +37,7 @@ type TaskLogger struct {
 	taskID string
 	stdout *os.File
 	stderr *os.File
+	cfg    LogConfig
 
 	lines    chan logLine
 	done     chan struct{}
@@ -44,7 +46,7 @@ type TaskLogger struct {
 }
 
 // NewTaskLogger creates a batching logger that writes to DB and files.
-func NewTaskLogger(pool *pgxpool.Pool, taskID, taskDir string) (*TaskLogger, error) {
+func NewTaskLogger(pool *pgxpool.Pool, taskID, taskDir string, cfg LogConfig) (*TaskLogger, error) {
 	logDir := filepath.Join(taskDir, ".nextask", "log")
 	if err := os.MkdirAll(logDir, 0755); err != nil {
 		return nil, fmt.Errorf("create log directory: %w", err)
@@ -66,7 +68,8 @@ func NewTaskLogger(pool *pgxpool.Pool, taskID, taskDir string) (*TaskLogger, err
 		taskID: taskID,
 		stdout: stdout,
 		stderr: stderr,
-		lines:  make(chan logLine, bufferSize),
+		cfg:    cfg,
+		lines:  make(chan logLine, cfg.BufferSize),
 		done:   make(chan struct{}),
 	}
 	go l.run()
@@ -117,8 +120,8 @@ func (l *TaskLogger) Close() error {
 func (l *TaskLogger) run() {
 	defer close(l.done)
 
-	buf := make([]db.LogEntry, 0, flushLines)
-	timer := time.NewTimer(flushInterval)
+	buf := make([]db.LogEntry, 0, l.cfg.FlushLines)
+	timer := time.NewTimer(l.cfg.FlushInterval)
 	timer.Stop()
 	timerRunning := false
 
@@ -134,10 +137,10 @@ func (l *TaskLogger) run() {
 			}
 			buf = append(buf, db.LogEntry{Stream: line.stream, Data: line.data})
 			if !timerRunning {
-				timer.Reset(flushInterval)
+				timer.Reset(l.cfg.FlushInterval)
 				timerRunning = true
 			}
-			if len(buf) >= flushLines {
+			if len(buf) >= l.cfg.FlushLines {
 				timer.Stop()
 				timerRunning = false
 				l.flush(buf)
