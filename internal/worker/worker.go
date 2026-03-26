@@ -164,6 +164,8 @@ func (w *Worker) Run(parentCtx context.Context) error {
 
 	fmt.Printf("Worker %s started\n", w.ID)
 
+	claimBackoff := db.NewBackOff(1*time.Second, 30*time.Second)
+
 	var idleTimer *time.Timer
 	var idleCh <-chan time.Time
 	if w.ExitIfIdle != nil {
@@ -179,9 +181,17 @@ func (w *Worker) Run(parentCtx context.Context) error {
 
 		task, err := db.ClaimTask(ctx, w.Pool, w.ID, w.Info, w.tagFilter)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "failed to claim task: %v\n", err)
+			wait := claimBackoff.NextBackOff()
+			fmt.Fprintf(os.Stderr, "failed to claim task: %v (retry in %v)\n", err, wait)
+			select {
+			case <-time.After(wait):
+			case <-ctx.Done():
+				return nil
+			}
 			continue
 		}
+		claimBackoff.Reset()
+		w.backoff.Reset()
 
 		if task != nil {
 			w.processTask(ctx, task)
