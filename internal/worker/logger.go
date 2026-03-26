@@ -37,9 +37,10 @@ type TaskLogger struct {
 	stdout *os.File
 	stderr *os.File
 
-	lines chan logLine
-	done  chan struct{}
-	once  sync.Once
+	lines    chan logLine
+	done     chan struct{}
+	once     sync.Once
+	notifyWg sync.WaitGroup
 }
 
 // NewTaskLogger creates a batching logger that writes to DB and files.
@@ -94,10 +95,12 @@ func (l *TaskLogger) Log(ctx context.Context, stream, data string) {
 	}
 }
 
-// Close flushes remaining buffered lines and closes log files.
+// Close flushes remaining buffered lines, waits for in-flight notifies,
+// and closes log files.
 func (l *TaskLogger) Close() error {
 	l.once.Do(func() { close(l.lines) })
 	<-l.done
+	l.notifyWg.Wait()
 
 	var firstErr error
 	if err := l.stdout.Close(); err != nil {
@@ -162,11 +165,15 @@ func (l *TaskLogger) flush(entries []db.LogEntry) {
 		return
 	}
 
-	// Single NOTIFY per batch — consumer fetches all since last seen ID.
+	// Async NOTIFY — best-effort, consumer has poll fallback.
 	channel := db.FromTaskChannel(l.taskID)
-	if err := db.Notify(ctx, l.pool, channel, db.TaskLogEvent{ID: maxID}); err != nil {
-		fmt.Fprintf(os.Stderr, "log notify failed: %s\n", db.HumanError(err))
-	}
+	l.notifyWg.Add(1)
+	go func() {
+		defer l.notifyWg.Done()
+		if err := db.Notify(context.Background(), l.pool, channel, db.TaskLogEvent{ID: maxID}); err != nil {
+			fmt.Fprintf(os.Stderr, "log notify failed: %s\n", db.HumanError(err))
+		}
+	}()
 }
 
 // DBLogger writes log lines to the database synchronously (used before task dir exists).
