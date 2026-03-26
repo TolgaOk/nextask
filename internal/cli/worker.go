@@ -11,8 +11,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/charmbracelet/lipgloss"
-	"github.com/charmbracelet/lipgloss/table"
 	"github.com/jackc/pgx/v5"
 	gonanoid "github.com/matoous/go-nanoid/v2"
 	"github.com/TolgaOk/nextask/internal/db"
@@ -137,6 +135,15 @@ var workerCmd = &cobra.Command{
 	},
 }
 
+var (
+	workerListLimit  int
+	workerListOffset int
+	workerListSince  string
+	workerListJSON   bool
+	workerListCSV    bool
+	workerListWrap   bool
+)
+
 var workerListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List registered workers",
@@ -160,7 +167,30 @@ var workerListCmd = &cobra.Command{
 			statusFilter = &s
 		}
 
-		workers, err := db.ListWorkers(ctx, pool, statusFilter)
+		var since time.Time
+		if workerListSince != "" {
+			dur, err := str2duration.ParseDuration(workerListSince)
+			if err != nil {
+				return errWithHints(fmt.Sprintf("invalid since format: %s", workerListSince),
+					"Examples: "+codeStyle.Render("1h")+", "+codeStyle.Render("24h")+", "+codeStyle.Render("7d"),
+				)
+			}
+			since = time.Now().Add(-dur)
+		}
+
+		filter := db.WorkerListFilter{
+			Status: statusFilter,
+			Since:  since,
+			Limit:  uint64(workerListLimit),
+			Offset: uint64(workerListOffset),
+		}
+
+		workers, err := db.ListWorkers(ctx, pool, filter)
+		if err != nil {
+			return err
+		}
+
+		total, err := db.CountWorkers(ctx, pool, filter)
 		if err != nil {
 			return err
 		}
@@ -171,6 +201,7 @@ var workerListCmd = &cobra.Command{
 		}
 
 		staleThreshold := cfg.Worker.StaleDuration()
+		plain := workerListJSON || workerListCSV
 
 		rows := [][]string{}
 		for _, w := range workers {
@@ -178,32 +209,28 @@ var workerListCmd = &cobra.Command{
 			if w.Status == db.WorkerStatusRunning && time.Since(w.LastHeartbeat) > staleThreshold {
 				status = "stale"
 			}
+			displayStatus := status
+			if !plain {
+				displayStatus = statusStyle(db.TaskStatus(status)).Render(status)
+			}
 			rows = append(rows, []string{
 				w.ID,
 				fmt.Sprintf("%d", w.PID),
 				w.Hostname,
-				status,
+				displayStatus,
 				w.StartedAt.Format("2006-01-02 15:04"),
 			})
 		}
 
-		headerStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("15"))
-		rowStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
-
-		t := table.New().
-			Border(lipgloss.NormalBorder()).
-			BorderStyle(lipgloss.NewStyle().Foreground(lipgloss.Color("240"))).
-			Headers("ID", "PID", "HOSTNAME", "STATUS", "STARTED").
-			Rows(rows...).
-			StyleFunc(func(row, col int) lipgloss.Style {
-				if row == 0 {
-					return headerStyle
-				}
-				return rowStyle
-			})
-
-		fmt.Fprintln(os.Stdout, t)
-		return nil
+		return PrintTable(TableConfig{
+			Headers: []string{"ID", "PID", "HOSTNAME", "STATUS", "STARTED"},
+			Rows:    rows,
+			Count:   total,
+			Offset:  workerListOffset,
+			JSON:    workerListJSON,
+			CSV:     workerListCSV,
+			Wrap:    workerListWrap,
+		})
 	},
 }
 
@@ -230,7 +257,7 @@ var workerStopCmd = &cobra.Command{
 		defer pool.Close()
 
 		// Verify worker exists and is running
-		workers, err := db.ListWorkers(ctx, pool, nil)
+		workers, err := db.ListWorkers(ctx, pool, db.WorkerListFilter{})
 		if err != nil {
 			return err
 		}
@@ -305,6 +332,12 @@ func init() {
 	workerCmd.Flags().MarkHidden("_id")
 
 	workerListCmd.Flags().String("status", "", "Filter by status (running, stopped)")
+	workerListCmd.Flags().IntVar(&workerListLimit, "limit", 50, "Max results")
+	workerListCmd.Flags().IntVar(&workerListOffset, "offset", 0, "Skip first N results")
+	workerListCmd.Flags().StringVar(&workerListSince, "since", "", "Workers started after (e.g., 1h, 24h, 7d)")
+	workerListCmd.Flags().BoolVar(&workerListJSON, "json", false, "Output as JSON")
+	workerListCmd.Flags().BoolVar(&workerListCSV, "csv", false, "Output as CSV")
+	workerListCmd.Flags().BoolVar(&workerListWrap, "wrap", false, "Wrap long lines instead of truncating")
 	workerCmd.AddCommand(workerListCmd)
 
 	workerStopCmd.Flags().DurationVar(&workerStopTimeout, "timeout", 10*time.Second, "Timeout waiting for stop confirmation")
