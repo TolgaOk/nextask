@@ -98,4 +98,7 @@ remote = "~/.nextask/source.git"                                 # bare repo
 workdir = "/tmp/nextask"                         # or NEXTASK_WORKER_WORKDIR
 heartbeat_interval = "1m"                        # how often workers ping
 stale_threshold = 3                              # missed heartbeats before stale
+log_flush_lines = 100                            # batch size before flushing to DB
+log_flush_interval = "50ms"                      # max wait before flushing to DB
+log_buffer_size = 1000                           # channel buffer for log lines
 ```
