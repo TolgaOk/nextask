@@ -36,40 +36,50 @@ type ListFilter struct {
 	Commands       []string
 	Since          time.Time
 	Limit          uint64
+	Offset         uint64
 	StaleThreshold time.Duration
+}
+
+func staleStatusExpr(staleThreshold time.Duration) string {
+	staleInterval := fmt.Sprintf("%d seconds", int(staleThreshold.Seconds()))
+	return fmt.Sprintf(
+		"CASE WHEN t.status = 'running' AND w.last_heartbeat < NOW() - '%s'::interval THEN 'stale' ELSE t.status END",
+		staleInterval,
+	)
+}
+
+func applyTaskFilters(query sq.SelectBuilder, filter ListFilter, statusExpr string) sq.SelectBuilder {
+	if len(filter.Statuses) > 0 {
+		query = query.Where(sq.Eq{statusExpr: filter.Statuses})
+	}
+	for k, v := range filter.Tags {
+		query = query.Where("t.tags @> ?::jsonb", fmt.Sprintf(`{"%s": "%s"}`, k, v))
+	}
+	for _, cmd := range filter.Commands {
+		query = query.Where("t.command ILIKE ?", "%"+cmd+"%")
+	}
+	if !filter.Since.IsZero() {
+		query = query.Where(sq.GtOrEq{"t.created_at": filter.Since})
+	}
+	return query
 }
 
 // ListTasks retrieves tasks matching the given filter criteria.
 func ListTasks(ctx context.Context, pool *pgxpool.Pool, filter ListFilter) ([]Task, error) {
-	staleInterval := fmt.Sprintf("%d seconds", int(filter.StaleThreshold.Seconds()))
-	statusExpr := fmt.Sprintf(
-		"CASE WHEN t.status = 'running' AND w.last_heartbeat < NOW() - '%s'::interval THEN 'stale' ELSE t.status END",
-		staleInterval,
-	)
+	statusExpr := staleStatusExpr(filter.StaleThreshold)
 
 	query := psql.Select("t.id", "t.command", statusExpr, "t.tags", "t.created_at").
 		From("tasks t").
 		LeftJoin("workers w ON t.worker_id = w.id").
 		OrderBy("t.created_at DESC")
 
-	if len(filter.Statuses) > 0 {
-		query = query.Where(sq.Eq{statusExpr: filter.Statuses})
-	}
-
-	for k, v := range filter.Tags {
-		query = query.Where("t.tags @> ?::jsonb", fmt.Sprintf(`{"%s": "%s"}`, k, v))
-	}
-
-	for _, cmd := range filter.Commands {
-		query = query.Where("t.command ILIKE ?", "%"+cmd+"%")
-	}
-
-	if !filter.Since.IsZero() {
-		query = query.Where(sq.GtOrEq{"t.created_at": filter.Since})
-	}
+	query = applyTaskFilters(query, filter, statusExpr)
 
 	if filter.Limit > 0 {
 		query = query.Limit(filter.Limit)
+	}
+	if filter.Offset > 0 {
+		query = query.Offset(filter.Offset)
 	}
 
 	sql, args, err := query.ToSql()
@@ -97,6 +107,25 @@ func ListTasks(ctx context.Context, pool *pgxpool.Pool, filter ListFilter) ([]Ta
 	}
 
 	return tasks, rows.Err()
+}
+
+// CountTasks returns the total count of tasks matching the filter (ignoring Limit/Offset).
+func CountTasks(ctx context.Context, pool *pgxpool.Pool, filter ListFilter) (int, error) {
+	statusExpr := staleStatusExpr(filter.StaleThreshold)
+
+	query := psql.Select("COUNT(*)").
+		From("tasks t").
+		LeftJoin("workers w ON t.worker_id = w.id")
+
+	query = applyTaskFilters(query, filter, statusExpr)
+
+	sql, args, err := query.ToSql()
+	if err != nil {
+		return 0, err
+	}
+	var count int
+	err = pool.QueryRow(ctx, sql, args...).Scan(&count)
+	return count, err
 }
 
 type scannable interface {
@@ -308,20 +337,41 @@ func UpdateHeartbeat(ctx context.Context, pool *pgxpool.Pool, id string) error {
 	return err
 }
 
-// ListWorkers retrieves all workers, optionally filtered by status.
-func ListWorkers(ctx context.Context, pool *pgxpool.Pool, status *WorkerStatus) ([]WorkerRecord, error) {
+// WorkerListFilter specifies criteria for filtering workers.
+type WorkerListFilter struct {
+	Status *WorkerStatus
+	Since  time.Time
+	Limit  uint64
+	Offset uint64
+}
+
+func (f WorkerListFilter) args() (*string, *time.Time, uint64, uint64) {
+	var statusArg *string
+	if f.Status != nil {
+		s := string(*f.Status)
+		statusArg = &s
+	}
+	var sinceArg *time.Time
+	if !f.Since.IsZero() {
+		sinceArg = &f.Since
+	}
+	limit := f.Limit
+	if limit == 0 {
+		limit = 1000
+	}
+	return statusArg, sinceArg, limit, f.Offset
+}
+
+// ListWorkers retrieves workers matching the given filter.
+func ListWorkers(ctx context.Context, pool *pgxpool.Pool, filter WorkerListFilter) ([]WorkerRecord, error) {
 	sql, err := migrations.FS.ReadFile("list_workers.sql")
 	if err != nil {
 		return nil, fmt.Errorf("failed to read list_workers.sql: %w", err)
 	}
 
-	var statusArg *string
-	if status != nil {
-		s := string(*status)
-		statusArg = &s
-	}
+	statusArg, sinceArg, limit, offset := filter.args()
 
-	rows, err := pool.Query(ctx, string(sql), statusArg)
+	rows, err := pool.Query(ctx, string(sql), statusArg, sinceArg, limit, offset)
 	if err != nil {
 		return nil, err
 	}
@@ -336,4 +386,16 @@ func ListWorkers(ctx context.Context, pool *pgxpool.Pool, status *WorkerStatus) 
 		workers = append(workers, w)
 	}
 	return workers, rows.Err()
+}
+
+// CountWorkers returns the total count of workers matching the filter.
+func CountWorkers(ctx context.Context, pool *pgxpool.Pool, filter WorkerListFilter) (int, error) {
+	statusArg, sinceArg, _, _ := filter.args()
+
+	var count int
+	err := pool.QueryRow(ctx,
+		"SELECT COUNT(*) FROM workers WHERE ($1::text IS NULL OR status = $1) AND ($2::timestamptz IS NULL OR started_at >= $2)",
+		statusArg, sinceArg,
+	).Scan(&count)
+	return count, err
 }
