@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
@@ -12,7 +13,7 @@ import (
 	"github.com/TolgaOk/nextask/internal/db"
 	"github.com/cenkalti/backoff/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	gonanoid "github.com/matoous/go-nanoid/v2"
+	"github.com/moby/moby/pkg/namesgenerator"
 )
 
 // Worker processes tasks from the queue.
@@ -22,6 +23,8 @@ type Worker struct {
 	Pool              *pgxpool.Pool
 	Executor          *Executor
 	Once              bool
+	Rm                bool
+	ExitIfIdle        *time.Duration
 	dbURL             string
 	workdir           string
 	heartbeatInterval time.Duration
@@ -35,6 +38,8 @@ type Config struct {
 	Workdir           string
 	Name              string
 	Once              bool
+	Rm                bool
+	ExitIfIdle        *time.Duration
 	HeartbeatInterval time.Duration
 	TagFilter         map[string]string
 	BackoffInitial    time.Duration
@@ -50,7 +55,7 @@ func New(ctx context.Context, cfg Config) (*Worker, error) {
 
 	workerID := cfg.Name
 	if workerID == "" {
-		workerID, _ = gonanoid.Generate("0123456789abcdefghijklmnopqrstuvwxyz", 8)
+		workerID = namesgenerator.GetRandomName(0)
 	}
 
 	hostname, _ := os.Hostname()
@@ -76,6 +81,8 @@ func New(ctx context.Context, cfg Config) (*Worker, error) {
 		Pool:              pool,
 		Executor:          &Executor{Pool: pool, Workdir: cfg.Workdir},
 		Once:              cfg.Once,
+		Rm:                cfg.Rm,
+		ExitIfIdle:        cfg.ExitIfIdle,  // nil = disabled, 0 = exit immediately, >0 = wait duration
 		dbURL:             cfg.DBURL,
 		workdir:           cfg.Workdir,
 		heartbeatInterval: cfg.HeartbeatInterval,
@@ -157,6 +164,14 @@ func (w *Worker) Run(parentCtx context.Context) error {
 
 	fmt.Printf("Worker %s started\n", w.ID)
 
+	var idleTimer *time.Timer
+	var idleCh <-chan time.Time
+	if w.ExitIfIdle != nil {
+		idleTimer = time.NewTimer(*w.ExitIfIdle)
+		idleCh = idleTimer.C
+		defer idleTimer.Stop()
+	}
+
 	for {
 		if ctx.Err() != nil {
 			return nil
@@ -170,6 +185,15 @@ func (w *Worker) Run(parentCtx context.Context) error {
 
 		if task != nil {
 			w.processTask(ctx, task)
+			if w.Rm {
+				taskDir := filepath.Join(w.workdir, task.ID)
+				if err := os.RemoveAll(taskDir); err != nil {
+					fmt.Fprintf(os.Stderr, "cleanup failed: %v\n", err)
+				}
+			}
+			if idleTimer != nil {
+				idleTimer.Reset(*w.ExitIfIdle)
+			}
 			if w.Once {
 				return nil
 			}
@@ -192,6 +216,9 @@ func (w *Worker) Run(parentCtx context.Context) error {
 		select {
 		case <-taskListener.C:
 			// wake event received, loop to claim task
+		case <-idleCh:
+			fmt.Println("No tasks received, exiting (idle timeout)")
+			return nil
 		case <-ctx.Done():
 			return nil
 		}
