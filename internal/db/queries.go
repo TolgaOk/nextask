@@ -204,6 +204,54 @@ func InsertLog(ctx context.Context, pool *pgxpool.Pool, taskID, stream, data str
 	return id, err
 }
 
+// LogEntry represents a single log line for batch insertion.
+type LogEntry struct {
+	Stream string
+	Data   string
+}
+
+// InsertLogBatch inserts multiple log lines in a single query and returns the max inserted ID.
+func InsertLogBatch(ctx context.Context, pool *pgxpool.Pool, taskID string, entries []LogEntry) (int, error) {
+	if len(entries) == 0 {
+		return 0, nil
+	}
+
+	// Build multi-row INSERT: INSERT INTO task_logs (task_id, stream, data) VALUES ($1,$2,$3), ($1,$4,$5), ...
+	// All rows share the same task_id ($1).
+	query := "INSERT INTO task_logs (task_id, stream, data) VALUES "
+	args := make([]any, 0, 1+len(entries)*2)
+	args = append(args, taskID) // $1
+
+	for i, e := range entries {
+		if i > 0 {
+			query += ", "
+		}
+		streamIdx := 2 + i*2
+		dataIdx := 3 + i*2
+		query += fmt.Sprintf("($1, $%d, $%d)", streamIdx, dataIdx)
+		args = append(args, e.Stream, e.Data)
+	}
+	query += " RETURNING id"
+
+	rows, err := pool.Query(ctx, query, args...)
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+
+	var maxID int
+	for rows.Next() {
+		var id int
+		if err := rows.Scan(&id); err != nil {
+			return 0, err
+		}
+		if id > maxID {
+			maxID = id
+		}
+	}
+	return maxID, rows.Err()
+}
+
 // GetLogsSince retrieves logs for a task with ID greater than lastLogID.
 func GetLogsSince(ctx context.Context, pool *pgxpool.Pool, taskID string, lastLogID int) ([]TaskLog, error) {
 	sql, err := migrations.FS.ReadFile("get_logs_since.sql")
