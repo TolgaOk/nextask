@@ -1,0 +1,106 @@
+services:
+  db:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: nextask
+      POSTGRES_DB: nextask
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./init-db.sql:/docker-entrypoint-initdb.d/init-db.sql
+    command:
+      - postgres
+      - -c
+      - tcp_keepalives_idle=60
+      - -c
+      - tcp_keepalives_interval=10
+      - -c
+      - tcp_keepalives_count=3
+      - -c
+      - idle_in_transaction_session_timeout=60000
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nextask"]
+      interval: 5s
+      retries: 5
+
+  pgbouncer:
+    image: bitnami/pgbouncer:latest
+    restart: unless-stopped
+    environment:
+      POSTGRESQL_HOST: db
+      POSTGRESQL_PORT: 5432
+      POSTGRESQL_USERNAME: nextask
+      POSTGRESQL_PASSWORD: ${DB_PASSWORD}
+      POSTGRESQL_DATABASE: nextask
+      PGBOUNCER_POOL_MODE: transaction
+      PGBOUNCER_DEFAULT_POOL_SIZE: 15
+      PGBOUNCER_MAX_CLIENT_CONN: 200
+      PGBOUNCER_SERVER_IDLE_TIMEOUT: 300
+      PGBOUNCER_CLIENT_IDLE_TIMEOUT: 300
+    ports:
+      - "5432:6432"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  gitea:
+    image: gitea/gitea:latest
+    restart: unless-stopped
+    environment:
+      GITEA__database__DB_TYPE: postgres
+      GITEA__database__HOST: db:5432
+      GITEA__database__NAME: gitea
+      GITEA__database__USER: nextask
+      GITEA__database__PASSWD: ${DB_PASSWORD}
+      GITEA__security__INSTALL_LOCK: "true"
+      GITEA__service__DISABLE_REGISTRATION: "true"
+    volumes:
+      - gitea:/data
+    ports:
+      - "3000:3000"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  gitea-init:
+    image: gitea/gitea:latest
+    restart: "no"
+    environment:
+      GITEA__database__DB_TYPE: postgres
+      GITEA__database__HOST: db:5432
+      GITEA__database__NAME: gitea
+      GITEA__database__USER: nextask
+      GITEA__database__PASSWD: ${DB_PASSWORD}
+      GITEA__security__INSTALL_LOCK: "true"
+    volumes:
+      - gitea:/data
+    depends_on:
+      gitea:
+        condition: service_started
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        sleep 5
+        gitea admin user create \
+          --username nextask \
+          --password "$${DB_PASSWORD}" \
+          --email nextask@local \
+          --admin \
+          --must-change-password=false 2>/dev/null || true
+        # Create the source repo via API
+        TOKEN=$$(gitea admin user generate-access-token --username nextask --token-name setup --scopes repo 2>/dev/null | grep -o '[a-f0-9]\{40\}' || true)
+        if [ -n "$$TOKEN" ]; then
+          wget -qO- --header="Authorization: token $$TOKEN" \
+            --header="Content-Type: application/json" \
+            --post-data='{"name":"source","private":true}' \
+            "http://gitea:3000/api/v1/user/repos" 2>/dev/null || true
+          echo ""
+          echo "Gitea ready:"
+          echo "  Remote: http://nextask:$$TOKEN@<host>:3000/nextask/source.git"
+          echo "  (replace <host> with your server IP)"
+        fi
+
+volumes:
+  pgdata:
+  gitea:

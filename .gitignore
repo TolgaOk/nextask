@@ -41,3 +41,4 @@ bin/
 nextask
 nextask-*
 !nextask/
+!skills/nextask*/
