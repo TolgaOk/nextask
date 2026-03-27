@@ -11,8 +11,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/charmbracelet/lipgloss"
-	"github.com/charmbracelet/lipgloss/table"
 	"github.com/jackc/pgx/v5"
 	gonanoid "github.com/matoous/go-nanoid/v2"
 	"github.com/TolgaOk/nextask/internal/db"
@@ -22,12 +20,14 @@ import (
 )
 
 var (
-	workdir       string
-	once          bool
-	daemon        bool
-	workerID      string // hidden, used by daemon mode
-	workerTimeout string
-	workerFilters []string
+	workdir        string
+	once           bool
+	daemon         bool
+	rm             bool
+	exitIfIdle     string
+	workerID       string // hidden, used by daemon mode
+	workerTimeout  string
+	workerFilters  []string
 )
 
 var workerCmd = &cobra.Command{
@@ -65,6 +65,18 @@ var workerCmd = &cobra.Command{
 			}
 		}
 
+		// Parse exit-if-idle if provided
+		var exitIfIdleDuration *time.Duration
+		if exitIfIdle != "" {
+			d, err := str2duration.ParseDuration(exitIfIdle)
+			if err != nil {
+				return errWithHints(fmt.Sprintf("invalid exit-if-idle: %s", exitIfIdle),
+					"Examples: "+codeStyle.Render("0s")+", "+codeStyle.Render("1m")+", "+codeStyle.Render("5m"),
+				)
+			}
+			exitIfIdleDuration = &d
+		}
+
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
@@ -73,7 +85,7 @@ var workerCmd = &cobra.Command{
 			go func() {
 				select {
 				case <-time.After(timeout):
-					fmt.Printf("\nTimeout reached (%s), shutting down...\n", workerTimeout)
+					fmt.Fprintf(os.Stderr, "\nTimeout reached (%s), shutting down...\n", workerTimeout)
 					cancel()
 				case <-ctx.Done():
 				}
@@ -85,7 +97,7 @@ var workerCmd = &cobra.Command{
 		go func() {
 			select {
 			case sig := <-sigCh:
-				fmt.Printf("\nReceived %s, shutting down...\n", sig)
+				fmt.Fprintf(os.Stderr, "\nReceived %s, shutting down...\n", sig)
 				cancel()
 			case <-ctx.Done():
 				signal.Stop(sigCh)
@@ -109,8 +121,13 @@ var workerCmd = &cobra.Command{
 			Workdir:           cfg.Worker.Workdir,
 			Name:              workerID,
 			Once:              once,
+			Rm:                rm,
+			ExitIfIdle:        exitIfIdleDuration,
 			HeartbeatInterval: cfg.Worker.HeartbeatInterval,
 			TagFilter:         tagFilter,
+			LogFlushLines:     cfg.Worker.LogFlushLines,
+			LogFlushInterval:  cfg.Worker.LogFlushInterval,
+			LogBufferSize:     cfg.Worker.LogBufferSize,
 		})
 		if err != nil {
 			return err
@@ -120,6 +137,15 @@ var workerCmd = &cobra.Command{
 		return w.Run(ctx)
 	},
 }
+
+var (
+	workerListLimit  int
+	workerListOffset int
+	workerListSince  string
+	workerListJSON   bool
+	workerListCSV    bool
+	workerListWrap   bool
+)
 
 var workerListCmd = &cobra.Command{
 	Use:   "list",
@@ -144,46 +170,70 @@ var workerListCmd = &cobra.Command{
 			statusFilter = &s
 		}
 
-		workers, err := db.ListWorkers(ctx, pool, statusFilter)
+		var since time.Time
+		if workerListSince != "" {
+			dur, err := str2duration.ParseDuration(workerListSince)
+			if err != nil {
+				return errWithHints(fmt.Sprintf("invalid since format: %s", workerListSince),
+					"Examples: "+codeStyle.Render("1h")+", "+codeStyle.Render("24h")+", "+codeStyle.Render("7d"),
+				)
+			}
+			since = time.Now().Add(-dur)
+		}
+
+		filter := db.WorkerListFilter{
+			Status: statusFilter,
+			Since:  since,
+			Limit:  uint64(workerListLimit),
+			Offset: uint64(workerListOffset),
+		}
+
+		workers, err := db.ListWorkers(ctx, pool, filter)
+		if err != nil {
+			return err
+		}
+
+		total, err := db.CountWorkers(ctx, pool, filter)
 		if err != nil {
 			return err
 		}
 
 		if len(workers) == 0 {
-			fmt.Println("No workers found")
+			fmt.Fprintln(os.Stderr, "No workers found")
 			return nil
 		}
 
+		staleThreshold := cfg.Worker.StaleDuration()
+		plain := workerListJSON || workerListCSV
+
 		rows := [][]string{}
 		for _, w := range workers {
-			heartbeat := time.Since(w.LastHeartbeat).Truncate(time.Second).String() + " ago"
+			status := string(w.Status)
+			if w.Status == db.WorkerStatusRunning && time.Since(w.LastHeartbeat) > staleThreshold {
+				status = "stale"
+			}
+			displayStatus := status
+			if !plain {
+				displayStatus = statusStyle(db.TaskStatus(status)).Render(status)
+			}
 			rows = append(rows, []string{
 				w.ID,
 				fmt.Sprintf("%d", w.PID),
 				w.Hostname,
-				string(w.Status),
+				displayStatus,
 				w.StartedAt.Format("2006-01-02 15:04"),
-				heartbeat,
 			})
 		}
 
-		headerStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("15"))
-		rowStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
-
-		t := table.New().
-			Border(lipgloss.NormalBorder()).
-			BorderStyle(lipgloss.NewStyle().Foreground(lipgloss.Color("240"))).
-			Headers("ID", "PID", "HOSTNAME", "STATUS", "STARTED", "HEARTBEAT").
-			Rows(rows...).
-			StyleFunc(func(row, col int) lipgloss.Style {
-				if row == 0 {
-					return headerStyle
-				}
-				return rowStyle
-			})
-
-		fmt.Fprintln(os.Stdout, t)
-		return nil
+		return PrintTable(TableConfig{
+			Headers: []string{"ID", "PID", "HOSTNAME", "STATUS", "STARTED"},
+			Rows:    rows,
+			Count:   total,
+			Offset:  workerListOffset,
+			JSON:    workerListJSON,
+			CSV:     workerListCSV,
+			Wrap:    workerListWrap,
+		})
 	},
 }
 
@@ -210,7 +260,7 @@ var workerStopCmd = &cobra.Command{
 		defer pool.Close()
 
 		// Verify worker exists and is running
-		workers, err := db.ListWorkers(ctx, pool, nil)
+		workers, err := db.ListWorkers(ctx, pool, db.WorkerListFilter{})
 		if err != nil {
 			return err
 		}
@@ -231,7 +281,7 @@ var workerStopCmd = &cobra.Command{
 		}
 
 		if found.Status == db.WorkerStatusStopped {
-			fmt.Printf("Worker %s is already stopped\n", workerID)
+			fmt.Fprintf(os.Stderr, "Worker %s is already stopped\n", workerID)
 			return nil
 		}
 
@@ -268,7 +318,7 @@ var workerStopCmd = &cobra.Command{
 			return err
 		}
 
-		fmt.Printf("Worker %s stopped\n", workerID)
+		fmt.Fprintf(os.Stderr, "Worker %s stopped\n", workerID)
 		return nil
 	},
 }
@@ -276,13 +326,21 @@ var workerStopCmd = &cobra.Command{
 func init() {
 	workerCmd.Flags().StringVar(&workdir, "workdir", "", "Base directory for task execution (default /tmp/nextask)")
 	workerCmd.Flags().BoolVar(&once, "once", false, "Run single task and exit")
+	workerCmd.Flags().BoolVar(&rm, "rm", false, "Remove task workdir after completion")
 	workerCmd.Flags().BoolVar(&daemon, "daemon", false, "Run as background daemon")
 	workerCmd.Flags().StringVar(&workerTimeout, "timeout", "", "Stop worker after duration (e.g., 1h, 24h, 7d)")
+	workerCmd.Flags().StringVar(&exitIfIdle, "exit-if-idle", "", "Exit if no tasks claimed within duration (e.g., 0s, 1m, 5m)")
 	workerCmd.Flags().StringSliceVar(&workerFilters, "filter", nil, "Only claim tasks with tag (key=value, repeatable)")
 	workerCmd.Flags().StringVar(&workerID, "_id", "", "Worker ID (internal use)")
 	workerCmd.Flags().MarkHidden("_id")
 
 	workerListCmd.Flags().String("status", "", "Filter by status (running, stopped)")
+	workerListCmd.Flags().IntVar(&workerListLimit, "limit", 50, "Max results")
+	workerListCmd.Flags().IntVar(&workerListOffset, "offset", 0, "Skip first N results")
+	workerListCmd.Flags().StringVar(&workerListSince, "since", "", "Workers started after (e.g., 1h, 24h, 7d)")
+	workerListCmd.Flags().BoolVar(&workerListJSON, "json", false, "Output as JSON")
+	workerListCmd.Flags().BoolVar(&workerListCSV, "csv", false, "Output as CSV")
+	workerListCmd.Flags().BoolVar(&workerListWrap, "wrap", false, "Wrap long lines instead of truncating")
 	workerCmd.AddCommand(workerListCmd)
 
 	workerStopCmd.Flags().DurationVar(&workerStopTimeout, "timeout", 10*time.Second, "Timeout waiting for stop confirmation")
@@ -345,8 +403,8 @@ func daemonize() error {
 		return fmt.Errorf("failed to release daemon process: %w", err)
 	}
 
-	fmt.Printf("Worker %s started as daemon (pid %d)\n", id, pid)
-	fmt.Printf("Logs: %s\n", logPath)
+	fmt.Fprintf(os.Stderr, "Worker %s started as daemon (pid %d)\n", id, pid)
+	fmt.Fprintf(os.Stderr, "Logs: %s\n", logPath)
 
 	return nil
 }

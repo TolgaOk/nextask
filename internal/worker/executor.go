@@ -18,8 +18,11 @@ import (
 
 // Executor handles task execution including source fetching and command running.
 type Executor struct {
-	Pool    *pgxpool.Pool
-	Workdir string
+	Pool             *pgxpool.Pool
+	Workdir          string
+	LogFlushLines    int
+	LogFlushInterval time.Duration
+	LogBufferSize    int
 }
 
 // ExitResult contains information about how a command exited.
@@ -52,7 +55,11 @@ func (e *Executor) Execute(ctx context.Context, task *db.Task) *ExitResult {
 	}
 
 	// Create task logger with file output now that taskDir exists
-	log, err := NewTaskLogger(e.Pool, task.ID, taskDir)
+	log, err := NewTaskLogger(e.Pool, task.ID, taskDir, LogConfig{
+		FlushLines:    e.LogFlushLines,
+		FlushInterval: e.LogFlushInterval,
+		BufferSize:    e.LogBufferSize,
+	})
 	if err != nil {
 		dbLog.Log(ctx, "nextask", fmt.Sprintf("[error] create task logger: %v", err))
 		return &ExitResult{Code: 1, Err: err}

@@ -8,8 +8,6 @@ import (
 	"time"
 
 	"github.com/TolgaOk/nextask/internal/db"
-	"github.com/charmbracelet/lipgloss"
-	"github.com/charmbracelet/lipgloss/table"
 	"github.com/spf13/cobra"
 	str2duration "github.com/xhit/go-str2duration/v2"
 )
@@ -20,6 +18,10 @@ var (
 	listCommands []string
 	listSince    string
 	listLimit    int
+	listOffset   int
+	listJSON     bool
+	listCSV      bool
+	listWrap     bool
 )
 
 var listCmd = &cobra.Command{
@@ -73,6 +75,7 @@ var listCmd = &cobra.Command{
 			Commands:       listCommands,
 			Since:          since,
 			Limit:          uint64(listLimit),
+			Offset:         uint64(listOffset),
 			StaleThreshold: cfg.Worker.StaleDuration(),
 		}
 
@@ -81,11 +84,17 @@ var listCmd = &cobra.Command{
 			return err
 		}
 
+		total, err := db.CountTasks(ctx, pool, filter)
+		if err != nil {
+			return err
+		}
+
 		if len(tasks) == 0 {
-			fmt.Println("No tasks found")
+			fmt.Fprintln(os.Stderr, "No tasks found")
 			return nil
 		}
 
+		plain := listJSON || listCSV
 		rows := [][]string{}
 		for _, t := range tasks {
 			var tagParts []string
@@ -94,32 +103,29 @@ var listCmd = &cobra.Command{
 			}
 			tagsStr := strings.Join(tagParts, " ")
 
+			status := string(t.Status)
+			if !plain {
+				status = statusStyle(t.Status).Render(status)
+			}
+
 			rows = append(rows, []string{
 				t.ID,
-				string(t.Status),
+				status,
 				t.Command,
 				tagsStr,
 				t.CreatedAt.Format("2006-01-02 15:04"),
 			})
 		}
 
-		headerStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("15"))
-		rowStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
-
-		t := table.New().
-			Border(lipgloss.NormalBorder()).
-			BorderStyle(lipgloss.NewStyle().Foreground(lipgloss.Color("240"))).
-			Headers("ID", "STATUS", "COMMAND", "TAGS", "CREATED").
-			Rows(rows...).
-			StyleFunc(func(row, col int) lipgloss.Style {
-				if row == 0 {
-					return headerStyle
-				}
-				return rowStyle
-			})
-
-		fmt.Fprintln(os.Stdout, t)
-		return nil
+		return PrintTable(TableConfig{
+			Headers: []string{"ID", "STATUS", "COMMAND", "TAGS", "CREATED"},
+			Rows:    rows,
+			Count:   total,
+			Offset:  listOffset,
+			JSON:    listJSON,
+			CSV:     listCSV,
+			Wrap:    listWrap,
+		})
 	},
 }
 
@@ -129,5 +135,9 @@ func init() {
 	listCmd.Flags().StringSliceVar(&listCommands, "command", nil, "Substring match in command (repeatable)")
 	listCmd.Flags().StringVar(&listSince, "since", "", "Tasks created after (e.g., 1h, 24h, 7d)")
 	listCmd.Flags().IntVar(&listLimit, "limit", 50, "Max results")
+	listCmd.Flags().IntVar(&listOffset, "offset", 0, "Skip first N results")
+	listCmd.Flags().BoolVar(&listJSON, "json", false, "Output as JSON")
+	listCmd.Flags().BoolVar(&listCSV, "csv", false, "Output as CSV")
+	listCmd.Flags().BoolVar(&listWrap, "wrap", false, "Wrap long lines instead of truncating")
 	RootCmd.AddCommand(listCmd)
 }

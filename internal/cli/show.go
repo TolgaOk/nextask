@@ -31,6 +31,8 @@ func statusStyle(status db.TaskStatus) lipgloss.Style {
 		return lipgloss.NewStyle().Foreground(lipgloss.Color("243"))
 	case db.StatusStale:
 		return lipgloss.NewStyle().Foreground(lipgloss.Color("208")).Bold(true)
+	case "stopped":
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("243"))
 	default:
 		return lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
 	}

@@ -48,7 +48,7 @@ var cancelCmd = &cobra.Command{
 
 		switch *originalStatus {
 		case db.StatusPending:
-			fmt.Println("Task cancelled")
+			fmt.Fprintln(os.Stderr, "Task cancelled")
 			return nil
 
 		case db.StatusRunning:
@@ -134,7 +134,7 @@ func waitForCancel(ctx context.Context, pool *pgxpool.Pool, taskID string) error
 				return fmt.Errorf("failed to parse status event: %w", err)
 			}
 			if status.Status == string(db.StatusCancelled) {
-				fmt.Println("Task cancelled")
+				fmt.Fprintln(os.Stderr, "Task cancelled")
 				return nil
 			}
 		}
