@@ -15,6 +15,21 @@ Compose files are in `${CLAUDE_SKILL_DIR}/scripts/`.
 
 Guide the user through setup interactively. Follow this decision tree — each answer determines the next question. Do not ask all questions upfront.
 
+If `AskUserQuestion` is available, use it to present choices as structured options. Otherwise, ask in plain text.
+
+**Quick reference:**
+```
+0. Check nextask (silent install if missing)
+1. Check existing config → use it / start fresh
+2. Where to deploy? → local / remote
+3. Check Docker (ask user to install if missing)
+4. Snapshots? → no: skip to 7
+5. Git remote? → Gitea / bare repo / GitHub / git daemon
+6. Gitea admin? → auto / custom
+7. DB password? → auto / custom
+8. Agent runs: ports, compose, init db, write config, verify, list secrets
+```
+
 ### 0. Check nextask
 
 Check `nextask --version`. If not installed, install with:
@@ -203,14 +218,16 @@ Copy `scripts/postgres-only.docker-compose.yml` as `docker-compose.yml`. Create 
 ```
 DB_PASSWORD=<strong random password>
 ```
+
+Port override if 5432 is taken: add `NEXTASK_PG_PORT=5433` to `.env`.
+
 ```bash
 docker compose up -d
 ```
 
-Connection URL: `postgres://nextask:<password>@<host>:5432/nextask`
+Connection URL: `postgres://nextask:<password>@<host>:5432/nextask` (use `NEXTASK_PG_PORT` if overridden).
 
-Alternatives:
-- **Standalone container**: `docker run -d --name nextask-pg -p 5432:5432 -e POSTGRES_USER=nextask -e POSTGRES_PASSWORD=<pw> -e POSTGRES_DB=nextask -v nextask-pgdata:/var/lib/postgresql/data --restart unless-stopped postgres:17`
+Alternatives (no compose needed):
 - **Existing PostgreSQL 14+**: user provides URL
 - **Managed** (Supabase, Neon, RDS): user provides URL
 

@@ -16,12 +16,25 @@ services:
       - tcp_keepalives_interval=10
       - -c
       - tcp_keepalives_count=3
-    ports:
-      - "5432:5432"
+      - -c
+      - idle_in_transaction_session_timeout=60000
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U nextask"]
       interval: 5s
-      retries: 5
+      retries: 10
+      start_period: 10s
+
+  pgbouncer:
+    image: edoburu/pgbouncer:latest
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgres://nextask:${DB_PASSWORD}@db:5432/nextask
+      AUTH_TYPE: scram-sha-256
+    ports:
+      - "${NEXTASK_PG_PORT:-5432}:5432"
+    depends_on:
+      db:
+        condition: service_healthy
 
 volumes:
   pgdata:
