@@ -8,7 +8,6 @@ services:
       POSTGRES_PASSWORD: ${DB_PASSWORD}
     volumes:
       - pgdata:/var/lib/postgresql/data
-      - ./init-db.sql:/docker-entrypoint-initdb.d/init-db.sql
     command:
       - postgres
       - -c
@@ -22,24 +21,30 @@ services:
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U nextask"]
       interval: 5s
-      retries: 5
+      retries: 10
+      start_period: 10s
+
+  db-init:
+    image: postgres:17
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+    environment:
+      PGPASSWORD: ${DB_PASSWORD}
+    entrypoint: ["sh", "-c"]
+    command:
+      - |
+        psql -h db -U nextask -tc "SELECT 1 FROM pg_database WHERE datname='gitea'" | grep -q 1 || psql -h db -U nextask -c "CREATE DATABASE gitea;"
 
   pgbouncer:
-    image: bitnami/pgbouncer:latest
+    image: edoburu/pgbouncer:latest
     restart: unless-stopped
     environment:
-      POSTGRESQL_HOST: db
-      POSTGRESQL_PORT: 5432
-      POSTGRESQL_USERNAME: nextask
-      POSTGRESQL_PASSWORD: ${DB_PASSWORD}
-      POSTGRESQL_DATABASE: nextask
-      PGBOUNCER_POOL_MODE: transaction
-      PGBOUNCER_DEFAULT_POOL_SIZE: 15
-      PGBOUNCER_MAX_CLIENT_CONN: 200
-      PGBOUNCER_SERVER_IDLE_TIMEOUT: 300
-      PGBOUNCER_CLIENT_IDLE_TIMEOUT: 300
+      DATABASE_URL: postgres://nextask:${DB_PASSWORD}@db:5432/nextask
+      AUTH_TYPE: scram-sha-256
     ports:
-      - "5432:6432"
+      - "${NEXTASK_PG_PORT:-5432}:5432"
     depends_on:
       db:
         condition: service_healthy
@@ -58,48 +63,46 @@ services:
     volumes:
       - gitea:/data
     ports:
-      - "3000:3000"
+      - "${NEXTASK_GITEA_PORT:-3000}:3000"
     depends_on:
-      db:
-        condition: service_healthy
+      db-init:
+        condition: service_completed_successfully
 
   gitea-init:
     image: gitea/gitea:latest
-    restart: "no"
-    environment:
-      GITEA__database__DB_TYPE: postgres
-      GITEA__database__HOST: db:5432
-      GITEA__database__NAME: gitea
-      GITEA__database__USER: nextask
-      GITEA__database__PASSWD: ${DB_PASSWORD}
-      GITEA__security__INSTALL_LOCK: "true"
-    volumes:
-      - gitea:/data
+    user: git
     depends_on:
       gitea:
         condition: service_started
+    volumes:
+      - gitea:/data
+    environment:
+      DB_PASSWORD: ${DB_PASSWORD}
+    restart: "no"
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
-        sleep 5
-        gitea admin user create \
-          --username nextask \
-          --password "$${DB_PASSWORD}" \
-          --email nextask@local \
-          --admin \
-          --must-change-password=false 2>/dev/null || true
-        # Create the source repo via API
-        TOKEN=$$(gitea admin user generate-access-token --username nextask --token-name setup --scopes repo 2>/dev/null | grep -o '[a-f0-9]\{40\}' || true)
-        if [ -n "$$TOKEN" ]; then
-          wget -qO- --header="Authorization: token $$TOKEN" \
-            --header="Content-Type: application/json" \
-            --post-data='{"name":"source","private":true}' \
-            "http://gitea:3000/api/v1/user/repos" 2>/dev/null || true
-          echo ""
-          echo "Gitea ready:"
-          echo "  Remote: http://nextask:$$TOKEN@<host>:3000/nextask/source.git"
-          echo "  (replace <host> with your server IP)"
-        fi
+        echo "Waiting for Gitea..."
+        until curl -sf http://gitea:3000/api/v1/version > /dev/null 2>&1; do sleep 2; done
+        echo "Gitea is ready"
+        gitea admin user create --username nextask --password "$$DB_PASSWORD" --email nextask@localhost --admin 2>&1 || echo "(user may already exist)"
+        curl -sf -X DELETE -u "nextask:$$DB_PASSWORD" "http://gitea:3000/api/v1/users/nextask/tokens/nextask-auto" 2>/dev/null || true
+        TOKEN=$$(curl -sf -X POST -u "nextask:$$DB_PASSWORD" \
+          -H "Content-Type: application/json" \
+          -d '{"name":"nextask-auto","scopes":["write:repository","write:user"]}' \
+          "http://gitea:3000/api/v1/users/nextask/tokens" | grep -o '"sha1":"[^"]*"' | cut -d'"' -f4)
+        if [ -z "$$TOKEN" ]; then echo "ERROR: Failed to create token"; exit 1; fi
+        curl -sf -X POST \
+          -H "Authorization: token $$TOKEN" \
+          -H "Content-Type: application/json" \
+          -d '{"name":"source","private":true,"auto_init":true}' \
+          "http://gitea:3000/api/v1/user/repos" > /dev/null 2>&1 || true
+        echo ""
+        echo "================================================"
+        echo "Gitea setup complete!"
+        echo "Remote: http://nextask:$${TOKEN}@<HOST>:3000/nextask/source.git"
+        echo "(replace <HOST> with server IP or hostname)"
+        echo "================================================"
 
 volumes:
   pgdata:
