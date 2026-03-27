@@ -5,6 +5,8 @@ description: Deploy nextask backend services (PostgreSQL, PgBouncer, Gitea) on a
 
 See the [README](https://github.com/TolgaOk/nextask) for install instructions and full documentation.
 
+Related skills: `nextask` (enqueue, monitor, manage tasks), `nextask-setup-worker` (set up workers).
+
 Deploy nextask backend services. These are lightweight (1 CPU, 1GB RAM is enough) but should run on an always-on machine. A VPS is ideal. Local machines that sleep or change networks will disrupt workers.
 
 Requires Docker with Docker Compose (`docker compose`). Apple Container (`container` CLI) does not support compose files and is not suitable for multi-service setups.
@@ -13,7 +15,7 @@ Compose files are in `${CLAUDE_SKILL_DIR}/scripts/`.
 
 ## Agent guidance
 
-Guide the user through setup interactively. Follow this decision tree — each answer determines the next question. Do not ask all questions upfront.
+Guide the user through setup interactively. Follow this decision tree. Each answer determines the next question. Do not ask all questions upfront.
 
 If `AskUserQuestion` is available, use it to present choices as structured options. Otherwise, ask in plain text.
 
@@ -21,7 +23,7 @@ If `AskUserQuestion` is available, use it to present choices as structured optio
 ```
 0. Check nextask (silent install if missing)
 1. Check existing config → use it / start fresh
-2. Where to deploy? → local / remote
+2. Where to deploy? → remote (recommend) / local
 3. Check Docker (ask user to install if missing)
 4. Snapshots? → no: skip to 7
 5. Git remote? → Gitea / bare repo / GitHub / git daemon
@@ -57,18 +59,18 @@ If a config exists, tell the user what was found and ask: "You already have a ne
 
 If no config found, continue to step 2.
 
-> **Note:** When jumping to a step from here, the agent still needs Docker (step 3) if deploying new services. Use judgement — if only adding a source remote to an existing DB setup, Docker may not be needed.
+> **Note:** When jumping to a step from here, the agent still needs Docker (step 3) if deploying new services. Use judgement: if only adding a source remote to an existing DB setup, Docker may not be needed.
 
 ### 2. "Where will you deploy — locally or on a remote server?"
 
-- **Local** → continue to step 3
-- **Remote** → verify SSH access: `ssh -o ConnectTimeout=10 user@host "echo ok"`. Continue to step 3.
+- **Remote server/VPS** (recommend) → services stay up reliably. Verify SSH: `ssh -o ConnectTimeout=10 user@host "echo ok"`. Continue to step 3.
+- **Local** → fine for testing, but local machines that sleep or change networks will disrupt workers. Continue to step 3.
 
 ### 3. Check Docker
 
 Check `docker compose version` (locally, or via SSH if remote). If not installed, ask: "Docker is not installed. I can install it for you, or you can install it yourself and tell me when it's ready."
 
-- **Agent installs**: macOS `brew install --cask docker`, Linux `curl -fsSL https://get.docker.com | sh`. On macOS, Docker Desktop needs to be launched before `docker compose` works — tell the user to open it.
+- **Agent installs**: macOS `brew install --cask docker`, Linux `curl -fsSL https://get.docker.com | sh`. On macOS, Docker Desktop needs to be launched before `docker compose` works. Tell the user to open it.
 - **User installs**: wait for user to confirm, then re-check.
 
 Continue once `docker compose version` succeeds.
@@ -90,11 +92,11 @@ Explain: snapshots capture your exact working tree (including uncommitted change
 ### 6. "For the Gitea admin — should I set it up automatically or do you want custom credentials?"
 
 - **Auto** (recommend this) → username `nextask`, password = same as DB password. The compose handles everything. Continue to step 7.
-- **Custom** → user must create admin manually via Gitea web UI after startup, then create token and repo (see troubleshooting table). More work — warn them. Continue to step 7.
+- **Custom** → user must create admin manually via Gitea web UI after startup, then create token and repo (see troubleshooting table). More work, warn them. Continue to step 7.
 
 ### 7. "For the database password — should I generate one or do you want to set your own?"
 
-- **Auto** → generate with `openssl rand -base64 24`, show to user
+- **Auto** → generate with `openssl rand -hex 24`, show to user
 - **Custom** → user provides
 
 ### 8. Agent actions (no more questions)

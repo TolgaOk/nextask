@@ -3,6 +3,8 @@ name: nextask-setup-worker
 description: Set up a nextask worker to execute tasks. Covers local workers, containerized workers with dependency isolation, remote servers via SSH, and cloud GPU providers (RunPod, Vast.ai). Use when the user wants to add a worker, run tasks on a GPU machine, set up a container with project dependencies, or says "add a worker" or "I want to run jobs on my server."
 ---
 
+Related skills: `nextask` (enqueue, monitor, manage tasks), `nextask-setup-services` (deploy PostgreSQL, git server).
+
 Set up workers that claim and execute nextask tasks. Services (PostgreSQL, git remote) must already be running. If not, use the `nextask-setup-services` skill first.
 
 **Installing nextask:** `curl -fsSL https://raw.githubusercontent.com/TolgaOk/nextask/main/scripts/install.sh | bash`
@@ -56,9 +58,9 @@ Only if cloud provider was chosen:
 
 For local and remote:
 
-- **No** → run nextask directly. Jump to step 4.
-- **Yes, use a container** → build a per-project Docker image with deps + nextask. Jump to step 4.
-- **Yes, use a virtual env** (venv/conda) → start the worker from within the activated environment so child processes inherit it. E.g., `conda activate myproject && nextask worker`. Alternatively, bake activation into the enqueued command: `nextask enqueue "source .venv/bin/activate && python train.py"`. Jump to step 4.
+- **Container** (recommend) → build a per-project Docker image with deps + nextask. Reproducible and isolated. Jump to step 4.
+- **Virtual env** (venv/conda) → start the worker from within the activated environment so child processes inherit it. E.g., `conda activate myproject && nextask worker`. Alternatively, bake activation into the enqueued command: `nextask enqueue "source .venv/bin/activate && python train.py"`. Jump to step 4.
+- **No deps needed** → run nextask directly without isolation. Jump to step 4.
 
 ### 3. Cloud provider container setup
 
@@ -159,7 +161,7 @@ Create a pod/template with:
 - Env vars: `NEXTASK_DB_URL`, `NEXTASK_SOURCE_REMOTE`
 - Start command: `nextask worker --filter gpu=a100 --exit-if-idle 5m`
 
-`--exit-if-idle 5m` exits after 5 minutes with no tasks. The pod stays running — stop it via the provider to stop billing.
+`--exit-if-idle 5m` exits after 5 minutes with no tasks. The pod stays running. Stop it via the provider to stop billing.
 
 Enqueue side:
 ```bash
