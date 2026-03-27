@@ -15,43 +15,87 @@ Compose files are in `${CLAUDE_SKILL_DIR}/scripts/`.
 
 Guide the user through setup interactively. Follow this decision tree — each answer determines the next question. Do not ask all questions upfront.
 
-### 1. "Where will you deploy — locally or on a remote server?"
+### 0. Check nextask
 
-- **Local** → continue to step 2
-- **Remote** → verify SSH access (`ssh -o ConnectTimeout=10 user@host "docker compose version"`), then continue to step 2
+Check `nextask --version`. If not installed, install with:
+```bash
+curl -fsSL https://raw.githubusercontent.com/TolgaOk/nextask/main/scripts/install.sh | bash
+```
 
-### 2. "Do you want source snapshots (`--snapshot`)?"
+### 1. Check existing config
+
+Check for existing configuration:
+```bash
+cat ~/.config/nextask/global.toml 2>/dev/null
+cat .nextask.toml 2>/dev/null
+echo "NEXTASK_DB_URL=$NEXTASK_DB_URL"
+echo "NEXTASK_SOURCE_REMOTE=$NEXTASK_SOURCE_REMOTE"
+```
+
+If a config exists, tell the user what was found and ask: "You already have a nextask config. Do you want to use it, or start fresh?"
+
+- **Use existing** → test the connection: `nextask list` and (if source.remote is set) `git ls-remote <remote>`.
+  - Both work → setup is done, skip all remaining steps.
+  - DB works but no source remote → ask if they want snapshots (jump to step 4).
+  - DB fails → ask if they want to fix it or start fresh (jump to step 2).
+- **Start fresh** → continue to step 2.
+
+If no config found, continue to step 2.
+
+> **Note:** When jumping to a step from here, the agent still needs Docker (step 3) if deploying new services. Use judgement — if only adding a source remote to an existing DB setup, Docker may not be needed.
+
+### 2. "Where will you deploy — locally or on a remote server?"
+
+- **Local** → continue to step 3
+- **Remote** → verify SSH access: `ssh -o ConnectTimeout=10 user@host "echo ok"`. Continue to step 3.
+
+### 3. Check Docker
+
+Check `docker compose version` (locally, or via SSH if remote). If not installed, ask: "Docker is not installed. I can install it for you, or you can install it yourself and tell me when it's ready."
+
+- **Agent installs**: macOS `brew install --cask docker`, Linux `curl -fsSL https://get.docker.com | sh`. On macOS, Docker Desktop needs to be launched before `docker compose` works — tell the user to open it.
+- **User installs**: wait for user to confirm, then re-check.
+
+Continue once `docker compose version` succeeds.
+
+### 4. "Do you want source snapshots (`--snapshot`)?"
 
 Explain: snapshots capture your exact working tree (including uncommitted changes) so every task is reproducible. Requires a git remote to store them.
 
-- **Yes** → continue to step 3
-- **No** → skip to step 5 (Postgres only, no Gitea)
+- **Yes** → continue to step 5
+- **No** → skip to step 7 (Postgres only)
 
-### 3. "For the git remote — Gitea (simplest, included), local bare repo, or GitHub/GitLab?"
+### 5. "For the git remote — self-hosted git server, local bare repo, GitHub/GitLab, or git daemon?"
 
-- **Gitea** (recommend this) → continue to step 4
-- **Local bare repo** → run `git init --bare ~/.nextask/source.git`, skip to step 5 (Postgres only compose). Set `source.remote` to that path.
-- **GitHub/GitLab** → user provides a private repo URL and personal access token. Skip to step 5 (Postgres only compose). Set `source.remote` to the authenticated URL.
+- **Gitea** (recommend) → self-hosted, included in full-stack compose. Continue to step 6.
+- **Local bare repo** → single-machine only. Skip to step 7.
+- **GitHub/GitLab** → user provides repo URL + token. Skip to step 7.
+- **Git daemon** → no auth, trusted networks only. Skip to step 7.
 
-### 4. "For the Gitea admin — should I set it up automatically or do you want custom credentials?"
+### 6. "For the Gitea admin — should I set it up automatically or do you want custom credentials?"
 
-- **Auto** (recommend this) → username `nextask`, password = same as DB password. The compose handles everything.
-- **Custom** → user must create admin manually via Gitea web UI after startup, then create token and repo (see troubleshooting table). More work — warn them.
+- **Auto** (recommend this) → username `nextask`, password = same as DB password. The compose handles everything. Continue to step 7.
+- **Custom** → user must create admin manually via Gitea web UI after startup, then create token and repo (see troubleshooting table). More work — warn them. Continue to step 7.
 
-### 5. "For the database password — should I generate one or do you want to set your own?"
+### 7. "For the database password — should I generate one or do you want to set your own?"
 
 - **Auto** → generate with `openssl rand -base64 24`, show to user
 - **Custom** → user provides
 
-### 6. Agent actions (no more questions)
+### 8. Agent actions (no more questions)
 
 1. Check ports 5432 and 3000: `lsof -i :5432`, `lsof -i :3000`. If occupied, set `NEXTASK_PG_PORT` / `NEXTASK_GITEA_PORT` in `.env`. Tell user which ports will be used.
 2. Copy compose file, write `.env`, run `docker compose up -d`.
 3. If full stack: wait for `gitea-init` to complete, extract token from `docker compose logs gitea-init`.
 4. Run `nextask init db`.
-5. Write `db.url` and `source.remote` to `~/.config/nextask/global.toml` (create directory if missing). This is the safe default — local to user's machine, not in version control. Do NOT write a project `.env` unless the user explicitly asks (risk of committing secrets).
+5. Write `db.url` and `source.remote` to `~/.config/nextask/global.toml` (create directory if missing). Set `chmod 600 ~/.config/nextask/global.toml` so only the owner can read it. Do NOT write a project `.env` unless the user explicitly asks (risk of committing secrets).
 6. Verify: `nextask list` (expect "No tasks found"), `git ls-remote <remote>` (expect refs listed).
-7. Tell user: config written to `~/.config/nextask/global.toml`. If Gitea was set up, mention once that Gitea web login is username `nextask` with the database password.
+7. Tell the user where their secrets are stored. Include all that apply:
+   - Any auto-generated passwords — repeat them here so the user can save them.
+   - `~/.config/nextask/global.toml` (chmod 600) — DB URL and source remote with embedded credentials.
+   - Compose `.env` file — `DB_PASSWORD`, used by Docker services.
+   - If Gitea with auto setup: Gitea web login is username `nextask` with `DB_PASSWORD`. Token is in the source remote URL and in `docker compose logs gitea-init`.
+   - Docker named volumes (`pgdata`, `gitea`) hold all persistent data. Survives restarts. Only deleted with `docker compose down -v`.
 
 ## SSH tips (for remote deployment)
 
