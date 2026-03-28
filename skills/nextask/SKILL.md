@@ -101,6 +101,16 @@ nextask enqueue "python train.py" --snapshot --tag gpu=a100
 nextask worker --filter gpu=a100
 ```
 
+### Saving results from tasks
+
+Tasks run in a cloned workdir on the worker. To persist results (CSVs, models, logs), have the task commit and push them back:
+
+```bash
+nextask enqueue 'python train.py --output results.csv && git add results.csv && git commit -m "results" && git push origin HEAD' --snapshot
+```
+
+Or write results to a shared filesystem / object store that both the enqueue machine and worker can access.
+
 ### Tagging and querying
 
 Tags are key=value pairs for organizing, filtering, and routing tasks.
@@ -126,7 +136,7 @@ nextask config                     # show configuration
 ```
 
 ## Related skills
-- `nextask-setup-services` — deploy PostgreSQL, PgBouncer, and a git server for snapshots. Use whenever services need to be set up, changed, or are not working.
+- `nextask-setup-services` — deploy PostgreSQL and a git server for snapshots. Use whenever services need to be set up, changed, or are not working.
 - `nextask-setup-worker` — set up workers (local, remote, cloud). Use whenever a worker needs to be added or reconfigured.
 
 ## Configuration

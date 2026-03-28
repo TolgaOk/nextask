@@ -1,6 +1,6 @@
 ---
 name: nextask-setup-services
-description: Deploy nextask backend services (PostgreSQL, PgBouncer, Gitea) on a VPS, local machine, or managed provider. Use when the user wants to set up the database, configure a git remote for snapshots, or deploy nextask services. Also triggers for "set up the task queue", "deploy postgres for nextask", or "I need a git server for snapshots."
+description: Deploy nextask backend services (PostgreSQL, Gitea) on a VPS, local machine, or managed provider. Use when the user wants to set up the database, configure a git remote for snapshots, or deploy nextask services. Also triggers for "set up the task queue", "deploy postgres for nextask", or "I need a git server for snapshots."
 ---
 
 See the [README](https://github.com/TolgaOk/nextask) for install instructions and full documentation.
@@ -130,7 +130,7 @@ scp docker-compose.yml user@host:/opt/nextask/
 
 Do NOT use `-t` or `-tt` for non-interactive commands. Do NOT run SSH in background and poll for results.
 
-## Full stack (PostgreSQL + PgBouncer + Gitea)
+## Full stack (PostgreSQL + Gitea)
 
 This is the recommended setup. The compose file includes a `gitea-init` service that automatically creates an admin user, access token, and private `source` repo.
 
@@ -158,11 +158,10 @@ docker compose up -d
 ```
 
 This starts 5 services in order:
-1. `db` — PostgreSQL 17
+1. `db` — PostgreSQL 17 (exposed on port 5432 or `NEXTASK_PG_PORT`)
 2. `db-init` — creates the `gitea` database (one-shot, exits when done)
-3. `pgbouncer` — connection pooler, exposed on port 5432 (or `NEXTASK_PG_PORT`)
-4. `gitea` — git server, exposed on port 3000 (or `NEXTASK_GITEA_PORT`)
-5. `gitea-init` — creates admin user `nextask`, access token, and `source` repo (one-shot)
+3. `gitea` — git server, exposed on port 3000 (or `NEXTASK_GITEA_PORT`)
+4. `gitea-init` — creates admin user `nextask`, access token, and `source` repo (one-shot)
 
 ### Step 3: Get the remote URL
 
