@@ -206,31 +206,33 @@ func InsertLog(ctx context.Context, pool *pgxpool.Pool, taskID, stream, data str
 
 // LogEntry represents a single log line for batch insertion.
 type LogEntry struct {
+	Seq    int
 	Stream string
 	Data   string
 }
 
 // InsertLogBatch inserts multiple log lines in a single query and returns the max inserted ID.
+// Uses ON CONFLICT to make retries idempotent — duplicate (task_id, seq) pairs are silently skipped.
 func InsertLogBatch(ctx context.Context, pool *pgxpool.Pool, taskID string, entries []LogEntry) (int, error) {
 	if len(entries) == 0 {
 		return 0, nil
 	}
 
-	// Build multi-row INSERT: INSERT INTO task_logs (task_id, stream, data) VALUES ($1,$2,$3), ($1,$4,$5), ...
-	// All rows share the same task_id ($1).
-	query := "INSERT INTO task_logs (task_id, stream, data) VALUES "
-	args := make([]any, 0, 1+len(entries)*2)
+	query := "INSERT INTO task_logs (task_id, seq, stream, data) VALUES "
+	args := make([]any, 0, 1+len(entries)*3)
 	args = append(args, taskID) // $1
 
 	for i, e := range entries {
 		if i > 0 {
 			query += ", "
 		}
-		streamIdx := 2 + i*2
-		dataIdx := 3 + i*2
-		query += fmt.Sprintf("($1, $%d, $%d)", streamIdx, dataIdx)
-		args = append(args, e.Stream, e.Data)
+		seqIdx := 2 + i*3
+		streamIdx := 3 + i*3
+		dataIdx := 4 + i*3
+		query += fmt.Sprintf("($1, $%d, $%d, $%d)", seqIdx, streamIdx, dataIdx)
+		args = append(args, e.Seq, e.Stream, e.Data)
 	}
+	query += " ON CONFLICT (task_id, seq) WHERE seq IS NOT NULL DO NOTHING"
 	query += " RETURNING id"
 
 	rows, err := pool.Query(ctx, query, args...)
@@ -268,7 +270,7 @@ func GetLogsSince(ctx context.Context, pool *pgxpool.Pool, taskID string, lastLo
 	var logs []TaskLog
 	for rows.Next() {
 		var log TaskLog
-		if err := rows.Scan(&log.ID, &log.TaskID, &log.Stream, &log.Data, &log.CreatedAt); err != nil {
+		if err := rows.Scan(&log.ID, &log.TaskID, &log.Seq, &log.Stream, &log.Data, &log.CreatedAt); err != nil {
 			return nil, err
 		}
 		logs = append(logs, log)
@@ -346,7 +348,7 @@ func GetLogs(ctx context.Context, pool *pgxpool.Pool, taskID, stream string, lim
 	var logs []TaskLog
 	for rows.Next() {
 		var log TaskLog
-		if err := rows.Scan(&log.ID, &log.TaskID, &log.Stream, &log.Data, &log.CreatedAt); err != nil {
+		if err := rows.Scan(&log.ID, &log.TaskID, &log.Seq, &log.Stream, &log.Data, &log.CreatedAt); err != nil {
 			return nil, err
 		}
 		logs = append(logs, log)
