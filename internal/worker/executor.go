@@ -153,10 +153,10 @@ func (e *Executor) runCommand(ctx context.Context, task *db.Task, taskDir string
 		}
 	}()
 
+	wg.Wait()
+
 	err = cmd.Wait()
 	close(processDone)
-
-	wg.Wait()
 
 	if errors.Is(err, exec.ErrWaitDelay) {
 		log.Log(ctx, "nextask", "[warn] pipes forced closed after WaitDelay (orphaned child?)")
