@@ -101,8 +101,8 @@ func printStyledTable(tc TableConfig) error {
 
 	fmt.Fprintln(os.Stdout, t)
 
-	if tc.Count > 0 {
-		fmt.Fprintf(os.Stderr, "%d/%d\n", len(tc.Rows), tc.Count)
+	if tc.Count > 0 && len(tc.Rows) < tc.Count {
+		fmt.Fprintf(os.Stderr, "%d/%d (use --limit to show more)\n", len(tc.Rows), tc.Count)
 	}
 
 	return nil
