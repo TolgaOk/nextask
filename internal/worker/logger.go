@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -95,6 +96,8 @@ func (l *TaskLogger) Log(ctx context.Context, stream, data string) {
 	}
 
 	// Buffer for batch DB insert — blocks if buffer is full (back-pressure).
+	// Strip null bytes: PostgreSQL TEXT columns cannot store \x00.
+	data = strings.ReplaceAll(data, "\x00", "")
 	seq := int(l.seq.Add(1))
 	select {
 	case l.lines <- logLine{seq: seq, stream: stream, data: data}:
