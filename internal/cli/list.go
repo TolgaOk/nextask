@@ -101,7 +101,13 @@ var listCmd = &cobra.Command{
 		}
 
 		if len(tasks) == 0 {
-			fmt.Fprintln(os.Stderr, "No tasks found")
+			if listJSON {
+				fmt.Println("[]")
+			} else if listCSV {
+				fmt.Println("ID,STATUS,COMMAND,TAGS,CREATED")
+			} else {
+				fmt.Fprintln(os.Stderr, "No tasks found")
+			}
 			return nil
 		}
 

@@ -206,7 +206,13 @@ var workerListCmd = &cobra.Command{
 		}
 
 		if len(workers) == 0 {
-			fmt.Fprintln(os.Stderr, "No workers found")
+			if workerListJSON {
+				fmt.Println("[]")
+			} else if workerListCSV {
+				fmt.Println("ID,PID,HOSTNAME,STATUS,STARTED")
+			} else {
+				fmt.Fprintln(os.Stderr, "No workers found")
+			}
 			return nil
 		}
 
