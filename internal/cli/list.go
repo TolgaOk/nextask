@@ -41,15 +41,9 @@ var listCmd = &cobra.Command{
 		}
 		defer pool.Close()
 
-		parsedTags := make(map[string]string)
-		for _, tag := range listTags {
-			parts := strings.SplitN(tag, "=", 2)
-			if len(parts) != 2 {
-				return errWithHints(fmt.Sprintf("invalid tag format: %s", tag),
-					"Expected format: "+codeStyle.Render("key=value"),
-				)
-			}
-			parsedTags[parts[0]] = parts[1]
+		parsedTags, err := parseTags(listTags)
+		if err != nil {
+			return err
 		}
 
 		var since time.Time
@@ -66,6 +60,12 @@ var listCmd = &cobra.Command{
 		if listLimit <= 0 {
 			return errWithHints("limit must be positive",
 				"Example: "+codeStyle.Render("--limit 50"),
+			)
+		}
+
+		if listOffset < 0 {
+			return errWithHints("offset must not be negative",
+				"Example: "+codeStyle.Render("--offset 50"),
 			)
 		}
 

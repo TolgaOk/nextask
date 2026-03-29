@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 	"time"
 
@@ -57,15 +56,9 @@ var enqueueCmd = &cobra.Command{
 
 		command := args[0]
 
-		parsedTags := make(map[string]string)
-		for _, tag := range tags {
-			parts := strings.SplitN(tag, "=", 2)
-			if len(parts) != 2 {
-				return errWithHints(fmt.Sprintf("invalid tag format: %s", tag),
-					"Expected format: "+codeStyle.Render("key=value"),
-				)
-			}
-			parsedTags[parts[0]] = parts[1]
+		parsedTags, err := parseTags(tags)
+		if err != nil {
+			return err
 		}
 
 		id, err := gonanoid.Generate("0123456789abcdefghijklmnopqrstuvwxyz", 8)

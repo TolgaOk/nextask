@@ -59,6 +59,17 @@ var logsCmd = &cobra.Command{
 			)
 		}
 
+		if logsHead < 0 {
+			return errWithHints("--head must be positive",
+				"Example: "+codeStyle.Render("--head 50"),
+			)
+		}
+		if logsTail < 0 {
+			return errWithHints("--tail must be positive",
+				"Example: "+codeStyle.Render("--tail 50"),
+			)
+		}
+
 		if logsHead > 0 && logsTail > 0 {
 			return errWithHints("cannot use both --head and --tail",
 				"Use "+codeStyle.Render("--head N")+" for first N lines",

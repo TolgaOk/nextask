@@ -7,7 +7,6 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
-	"strings"
 	"syscall"
 	"time"
 
@@ -63,6 +62,11 @@ var workerCmd = &cobra.Command{
 					"Examples: "+codeStyle.Render("1h")+", "+codeStyle.Render("24h")+", "+codeStyle.Render("7d"),
 				)
 			}
+			if timeout <= 0 {
+				return errWithHints("timeout must be positive",
+					"Examples: "+codeStyle.Render("1h")+", "+codeStyle.Render("24h")+", "+codeStyle.Render("7d"),
+				)
+			}
 		}
 
 		// Parse exit-if-idle if provided
@@ -71,6 +75,11 @@ var workerCmd = &cobra.Command{
 			d, err := str2duration.ParseDuration(exitIfIdle)
 			if err != nil {
 				return errWithHints(fmt.Sprintf("invalid exit-if-idle: %s", exitIfIdle),
+					"Examples: "+codeStyle.Render("0s")+", "+codeStyle.Render("1m")+", "+codeStyle.Render("5m"),
+				)
+			}
+			if d < 0 {
+				return errWithHints("exit-if-idle must not be negative",
 					"Examples: "+codeStyle.Render("0s")+", "+codeStyle.Render("1m")+", "+codeStyle.Render("5m"),
 				)
 			}
@@ -105,15 +114,9 @@ var workerCmd = &cobra.Command{
 		}()
 
 		// Parse tag filters
-		tagFilter := make(map[string]string)
-		for _, f := range workerFilters {
-			parts := strings.SplitN(f, "=", 2)
-			if len(parts) != 2 {
-				return errWithHints(fmt.Sprintf("invalid filter format: %s", f),
-					"Expected format: "+codeStyle.Render("key=value"),
-				)
-			}
-			tagFilter[parts[0]] = parts[1]
+		tagFilter, err := parseTags(workerFilters)
+		if err != nil {
+			return err
 		}
 
 		w, err := worker.New(ctx, worker.Config{
@@ -194,6 +197,12 @@ var workerListCmd = &cobra.Command{
 			)
 		}
 
+		if workerListOffset < 0 {
+			return errWithHints("offset must not be negative",
+				"Example: "+codeStyle.Render("--offset 50"),
+			)
+		}
+
 		filter := db.WorkerListFilter{
 			Status: statusFilter,
 			Since:  since,
@@ -267,6 +276,12 @@ var workerStopCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if cfg.DB.URL == "" {
 			return errDBRequired()
+		}
+
+		if workerStopTimeout <= 0 {
+			return errWithHints("timeout must be positive",
+				"Example: "+codeStyle.Render("--timeout 10s"),
+			)
 		}
 
 		ctx := context.Background()
