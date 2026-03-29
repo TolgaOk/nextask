@@ -129,7 +129,10 @@ func (w *waiter) check(ctx context.Context, taskID string) error {
 	}
 	if task == nil {
 		delete(w.remaining, taskID)
-		fmt.Fprintf(os.Stderr, "task %s not found\n", taskID)
+		printError(errWithHints(
+			fmt.Sprintf("task not found: %s", taskID),
+			"Run "+codeStyle.Render("nextask list")+" to see available tasks",
+		))
 		w.failCode = firstNonZero(w.failCode, 1)
 		return nil
 	}
