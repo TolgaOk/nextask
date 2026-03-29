@@ -43,8 +43,13 @@ Workers can also run inside containers. Use tags to route tasks to the right ima
 docker run pytorch-cuda:latest nextask worker --filter image=pytorch-gpu
 ```
 
-`nextask` is **agent ready** by design! Install the [skills](skills/) for general usage, setting up the services (DB and git remote), and workers with `npx skills add https://github.com/TolgaOk/nextask/tree/skills/skills`.
+`nextask` is **agent ready** by design! Install the [skills](skills/) for general usage, setting up the services (DB and git remote), and workers by
 
+```sh
+npx skills add https://github.com/TolgaOk/nextask/tree/skills/skills
+```
+
+Agents can wait for `all` or `any` tasks that has the given tag to finish:
 ```sh
 # Run a learning rate sweep over 0.1, 0.01, 0.001.
 
@@ -80,7 +85,7 @@ Simplified architecture:
 
 >**Workers** claim tasks atomically. Heartbeats detect stale workers. `--filter` routes tasks by tag. Task statuses: `pending` → `running` → `completed` | `failed` | `cancelled` | `stale`.
 
->**Logs** are capturedin batch (see `config`) with stdout/stderr separation. `--attach` streams output in real-time.
+>**Logs** are captured in batch (see `config`) with stdout/stderr separation. `--attach` streams output in real-time.
 
 >**Snapshots** (`--snapshot`) capture the full working tree (branch, commit, and uncommitted changes) and push to a configured git remote **without modifying your local repo**. Each task is executed in its own cloned workdir.
 
@@ -92,8 +97,10 @@ Config files:
 
 ```
 ~/.config/nextask/global.toml            # global defaults
-.nextask.toml                            # per-project (higher priority)
+.nextask.toml                            # per-project
 ```
+
+>**Priority:** CLI flags > ENV vars > `.nextask.toml` > `global.toml`.
 
 Example config file.
 
@@ -103,7 +110,7 @@ url = "postgres://user@localhost:5432/nextask"   # or NEXTASK_DB_URL
 
 [source]
 remote = "~/.nextask/source.git"                                 # bare repo
-# remote = "http://user>:<token>@gitea:3000/user/snapshots.git"  # gitea / github
+# remote = "http://<user>:<token>@gitea:3000/user/snapshots.git"  # gitea / github
 # remote = "git://192.168.1.10/snapshots.git"                    # git daemon
 
 [worker]
