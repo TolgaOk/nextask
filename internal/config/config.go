@@ -65,8 +65,8 @@ const DefaultHeartbeatInterval = 1 * time.Minute
 const DefaultStaleThreshold = 3
 
 const DefaultLogFlushLines = 100
-const DefaultLogFlushInterval = 50 * time.Millisecond
-const DefaultLogBufferSize = 1000
+const DefaultLogFlushInterval = 500 * time.Millisecond
+const DefaultLogBufferSize = 10000
 
 // StaleDuration returns the duration after which a task is considered stale.
 func (w WorkerConfig) StaleDuration() time.Duration {

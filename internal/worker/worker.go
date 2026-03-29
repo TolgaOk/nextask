@@ -111,32 +111,16 @@ func (w *Worker) Run(parentCtx context.Context) error {
 		return fmt.Errorf("failed to register worker: %w", err)
 	}
 
-	// Start listeners with auto-reconnect
-	taskListener, err := db.Listen(ctx, w.dbURL, w.backoff, db.ToWorkersChannel)
-	if err != nil {
-		cancel()
-		return fmt.Errorf("failed to listen for %s: %w", db.ToWorkersChannel, err)
-	}
-
+	// Single notifier for all channels (wake, stop, cancel)
 	toWorkerCh := db.ToWorkerChannel(w.ID)
-	stopListener, err := db.Listen(ctx, w.dbURL, w.backoff, toWorkerCh)
+	notifier, err := db.NewNotifier(ctx, w.dbURL, w.backoff, []string{
+		db.ToWorkersChannel,
+		toWorkerCh,
+	})
 	if err != nil {
-		taskListener.Close(context.Background())
 		cancel()
-		return fmt.Errorf("failed to listen for stop: %w", err)
+		return fmt.Errorf("failed to start notifier: %w", err)
 	}
-
-	// Handle stop signal
-	stopDone := make(chan struct{})
-	go func() {
-		defer close(stopDone)
-		select {
-		case <-stopListener.C:
-			fmt.Println("Received stop signal, shutting down...")
-			cancel()
-		case <-ctx.Done():
-		}
-	}()
 
 	// Start heartbeat goroutine
 	heartbeatDone := make(chan struct{})
@@ -152,9 +136,7 @@ func (w *Worker) Run(parentCtx context.Context) error {
 		closeCtx, closeCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer closeCancel()
 
-		taskListener.Close(closeCtx)
-		stopListener.Close(closeCtx)
-		<-stopDone
+		notifier.Close(closeCtx)
 		<-heartbeatDone
 
 		// Notify and unregister
@@ -197,7 +179,7 @@ func (w *Worker) Run(parentCtx context.Context) error {
 		w.backoff.Reset()
 
 		if task != nil {
-			w.processTask(ctx, task)
+			w.processTask(ctx, cancel, notifier, toWorkerCh, task)
 			if w.Rm {
 				taskDir := filepath.Join(w.workdir, task.ID)
 				if err := os.RemoveAll(taskDir); err != nil {
@@ -227,8 +209,15 @@ func (w *Worker) Run(parentCtx context.Context) error {
 		}
 
 		select {
-		case <-taskListener.C:
-			// wake event received, loop to claim task
+		case notif, ok := <-notifier.C:
+			if !ok {
+				return nil
+			}
+			if notif.Channel == toWorkerCh {
+				fmt.Println("Received stop signal, shutting down...")
+				return nil
+			}
+			// wake event — loop to claim
 		case <-idleCh:
 			fmt.Println("No tasks received, exiting (idle timeout)")
 			return nil
@@ -264,53 +253,71 @@ func (w *Worker) runHeartbeat(ctx context.Context) {
 	}
 }
 
-func (w *Worker) processTask(ctx context.Context, task *db.Task) {
+func (w *Worker) processTask(ctx context.Context, runCancel context.CancelFunc, notifier *db.Notifier, toWorkerCh string, task *db.Task) {
 	fmt.Printf("Processing %s: %s\n", task.ID, task.Command)
 
-	taskCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
+	taskCtx, taskCancel := context.WithCancel(ctx)
+	defer taskCancel()
 
-	// Listen for task cancellation
-	toChannel := db.ToTaskChannel(task.ID)
-	cancelListener, err := db.Listen(taskCtx, w.dbURL, w.backoff, toChannel)
-	if err != nil {
+	// Subscribe to task cancel channel on the existing connection
+	toTaskCh := db.ToTaskChannel(task.ID)
+	if err := notifier.Add(taskCtx, toTaskCh); err != nil {
 		fmt.Fprintf(os.Stderr, "failed to listen for cancel: %v\n", err)
+		w.finishTask(task, &ExitResult{Code: -1}, false)
 		return
 	}
+	defer notifier.Remove(toTaskCh)
 
-	// Handle cancel signal
-	cancelDone := make(chan struct{})
+	// Run executor in background
+	resultCh := make(chan *ExitResult, 1)
 	go func() {
-		defer close(cancelDone)
-		for {
-			select {
-			case notif, ok := <-cancelListener.C:
-				if !ok {
-					return
-				}
-				eventType, _, err := db.ParseEvent(notif.Payload)
-				if err != nil {
-					continue
-				}
-				if eventType == db.EventTypeCancel {
-					cancel()
-					return
-				}
-			case <-taskCtx.Done():
-				return
-			}
-		}
+		resultCh <- w.Executor.Execute(taskCtx, task)
 	}()
 
-	result := w.Executor.Execute(taskCtx, task)
+	// Dispatch notifications during execution
+	var result *ExitResult
+	wasCancelled := false
 
-	// Check if user cancelled BEFORE defer cancel() runs
-	wasCancelled := taskCtx.Err() == context.Canceled && ctx.Err() == nil
+	for {
+		select {
+		case result = <-resultCh:
+			goto finish
 
-	// Stop cancel listener
-	cancelListener.Close(context.Background())
-	<-cancelDone
+		case notif, ok := <-notifier.C:
+			if !ok {
+				taskCancel()
+				result = <-resultCh
+				goto finish
+			}
+			switch notif.Channel {
+			case toTaskCh:
+				eventType, _, err := db.ParseEvent(notif.Payload)
+				if err == nil && eventType == db.EventTypeCancel {
+					wasCancelled = true
+					taskCancel()
+					result = <-resultCh
+					goto finish
+				}
+			case toWorkerCh:
+				fmt.Println("Received stop signal, shutting down...")
+				runCancel()
+				taskCancel()
+				result = <-resultCh
+				goto finish
+			}
 
+		case <-ctx.Done():
+			result = <-resultCh
+			goto finish
+		}
+	}
+
+finish:
+	w.finishTask(task, result, wasCancelled)
+}
+
+// finishTask logs the result, marks the task complete in the DB, and notifies listeners.
+func (w *Worker) finishTask(task *db.Task, result *ExitResult, wasCancelled bool) {
 	logCtx, logCancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer logCancel()
 	log := NewDBLogger(w.Pool, task.ID)
@@ -337,7 +344,7 @@ func (w *Worker) processTask(ctx context.Context, task *db.Task) {
 	completeCtx, completeCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer completeCancel()
 
-	err = db.Retry(completeCtx, func() error {
+	err := db.Retry(completeCtx, func() error {
 		return db.CompleteTask(completeCtx, w.Pool, task.ID, status, exitCode)
 	}, backoff.WithBackOff(w.backoff))
 	if err != nil {

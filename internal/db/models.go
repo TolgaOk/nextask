@@ -45,6 +45,7 @@ type Task struct {
 type TaskLog struct {
 	ID        int
 	TaskID    string
+	Seq       *int
 	Stream    string
 	Data      string
 	CreatedAt time.Time

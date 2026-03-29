@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -26,6 +28,7 @@ type Logger interface {
 
 // logLine is a buffered log entry waiting to be flushed.
 type logLine struct {
+	seq    int
 	stream string
 	data   string
 }
@@ -39,6 +42,7 @@ type TaskLogger struct {
 	stderr *os.File
 	cfg    LogConfig
 
+	seq      atomic.Int64
 	lines    chan logLine
 	done     chan struct{}
 	once     sync.Once
@@ -92,8 +96,11 @@ func (l *TaskLogger) Log(ctx context.Context, stream, data string) {
 	}
 
 	// Buffer for batch DB insert — blocks if buffer is full (back-pressure).
+	// Strip null bytes: PostgreSQL TEXT columns cannot store \x00.
+	data = strings.ReplaceAll(data, "\x00", "")
+	seq := int(l.seq.Add(1))
 	select {
-	case l.lines <- logLine{stream: stream, data: data}:
+	case l.lines <- logLine{seq: seq, stream: stream, data: data}:
 	case <-ctx.Done():
 	}
 }
@@ -135,7 +142,7 @@ func (l *TaskLogger) run() {
 				}
 				return
 			}
-			buf = append(buf, db.LogEntry{Stream: line.stream, Data: line.data})
+			buf = append(buf, db.LogEntry{Seq: line.seq, Stream: line.stream, Data: line.data})
 			if !timerRunning {
 				timer.Reset(l.cfg.FlushInterval)
 				timerRunning = true
@@ -143,29 +150,32 @@ func (l *TaskLogger) run() {
 			if len(buf) >= l.cfg.FlushLines {
 				timer.Stop()
 				timerRunning = false
-				l.flush(buf)
-				buf = buf[:0]
+				if l.flush(buf) {
+					buf = buf[:0]
+				}
 			}
 
 		case <-timer.C:
 			timerRunning = false
 			if len(buf) > 0 {
-				l.flush(buf)
-				buf = buf[:0]
+				if l.flush(buf) {
+					buf = buf[:0]
+				}
 			}
 		}
 	}
 }
 
 // flush inserts a batch of log lines into the DB and sends a single NOTIFY.
-func (l *TaskLogger) flush(entries []db.LogEntry) {
+// Returns true if the insert succeeded, false if it should be retried.
+func (l *TaskLogger) flush(entries []db.LogEntry) bool {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	maxID, err := db.InsertLogBatch(ctx, l.pool, l.taskID, entries)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "log batch insert failed (%d lines): %s\n", len(entries), db.HumanError(err))
-		return
+		return false
 	}
 
 	// Async NOTIFY — best-effort, consumer has poll fallback.
@@ -177,6 +187,7 @@ func (l *TaskLogger) flush(entries []db.LogEntry) {
 			fmt.Fprintf(os.Stderr, "log notify failed: %s\n", db.HumanError(err))
 		}
 	}()
+	return true
 }
 
 // DBLogger writes log lines to the database synchronously (used before task dir exists).

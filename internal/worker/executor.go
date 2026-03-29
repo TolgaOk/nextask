@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -129,28 +130,12 @@ func (e *Executor) runCommand(ctx context.Context, task *db.Task, taskDir string
 
 	go func() {
 		defer wg.Done()
-		scanner := bufio.NewScanner(stdout)
-		buf := make([]byte, 64*1024)
-		scanner.Buffer(buf, 1024*1024)
-		for scanner.Scan() {
-			log.Log(ctx, "stdout", scanner.Text())
-		}
-		if err := scanner.Err(); err != nil && !errors.Is(err, os.ErrClosed) {
-			log.Log(ctx, "nextask", fmt.Sprintf("[warn] stdout scan: %v", err))
-		}
+		scanLines(ctx, stdout, "stdout", log)
 	}()
 
 	go func() {
 		defer wg.Done()
-		scanner := bufio.NewScanner(stderr)
-		buf := make([]byte, 64*1024)
-		scanner.Buffer(buf, 1024*1024)
-		for scanner.Scan() {
-			log.Log(ctx, "stderr", scanner.Text())
-		}
-		if err := scanner.Err(); err != nil && !errors.Is(err, os.ErrClosed) {
-			log.Log(ctx, "nextask", fmt.Sprintf("[warn] stderr scan: %v", err))
-		}
+		scanLines(ctx, stderr, "stderr", log)
 	}()
 
 	wg.Wait()
@@ -181,4 +166,40 @@ func (e *Executor) runCommand(ctx context.Context, task *db.Task, taskDir string
 	}
 
 	return &ExitResult{Code: 0}
+}
+
+const maxLineSize = 1024 * 1024 // 1MB
+
+// scanLines reads lines from r and logs them. Lines longer than maxLineSize
+// are truncated but scanning continues — one oversized line doesn't kill
+// the rest of the output.
+func scanLines(ctx context.Context, r io.Reader, stream string, log Logger) {
+	reader := bufio.NewReaderSize(r, 64*1024)
+	var line []byte
+	truncated := false
+	for {
+		chunk, isPrefix, err := reader.ReadLine()
+		if len(chunk) > 0 {
+			if len(line)+len(chunk) <= maxLineSize {
+				line = append(line, chunk...)
+			} else if !truncated {
+				truncated = true
+				log.Log(ctx, "nextask", fmt.Sprintf("[warn] %s line truncated at %d bytes", stream, maxLineSize))
+			}
+		}
+		if isPrefix {
+			continue
+		}
+		if len(line) > 0 {
+			log.Log(ctx, stream, string(line))
+			line = line[:0]
+		}
+		truncated = false
+		if err != nil {
+			if err != io.EOF && !errors.Is(err, os.ErrClosed) {
+				log.Log(ctx, "nextask", fmt.Sprintf("[warn] %s read: %v", stream, err))
+			}
+			return
+		}
+	}
 }
