@@ -1,0 +1,14 @@
+services:
+  gitea:
+    image: gitea/gitea:latest
+    restart: unless-stopped
+    environment:
+      GITEA__database__DB_TYPE: sqlite3
+      GITEA__service__DISABLE_REGISTRATION: "true"
+    volumes:
+      - gitea:/data
+    ports:
+      - "3000:3000"
+
+volumes:
+  gitea:

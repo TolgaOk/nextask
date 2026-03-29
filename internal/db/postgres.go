@@ -20,8 +20,16 @@ var (
 )
 
 // Connect establishes a connection pool to the PostgreSQL database.
+// Pool size is capped at 4 connections to keep total usage low when many workers
+// share the same database (each worker also opens 2-3 dedicated LISTEN connections).
 func Connect(ctx context.Context, dbURL string) (*pgxpool.Pool, error) {
-	pool, err := pgxpool.New(ctx, dbURL)
+	config, err := pgxpool.ParseConfig(dbURL)
+	if err != nil {
+		return nil, wrapPgError(err)
+	}
+	config.MaxConns = 4
+
+	pool, err := pgxpool.NewWithConfig(ctx, config)
 	if err != nil {
 		return nil, wrapPgError(err)
 	}
