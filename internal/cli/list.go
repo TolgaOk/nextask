@@ -63,7 +63,7 @@ var listCmd = &cobra.Command{
 			since = time.Now().Add(-dur)
 		}
 
-		if listLimit < 0 {
+		if listLimit <= 0 {
 			return errWithHints("limit must be positive",
 				"Example: "+codeStyle.Render("--limit 50"),
 			)

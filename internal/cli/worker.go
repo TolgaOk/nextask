@@ -188,6 +188,12 @@ var workerListCmd = &cobra.Command{
 			since = time.Now().Add(-dur)
 		}
 
+		if workerListLimit <= 0 {
+			return errWithHints("limit must be positive",
+				"Example: "+codeStyle.Render("--limit 50"),
+			)
+		}
+
 		filter := db.WorkerListFilter{
 			Status: statusFilter,
 			Since:  since,
