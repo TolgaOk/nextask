@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	gonanoid "github.com/matoous/go-nanoid/v2"
+	"github.com/moby/moby/pkg/namesgenerator"
 	"github.com/TolgaOk/nextask/internal/db"
 	"github.com/TolgaOk/nextask/internal/worker"
 	"github.com/spf13/cobra"
@@ -357,11 +357,7 @@ func init() {
 }
 
 func daemonize() error {
-	// Generate worker ID for log directory and child process
-	id, err := gonanoid.Generate("0123456789abcdefghijklmnopqrstuvwxyz", 8)
-	if err != nil {
-		return fmt.Errorf("failed to generate worker id: %w", err)
-	}
+	id := namesgenerator.GetRandomName(0)
 
 	// Create log directory: <workdir>/.nextask/<worker_id>/
 	logDir := filepath.Join(cfg.Worker.Workdir, ".nextask", id)
