@@ -69,6 +69,17 @@ var listCmd = &cobra.Command{
 			)
 		}
 
+		for _, s := range listStatuses {
+			switch db.TaskStatus(s) {
+			case db.StatusPending, db.StatusRunning, db.StatusCompleted,
+				db.StatusFailed, db.StatusCancelled, db.StatusStale:
+			default:
+				return errWithHints(fmt.Sprintf("unknown status: %s", s),
+					"Valid: "+codeStyle.Render("pending")+", "+codeStyle.Render("running")+", "+codeStyle.Render("completed")+", "+codeStyle.Render("failed")+", "+codeStyle.Render("cancelled")+", "+codeStyle.Render("stale"),
+				)
+			}
+		}
+
 		filter := db.ListFilter{
 			Statuses:       listStatuses,
 			Tags:           parsedTags,

@@ -167,6 +167,13 @@ var workerListCmd = &cobra.Command{
 		var statusFilter *db.WorkerStatus
 		if statusFlag != "" {
 			s := db.WorkerStatus(statusFlag)
+			switch s {
+			case db.WorkerStatusRunning, db.WorkerStatusStopped:
+			default:
+				return errWithHints(fmt.Sprintf("unknown status: %s", statusFlag),
+					"Valid: "+codeStyle.Render("running")+", "+codeStyle.Render("stopped"),
+				)
+			}
 			statusFilter = &s
 		}
 
