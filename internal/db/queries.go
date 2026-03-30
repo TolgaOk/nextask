@@ -55,8 +55,12 @@ func applyTaskFilters(query sq.SelectBuilder, filter ListFilter, statusExpr stri
 	for k, v := range filter.Tags {
 		query = query.Where("t.tags @> ?::jsonb", fmt.Sprintf(`{"%s": "%s"}`, k, v))
 	}
-	for _, cmd := range filter.Commands {
-		query = query.Where("t.command ILIKE ?", "%"+cmd+"%")
+	if len(filter.Commands) > 0 {
+		or := sq.Or{}
+		for _, cmd := range filter.Commands {
+			or = append(or, sq.ILike{"t.command": "%" + cmd + "%"})
+		}
+		query = query.Where(or)
 	}
 	if !filter.Since.IsZero() {
 		query = query.Where(sq.GtOrEq{"t.created_at": filter.Since})

@@ -41,15 +41,9 @@ var listCmd = &cobra.Command{
 		}
 		defer pool.Close()
 
-		parsedTags := make(map[string]string)
-		for _, tag := range listTags {
-			parts := strings.SplitN(tag, "=", 2)
-			if len(parts) != 2 {
-				return errWithHints(fmt.Sprintf("invalid tag format: %s", tag),
-					"Expected format: "+codeStyle.Render("key=value"),
-				)
-			}
-			parsedTags[parts[0]] = parts[1]
+		parsedTags, err := parseTags(listTags)
+		if err != nil {
+			return err
 		}
 
 		var since time.Time
@@ -63,10 +57,27 @@ var listCmd = &cobra.Command{
 			since = time.Now().Add(-dur)
 		}
 
-		if listLimit < 0 {
+		if listLimit <= 0 {
 			return errWithHints("limit must be positive",
 				"Example: "+codeStyle.Render("--limit 50"),
 			)
+		}
+
+		if listOffset < 0 {
+			return errWithHints("offset must not be negative",
+				"Example: "+codeStyle.Render("--offset 50"),
+			)
+		}
+
+		for _, s := range listStatuses {
+			switch db.TaskStatus(s) {
+			case db.StatusPending, db.StatusRunning, db.StatusCompleted,
+				db.StatusFailed, db.StatusCancelled, db.StatusStale:
+			default:
+				return errWithHints(fmt.Sprintf("unknown status: %s", s),
+					"Valid: "+codeStyle.Render("pending")+", "+codeStyle.Render("running")+", "+codeStyle.Render("completed")+", "+codeStyle.Render("failed")+", "+codeStyle.Render("cancelled")+", "+codeStyle.Render("stale"),
+				)
+			}
 		}
 
 		filter := db.ListFilter{
@@ -90,7 +101,13 @@ var listCmd = &cobra.Command{
 		}
 
 		if len(tasks) == 0 {
-			fmt.Fprintln(os.Stderr, "No tasks found")
+			if listJSON {
+				fmt.Println("[]")
+			} else if listCSV {
+				fmt.Println("ID,STATUS,COMMAND,TAGS,CREATED")
+			} else {
+				fmt.Fprintln(os.Stderr, "No tasks found")
+			}
 			return nil
 		}
 

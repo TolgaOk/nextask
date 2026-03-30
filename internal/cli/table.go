@@ -101,8 +101,12 @@ func printStyledTable(tc TableConfig) error {
 
 	fmt.Fprintln(os.Stdout, t)
 
-	if tc.Count > 0 {
-		fmt.Fprintf(os.Stderr, "%d/%d\n", len(tc.Rows), tc.Count)
+	if tc.Count > 0 && len(tc.Rows) < tc.Count {
+		if tc.Offset > 0 {
+			fmt.Fprintf(os.Stderr, "%d-%d/%d (use --offset to page through results)\n", tc.Offset+1, tc.Offset+len(tc.Rows), tc.Count)
+		} else {
+			fmt.Fprintf(os.Stderr, "%d/%d (use --offset to page through results)\n", len(tc.Rows), tc.Count)
+		}
 	}
 
 	return nil

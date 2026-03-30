@@ -26,6 +26,12 @@ var cancelCmd = &cobra.Command{
 			return errDBRequired()
 		}
 
+		if cancelTimeout <= 0 {
+			return errWithHints("timeout must be positive",
+				"Example: "+codeStyle.Render("--timeout 10s"),
+			)
+		}
+
 		ctx := context.Background()
 		taskID := args[0]
 

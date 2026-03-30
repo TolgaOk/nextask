@@ -55,6 +55,12 @@ func runWait(cmd *cobra.Command, args []string) error {
 		return errDBRequired()
 	}
 
+	if waitTimeout < 0 {
+		return errWithHints("timeout must not be negative",
+			"Example: "+codeStyle.Render("--timeout 30s"),
+		)
+	}
+
 	ctx := context.Background()
 	if waitTimeout > 0 {
 		var cancel context.CancelFunc
@@ -129,7 +135,10 @@ func (w *waiter) check(ctx context.Context, taskID string) error {
 	}
 	if task == nil {
 		delete(w.remaining, taskID)
-		fmt.Fprintf(os.Stderr, "task %s not found\n", taskID)
+		printError(errWithHints(
+			fmt.Sprintf("task not found: %s", taskID),
+			"Run "+codeStyle.Render("nextask list")+" to see available tasks",
+		))
 		w.failCode = firstNonZero(w.failCode, 1)
 		return nil
 	}
@@ -362,6 +371,12 @@ func parseTags(tags []string) (map[string]string, error) {
 		parts := strings.SplitN(tag, "=", 2)
 		if len(parts) != 2 {
 			return nil, errWithHints(fmt.Sprintf("invalid tag format: %s", tag),
+				"Expected format: "+codeStyle.Render("key=value"),
+			)
+		}
+		if parts[0] == "" || parts[1] == "" {
+			return nil, errWithHints(fmt.Sprintf("invalid tag format: %s", tag),
+				"Tag key and value must not be empty",
 				"Expected format: "+codeStyle.Render("key=value"),
 			)
 		}
