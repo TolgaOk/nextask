@@ -8,7 +8,7 @@ Manage your runs from one place. `nextask` is a distributed task queue with CLI 
 ## Install
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/TolgaOk/nextask/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/TolgaOk/nextask/main/install | bash
 ```
 
 ## Usage
@@ -43,10 +43,12 @@ Workers can also run inside containers. Use tags to route tasks to the right ima
 docker run pytorch-cuda:latest nextask worker --filter image=pytorch-gpu
 ```
 
-`nextask` is **agent ready** by design! Install the [skills](skills/) for general usage, setting up the services (DB and git remote), and workers by
+### Agent Ready
+
+`nextask` is agent ready by design. Install the [skills](skills/) to let agents set up services, deploy workers, and manage tasks:
 
 ```sh
-npx skills add https://github.com/TolgaOk/nextask/tree/skills/skills
+npx skills add https://github.com/TolgaOk/nextask/skills
 ```
 
 Agents can wait for `all` or `any` tasks that has the given tag to finish:
@@ -109,15 +111,15 @@ Example config file.
 url = "postgres://user@localhost:5432/nextask"   # or NEXTASK_DB_URL
 
 [source]
-remote = "~/.nextask/source.git"                                 # bare repo
+remote = "~/.nextask/source.git"                                  # bare repo
 # remote = "http://<user>:<token>@gitea:3000/user/snapshots.git"  # gitea / github
-# remote = "git://192.168.1.10/snapshots.git"                    # git daemon
+# remote = "git://192.168.1.10/snapshots.git"                     # git daemon
 
 [worker]
 workdir = "/tmp/nextask"                         # or NEXTASK_WORKER_WORKDIR
 heartbeat_interval = "1m"                        # how often workers ping
 stale_threshold = 3                              # missed heartbeats before stale
-log_flush_lines = 100                            # batch size before flushing to DB
+log_flush_lines = 100                            # batch size before flushing to DB, OR
 log_flush_interval = "500ms"                     # max wait before flushing to DB
 log_buffer_size = 10000                          # channel buffer for log lines
 ```
