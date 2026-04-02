@@ -1,0 +1,146 @@
+#!/bin/sh
+set -eu
+
+REPO="TolgaOk/nextask"
+CONFIG_DIR="$HOME/.config/nextask"
+COMPOSE_URL="https://raw.githubusercontent.com/${REPO}/main/skills/nextask-setup-services/scripts/full-stack.docker-compose.yml"
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+DIM='\033[0;2m'
+NC='\033[0m'
+
+info() { printf "${DIM}%s${NC}\n" "$1"; }
+success() { printf "${GREEN}%s${NC}\n" "$1"; }
+fail() { printf "${RED}%s${NC}\n" "$1" >&2; exit 1; }
+
+dc() { docker compose -f "$CONFIG_DIR/docker-compose.yml" --env-file "$CONFIG_DIR/.env" "$@"; }
+
+# Check requirements
+command -v docker >/dev/null 2>&1 || fail "Docker is not installed. See https://docs.docker.com/get-docker/"
+docker compose version >/dev/null 2>&1 || fail "Docker Compose is not available. See https://docs.docker.com/compose/install/"
+command -v nextask >/dev/null 2>&1 || fail "nextask is not installed. Run: curl -fsSL https://raw.githubusercontent.com/${REPO}/main/install | bash"
+
+# Check if already set up
+if [ -f "$CONFIG_DIR/global.toml" ]; then
+  if nextask list >/dev/null 2>&1; then
+    success "nextask is already configured and working."
+    echo "Run nextask --help to get started."
+    exit 0
+  fi
+fi
+
+info "Setting up nextask services..."
+mkdir -p "$CONFIG_DIR"
+
+# Generate password
+DB_PASSWORD=$(openssl rand -hex 24)
+
+cat > "$CONFIG_DIR/.env" << EOF
+DB_PASSWORD=${DB_PASSWORD}
+GITEA_USER=nextask
+GITEA_PASSWORD=${DB_PASSWORD}
+EOF
+chmod 600 "$CONFIG_DIR/.env"
+
+# Check ports and find available ones
+find_port() {
+  PORT=$1
+  for i in $(seq 0 9); do
+    CANDIDATE=$((PORT + i))
+    if ! docker info >/dev/null 2>&1; then break; fi
+    if ! (echo >/dev/tcp/localhost/$CANDIDATE) 2>/dev/null; then
+      echo "$CANDIDATE"
+      return
+    fi
+  done
+  fail "No available port found in range ${PORT}-$((PORT + 9))"
+}
+
+PG_PORT=$(find_port 5432)
+GITEA_PORT=$(find_port 3000)
+
+if [ "$PG_PORT" != "5432" ]; then
+  info "Port 5432 in use, using ${PG_PORT} for PostgreSQL"
+fi
+if [ "$GITEA_PORT" != "3000" ]; then
+  info "Port 3000 in use, using ${GITEA_PORT} for Gitea"
+fi
+
+echo "NEXTASK_PG_PORT=${PG_PORT}" >> "$CONFIG_DIR/.env"
+echo "NEXTASK_GITEA_PORT=${GITEA_PORT}" >> "$CONFIG_DIR/.env"
+
+# Download compose file
+info "Downloading compose file..."
+curl -fsSL "$COMPOSE_URL" -o "$CONFIG_DIR/docker-compose.yml"
+
+# Start services
+info "Starting services..."
+dc up -d 2>&1 || fail "Failed to start services. Is Docker running?"
+
+# Wait for PostgreSQL
+info "Waiting for PostgreSQL..."
+for i in $(seq 1 30); do
+  if dc ps 2>/dev/null | grep -q "healthy"; then
+    break
+  fi
+  sleep 1
+done
+sleep 2
+
+# Initialize database
+DB_URL="postgres://nextask:${DB_PASSWORD}@localhost:${PG_PORT}/nextask"
+nextask init db --db-url "$DB_URL" || fail "Failed to initialize database. Run: docker compose -f $CONFIG_DIR/docker-compose.yml logs"
+
+# Wait for Gitea
+info "Waiting for Gitea..."
+SOURCE_REMOTE=""
+for i in $(seq 1 30); do
+  SOURCE_REMOTE=$(dc logs gitea-init 2>/dev/null | grep "Remote:" | awk '{print $NF}' | sed "s/<HOST>:3000/localhost:${GITEA_PORT}/" || true)
+  if [ -n "$SOURCE_REMOTE" ]; then
+    break
+  fi
+  sleep 2
+done
+
+# Write config
+cat > "$CONFIG_DIR/global.toml" << EOF
+[db]
+url = "${DB_URL}"
+EOF
+
+if [ -n "$SOURCE_REMOTE" ]; then
+  cat >> "$CONFIG_DIR/global.toml" << EOF
+
+[source]
+remote = "${SOURCE_REMOTE}"
+EOF
+  GITEA_TOKEN=$(echo "$SOURCE_REMOTE" | sed -n 's|.*://nextask:\([^@]*\)@.*|\1|p')
+  echo "SOURCE_REMOTE=${SOURCE_REMOTE}" >> "$CONFIG_DIR/.env"
+  echo "GITEA_TOKEN=${GITEA_TOKEN}" >> "$CONFIG_DIR/.env"
+fi
+
+chmod 600 "$CONFIG_DIR/global.toml"
+
+# Done
+echo ""
+success "nextask is ready!"
+echo ""
+echo "  Database:  localhost:${PG_PORT}"
+if [ -n "$SOURCE_REMOTE" ]; then
+  echo "  Gitea:     http://localhost:${GITEA_PORT}"
+  echo "  Username:  nextask"
+  echo "  Password:  ${DB_PASSWORD}"
+fi
+echo ""
+echo "Try it out:"
+echo ""
+echo "  ❯ nextask enqueue \"echo hello world\""
+echo "  ❯ nextask worker --once"
+echo "  ❯ nextask log <id>"
+echo ""
+info "Config:  ${CONFIG_DIR}/global.toml"
+info "Secrets: ${CONFIG_DIR}/.env"
+info "Compose: ${CONFIG_DIR}/docker-compose.yml"
+echo ""
