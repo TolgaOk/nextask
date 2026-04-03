@@ -2,7 +2,7 @@
 
 [![Go 1.25](https://img.shields.io/badge/go-1.25-00ADD8?logo=go&logoColor=white)](https://go.dev) [![v0.1.1](https://img.shields.io/badge/v0.1.1-green)](https://github.com/TolgaOk/nextask) [![macOS | Linux](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-lightgrey)](https://github.com/TolgaOk/nextask) 
 
-Manage your runs from one place. `nextask` is a distributed task queue with CLI control, live log streaming, and git-based source snapshotting.
+Manage your runs from one place. `nextask` is a **distributed** task queue with live log streaming and git-based source snapshotting for full **reproducibility**.
 
 
 ## Install
@@ -13,7 +13,7 @@ curl -fsSL https://raw.githubusercontent.com/TolgaOk/nextask/main/install | bash
 
 ## Usage
 
-Enqueue tasks, start workers to pick them up, monitor output, organize tasks with tags, and more.
+Enqueue tasks, start workers to pick them up, monitor the outputs and states, organize tasks with tags, and more.
 
 
 <img src="doc/demo.gif" alt="nextask demo" width="100%">
@@ -40,7 +40,9 @@ Workers can also run inside containers. Use tags to route tasks to the right ima
 docker run pytorch-cuda:latest nextask worker --filter image=pytorch-gpu
 ```
 
-### Agent Ready
+See `nextask <command> --help` for all options and `nextask --help` for all commands.
+
+## Agent Ready
 
 `nextask` is agent ready by design. Install the [skills](skills/) to let agents set up services, deploy workers, and manage tasks:
 
@@ -48,39 +50,23 @@ docker run pytorch-cuda:latest nextask worker --filter image=pytorch-gpu
 npx skills add https://github.com/TolgaOk/nextask/skills
 ```
 
-Agents can wait for `all` or `any` tasks that have the given tag to finish:
+**Example**: Agents can **wait** for all tasks that have the given tag to finish:
 ```sh
 # Run a learning rate sweep over 0.1, 0.01, 0.001.
 
 for lr in 0.1 0.01 0.001; do
-  nextask enqueue "python train.py --lr $lr" --snapshot --tag sweep=lr --tag lr=$lr
+  nextask enqueue "python train.py --lr $lr" --snapshot --tag exp=sweep,lr=$lr
 done
 
-nextask wait --tag sweep=lr                         # block until all finish
+nextask wait --tag exp=sweep                        # block until all finish
 ```
 
-See `nextask <command> --help` for all options and `nextask --help` for all commands.
 
 ## How it works
 
 Simplified architecture:
 
-```
-                                                           ┌──────────────┐
-  ┌──────────────┐                                        ┌──────────────┐│
- ┌──────────────┐│   logs     ┌────────────┐    logs     ┌──────────────┐││
- │              ││◀───────────│ PostgreSQL │◀────────────│    worker    │││
- │    nextask   ││            │   queue    │             │   (remote)   │││
- │      CLI     ││  enqueue   │            │   claim     │              ││┘
- │              │┘─────────┬─▶│  ○ tasks   │──┬─────────▶│   execute    │┘
- └──────────────┘          │  │  ○ logs    │  │          └──────────────┘
-                           │  │  ○ workers │  │
-                           │  └────────────┘  │
-                --snapshot │                  │ clone
-                           │  ┌────────────┐  │
-                           └─▶│ git remote │──┘
-                              └────────────┘
-```
+<img src="doc/nextask_architecture.svg" alt="nextask architecture" width="100%">
 
 >**Workers** claim tasks atomically. Heartbeats detect stale workers. `--filter` routes tasks by tag. Task statuses: `pending` → `running` → `completed` | `failed` | `cancelled` | `stale`.
 
@@ -108,9 +94,7 @@ Example config:
 url = "postgres://user@localhost:5432/nextask"   # or NEXTASK_DB_URL
 
 [source]
-remote = "~/.nextask/source.git"                                  # bare repo
-# remote = "http://<user>:<token>@gitea:3000/user/snapshots.git"  # gitea / github
-# remote = "git://192.168.1.10/snapshots.git"                     # git daemon
+remote = "~/.nextask/source.git"                 # bare repo as git remote
 
 [worker]
 workdir = "/tmp/nextask"                         # or NEXTASK_WORKER_WORKDIR
