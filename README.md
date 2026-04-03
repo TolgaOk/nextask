@@ -32,9 +32,6 @@ nextask list --status running --tag sweep=exp3          # filter tasks
 nextask log <id> --attach                               # stream live output
 nextask show <id>                                       # task details
 nextask cancel <id>                                     # cancel task
-
-# Setup
-nextask init db                                         # create tables
 ```
 
 Workers can also run inside containers. Use tags to route tasks to the right image:
@@ -51,7 +48,7 @@ docker run pytorch-cuda:latest nextask worker --filter image=pytorch-gpu
 npx skills add https://github.com/TolgaOk/nextask/skills
 ```
 
-Agents can wait for `all` or `any` tasks that has the given tag to finish:
+Agents can wait for `all` or `any` tasks that have the given tag to finish:
 ```sh
 # Run a learning rate sweep over 0.1, 0.01, 0.001.
 
@@ -104,7 +101,7 @@ Config files:
 
 >**Priority:** CLI flags > ENV vars > `.nextask.toml` > `global.toml`.
 
-Example config file.
+Example config:
 
 ```toml
 [db]
