@@ -66,7 +66,7 @@ nextask wait --tag exp=sweep                        # block until all finish
 
 Simplified architecture:
 
-<img src="doc/nextask_architecture.svg" alt="nextask architecture" width="100%">
+<img src="doc/nextask_architecture.svg" alt="nextask architecture" width="80%">
 
 >**Workers** claim tasks atomically. Heartbeats detect stale workers. `--filter` routes tasks by tag. Task statuses: `pending` → `running` → `completed` | `failed` | `cancelled` | `stale`.
 
