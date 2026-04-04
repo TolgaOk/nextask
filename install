@@ -1,0 +1,184 @@
+#!/bin/sh
+set -eu
+
+REPO="TolgaOk/nextask"
+BINARY="nextask"
+INSTALL_DIR="${INSTALL_DIR:-$HOME/.local/bin}"
+
+# Defaults
+REQUESTED_VERSION=""
+NO_MODIFY_PATH=false
+
+usage() {
+  cat <<EOF
+nextask installer
+
+Usage: install [options]
+
+Options:
+    -h, --help              Display this help message
+    -v, --version <version> Install a specific version (e.g., 0.1.1)
+        --no-modify-path    Don't modify shell config files
+
+Examples:
+    curl -fsSL https://raw.githubusercontent.com/TolgaOk/nextask/main/install | bash
+    curl -fsSL ... | bash -s -- --version 0.1.1
+EOF
+}
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    -v|--version)
+      if [ -n "${2:-}" ]; then
+        REQUESTED_VERSION="$2"
+        shift 2
+      else
+        echo "Error: --version requires an argument" >&2
+        exit 1
+      fi
+      ;;
+    --no-modify-path)
+      NO_MODIFY_PATH=true
+      shift
+      ;;
+    *)
+      echo "Warning: unknown option '$1'" >&2
+      shift
+      ;;
+  esac
+done
+
+# Detect OS
+OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+case "$OS" in
+  linux)  OS="linux" ;;
+  darwin) OS="darwin" ;;
+  *) echo "Unsupported OS: $OS" >&2; exit 1 ;;
+esac
+
+# Detect architecture
+ARCH=$(uname -m)
+case "$ARCH" in
+  x86_64|amd64)  ARCH="amd64" ;;
+  aarch64|arm64)  ARCH="arm64" ;;
+  *) echo "Unsupported architecture: $ARCH" >&2; exit 1 ;;
+esac
+
+# Resolve version
+if [ -n "$REQUESTED_VERSION" ]; then
+  VERSION="v${REQUESTED_VERSION#v}"
+  HTTP_STATUS=$(curl -sI -o /dev/null -w "%{http_code}" "https://github.com/${REPO}/releases/tag/${VERSION}")
+  if [ "$HTTP_STATUS" = "404" ]; then
+    echo "Error: release ${VERSION} not found" >&2
+    echo "Available releases: https://github.com/${REPO}/releases" >&2
+    exit 1
+  fi
+else
+  VERSION=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" | grep '"tag_name"' | cut -d'"' -f4)
+  if [ -z "$VERSION" ]; then
+    echo "Failed to fetch latest version" >&2
+    exit 1
+  fi
+fi
+
+# Check if already installed at target version
+if command -v "$BINARY" >/dev/null 2>&1; then
+  INSTALLED=$("$BINARY" --version 2>/dev/null | awk '{print $NF}' || echo "")
+  TARGET="${VERSION#v}"
+  if [ "$INSTALLED" = "$TARGET" ]; then
+    echo "${BINARY} ${VERSION} is already installed"
+    exit 0
+  fi
+fi
+
+# Download
+URL="https://github.com/${REPO}/releases/download/${VERSION}/${BINARY}_${OS}_${ARCH}.tar.gz"
+TMP=$(mktemp -d)
+trap 'rm -rf "$TMP"' EXIT
+
+echo "Installing ${BINARY} ${VERSION} (${OS}/${ARCH})..."
+curl -fsSL "$URL" -o "$TMP/${BINARY}.tar.gz"
+tar -xzf "$TMP/${BINARY}.tar.gz" -C "$TMP"
+
+# Install
+mkdir -p "$INSTALL_DIR"
+mv "$TMP/${BINARY}" "$INSTALL_DIR/${BINARY}"
+chmod +x "$INSTALL_DIR/${BINARY}"
+
+# Add to PATH if needed
+add_to_path() {
+  CONFIG_FILE="$1"
+  COMMAND="$2"
+  if grep -Fxq "$COMMAND" "$CONFIG_FILE" 2>/dev/null; then
+    return
+  fi
+  if [ -w "$CONFIG_FILE" ]; then
+    printf '\n# nextask\n%s\n' "$COMMAND" >> "$CONFIG_FILE"
+    echo "Added ${BINARY} to \$PATH in ${CONFIG_FILE}"
+  fi
+}
+
+if [ "$NO_MODIFY_PATH" = "false" ]; then
+  case ":$PATH:" in
+    *":$INSTALL_DIR:"*) ;;
+    *)
+      SHELL_NAME=$(basename "${SHELL:-sh}")
+      case "$SHELL_NAME" in
+        zsh)
+          for f in "${ZDOTDIR:-$HOME}/.zshrc" "$HOME/.zshrc"; do
+            if [ -f "$f" ]; then
+              add_to_path "$f" "export PATH=\"$INSTALL_DIR:\$PATH\""
+              break
+            fi
+          done
+          ;;
+        bash)
+          for f in "$HOME/.bashrc" "$HOME/.bash_profile" "$HOME/.profile"; do
+            if [ -f "$f" ]; then
+              add_to_path "$f" "export PATH=\"$INSTALL_DIR:\$PATH\""
+              break
+            fi
+          done
+          ;;
+        fish)
+          f="${XDG_CONFIG_HOME:-$HOME/.config}/fish/config.fish"
+          if [ -f "$f" ]; then
+            add_to_path "$f" "fish_add_path $INSTALL_DIR"
+          fi
+          ;;
+        *)
+          echo "Add to your PATH: export PATH=\"${INSTALL_DIR}:\$PATH\""
+          ;;
+      esac
+      ;;
+  esac
+fi
+
+echo ""
+echo "    ███╗   ██╗███████╗██╗  ██╗████████╗ █████╗ ███████╗██╗  ██╗"
+echo "    ████╗  ██║██╔════╝╚██╗██╔╝╚══██╔══╝██╔══██╗██╔════╝██║ ██╔╝"
+echo "    ██╔██╗ ██║█████╗   ╚███╔╝    ██║   ███████║███████╗█████╔╝ "
+echo "    ██║╚██╗██║██╔══╝   ██╔██╗    ██║   ██╔══██║╚════██║██╔═██╗ "
+echo "    ██║ ╚████║███████╗██╔╝ ██╗   ██║   ██║  ██║███████║██║  ██╗"
+echo "    ╚═╝  ╚═══╝╚══════╝╚═╝  ╚═╝   ╚═╝   ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝"
+echo ""
+echo "Installed ${BINARY} ${VERSION} to ${INSTALL_DIR}/${BINARY}"
+echo ""
+echo "nextask uses PostgreSQL to coordinate tasks across machines."
+echo "We recommend an always-on database on a VPS or server,"
+echo "but a local instance works fine for trying things out."
+echo ""
+echo "● Install the skills and let your agent handle setup (recommended)"
+echo ""
+echo "  ❯ npx skills add https://github.com/${REPO}/skills"
+echo ""
+echo "● Quick local setup (requires Docker)"
+echo ""
+echo "  ❯ curl -fsSL https://raw.githubusercontent.com/${REPO}/main/setup | bash"
+echo ""
+echo "Run nextask --help for all commands."
+echo ""

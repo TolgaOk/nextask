@@ -16,7 +16,7 @@ nextask enqueue "python train.py --lr 0.001" --snapshot --tag model=resnet,lr=0.
 ```
 - `--snapshot` captures the current working tree (including uncommitted changes) and pushes to a git remote
 - `--remote <url|path>` override source remote for this snapshot
-- `--tag key=value` adds metadata for filtering (repeatable)
+- `--tag key=value` adds metadata for filtering (repeatable, both key and value required)
 - `--attach` / `-a` streams live output after enqueuing
 
 ### Monitor tasks
@@ -24,7 +24,7 @@ nextask enqueue "python train.py --lr 0.001" --snapshot --tag model=resnet,lr=0.
 nextask list                              # all tasks
 nextask list --status running             # filter by status
 nextask list --tag sweep=exp3             # filter by tag
-nextask list --command "train"            # search in command
+nextask list --command "train"            # search in command (multiple: OR)
 nextask list --since 1h                   # recent tasks
 nextask list --json                       # JSON output
 
@@ -141,7 +141,9 @@ nextask config                     # show configuration
 
 ## Configuration
 
-Set `db.url` via `--db-url`, `NEXTASK_DB_URL`, or in `.nextask.toml` / `~/.config/nextask/global.toml`.
+Priority: CLI flags > ENV vars > `.nextask.toml` > `~/.config/nextask/global.toml`.
+
+Set `db.url` via `--db-url`, `NEXTASK_DB_URL`, or in config files.
 Set `source.remote` for snapshot storage.
 
 ## Key concepts

@@ -7,7 +7,7 @@ Related skills: `nextask` (enqueue, monitor, manage tasks), `nextask-setup-servi
 
 Set up workers that claim and execute nextask tasks. Services (PostgreSQL, git remote) must already be running. If not, use the `nextask-setup-services` skill first.
 
-**Installing nextask:** `curl -fsSL https://raw.githubusercontent.com/TolgaOk/nextask/main/scripts/install.sh | bash`
+**Installing nextask:** `curl -fsSL https://raw.githubusercontent.com/TolgaOk/nextask/main/install | bash`
 
 For SSH to remote servers, use `ssh -o ConnectTimeout=10 user@host "command"`. Do not use `-t`/`-tt` for non-interactive commands. Do not run SSH in background.
 
@@ -38,7 +38,7 @@ Use existing values if found.
 
 Check `nextask --version`. If not installed, install with:
 ```bash
-curl -fsSL https://raw.githubusercontent.com/TolgaOk/nextask/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/TolgaOk/nextask/main/install | bash
 ```
 
 ### 1. "Where will the worker run?"
@@ -88,7 +88,7 @@ Foreground. Use `--daemon` to background. Use `--once` for a single task then ex
 ```dockerfile
 FROM python:3.12
 RUN pip install torch numpy scipy matplotlib
-RUN curl -fsSL https://raw.githubusercontent.com/TolgaOk/nextask/main/scripts/install.sh | bash
+RUN curl -fsSL https://raw.githubusercontent.com/TolgaOk/nextask/main/install | bash
 ```
 
 ```bash
@@ -114,7 +114,7 @@ docker run --rm --gpus all \
 
 1. Install nextask:
    ```bash
-   ssh user@server "curl -fsSL https://raw.githubusercontent.com/TolgaOk/nextask/main/scripts/install.sh | bash"
+   ssh user@server "curl -fsSL https://raw.githubusercontent.com/TolgaOk/nextask/main/install | bash"
    ```
 
 2. Create config with restricted permissions:
@@ -147,7 +147,7 @@ Example Dockerfile for RunPod:
 ```dockerfile
 FROM runpod/base:1.0.3-cuda1290-ubuntu2404
 RUN pip install torch jax flax
-RUN curl -fsSL https://raw.githubusercontent.com/TolgaOk/nextask/main/scripts/install.sh | bash
+RUN curl -fsSL https://raw.githubusercontent.com/TolgaOk/nextask/main/install | bash
 ```
 
 Build and push to a registry:

@@ -36,7 +36,7 @@ If `AskUserQuestion` is available, use it to present choices as structured optio
 
 Check `nextask --version`. If not installed, install with:
 ```bash
-curl -fsSL https://raw.githubusercontent.com/TolgaOk/nextask/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/TolgaOk/nextask/main/install | bash
 ```
 
 ### 1. Check existing config
