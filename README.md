@@ -1,4 +1,8 @@
-# nextask
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="doc/nextask-lockup-dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="doc/nextask-lockup-light.svg">
+  <img alt="nextask" src="doc/nextask-lockup-light.svg" width="452">
+</picture>
 
 [![Go 1.25](https://img.shields.io/badge/go-1.25-00ADD8?logo=go&logoColor=white)](https://go.dev) [![v0.1.1](https://img.shields.io/badge/v0.1.1-green)](https://github.com/TolgaOk/nextask) [![macOS | Linux](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-lightgrey)](https://github.com/TolgaOk/nextask) 
 
@@ -129,4 +133,3 @@ log_flush_lines = 100                            # batch size before flushing to
 log_flush_interval = "500ms"                     # max wait before flushing to DB
 log_buffer_size = 10000                          # channel buffer for log lines
 ```
-
