@@ -1,158 +1,344 @@
-<svg width="100%" viewBox="0 0 680 330" xmlns="http://www.w3.org/2000/svg">
-<defs>
-<marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker>
+<svg
+  xmlns="http://www.w3.org/2000/svg"
+  class="nxt"
+  viewBox="0 60 960 410"
+  role="img"
+  aria-label="How nextask works: the CLI enqueues a task into a Postgres-backed queue, a worker claims it and streams logs back live, while the source is snapshotted to a git remote. Task lifecycle: pending, running, completed."
+>
+  <title>nextask architecture</title>
+  <defs>
+    <marker id="nxt-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 1 1.5 L 8.5 5 L 1 8.5" fill="none" stroke="var(--faint)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"></path>
+    </marker>
+  </defs>
+
+  <!-- ================= CLI terminal ================= -->
+  <g>
+    <rect x="40" y="110" width="310" height="320" rx="10" fill="var(--term-bg)" stroke="var(--border)"></rect>
+    <line x1="40" y1="142" x2="350" y2="142" stroke="var(--border)"></line>
+    <circle cx="60" cy="126" r="4.5" fill="var(--faint)" opacity="0.45"></circle>
+    <circle cx="76" cy="126" r="4.5" fill="var(--faint)" opacity="0.45"></circle>
+    <circle cx="92" cy="126" r="4.5" fill="var(--faint)" opacity="0.45"></circle>
+    <text x="195" y="130" text-anchor="middle" class="mono" font-size="10.5" fill="var(--muted)">you@local &#8212; nextask</text>
+
+    <g class="mono" font-size="12">
+      <text class="l1" x="56" y="172" fill="var(--ink)"><tspan fill="var(--done)">&#10095;</tspan> nextask enqueue &#8220;python train.py&#8221; \</text>
+      <text class="l2" x="56" y="196" fill="var(--ink)">&#160;&#160;&#160;&#160;--snapshot --attach</text>
+      <text class="l3" x="56" y="220" fill="var(--muted)"><tspan fill="var(--running)">[a3f9c2]</tspan> pending</text>
+      <text class="l4" x="56" y="244" fill="var(--muted)"><tspan fill="var(--running)">[worker-1]</tspan> claimed a3f9c2</text>
+      <text class="l5" x="56" y="268" fill="var(--muted)"><tspan fill="var(--running)">[a3f9c2]</tspan> epoch 1/3&#160;&#160;loss 0.482</text>
+      <text class="l6" x="56" y="292" fill="var(--muted)"><tspan fill="var(--running)">[a3f9c2]</tspan> epoch 2/3&#160;&#160;loss 0.211</text>
+      <text class="l7" x="56" y="316" fill="var(--muted)"><tspan fill="var(--running)">[a3f9c2]</tspan> epoch 3/3&#160;&#160;loss 0.094</text>
+      <text class="l8" x="56" y="340" fill="var(--done)">&#10003; a3f9c2 completed &#183; exit 0</text>
+    </g>
+  </g>
+
+  <!-- ================= snapshot remote (below queue) ================= -->
+  <g>
+    <g text-anchor="middle" class="s2">
+      <circle cx="383" cy="384" r="7.5" fill="none" stroke="var(--running)"></circle>
+      <text x="383" y="387.5" font-size="9.5" fill="var(--running)">2</text>
+      <text x="383" y="406" font-size="9.5" fill="var(--muted)" letter-spacing="0.5">SNAPSHOT</text>
+    </g>
+    <rect x="420" y="376" width="215" height="42" rx="8" fill="var(--card)" stroke="var(--border)"></rect>
+    <image class="pgicon" x="430" y="385" width="24" height="24" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAAIz0lEQVR4AezaV8gsSxEH8LlmxZzjNWLOOWFCUcSAiuKDEQWzPvhoQAVFX/TBDAqKqCAqJgQD5oD5mnPCnHO88f9rTt/TOzuzO7vf7uy93PNRNVVdXd1dXdPT1V37na87j/+dcMB5fAF0J1bAgVfASRkfhhwGDrUCLp/p/rXBv4W/XHB2OIQDrp5Z/i54qeAlG/x9eHUh88HcDrh9pva14NC4ZOroRGUeMOg8I3XdvTLQW4KWf0iBU/L8erCCOjp0q2yvdC4H3C2zeGXw+sEK3wvz1OBTgj8IVqBDV5sq2xudwwE3jfVvDt44WMEG+JAUPn8MHxz692AFutpoW2V7oft2gE3uK7H8WsEKZ4S5StAKCCmAv1Lhjj+00fbix0W75/bpAPHdm75QY7bd/+SU/xvsA9nVIvxVsIK2QuR1qmDXdJ8OYCsnoBXfV5kR+uvIHxj8VrACGz+Twp2D/f4iOhro/Gg9rG79sl71E1N+SfDKwTEQGWyMbXTwybwxDe4Z3Cns0wFnxtLnHsOQAt7go8O9NnjV4BBo99lUPCn442CFG4YRHe4aujX0G+7SATa82/QGOC3lVwSfH6zACZb5xyP4RvDbwX47TvhC5PcN2htCCogObw93g+BOYFcOsFn9JRZ9OWiXN8GwBf6d54uDHGFiYbvz5yHe3yzUpL4YKhKELIAVIAqc3kgdl7+TsjFDjga7cICl6S21fXnLrWWc8uwIXh88NdgHbb3Vm/QrUjb564b+NFiB/n9S0CZke9DR9q27zvf4kXTQTtiybkNZqgt4+05+fyil4ceHh8XdzyN/RFDfIQXY/tFwbAjZDnSyTUsTdl73Ri3J2oed+2kpfDU4BJwwJG9l+m7LlXco0nfrBGOzgS1VbyO6rQPumFFeHfT9hhSwRIW5z6W0aqKr6tgj5KWLJdBOdHhCan4WrMAGttypCjahBtxEn67v8d1hfPshBXyndw9nE2Ro2FG4S2rGdK6QOiFylROMcY/oGTOkAFvYxLYimPrY1AF2ZDe39iBjl79oBvxFcAr4nl17h5wgOoggL09H7RgpLoA+LhaJsUMK0GfbJUpp4mMTB7iZ/Sn9tm1+mPItgkM7e8QrYexbJ39kWgqd1wgdg/+nwtg/Cq3Atj+mILyGrAcN1mt1neX9/ii2sdeR9VGRtQakuDW8NS3bVfH4lF8QHDsxpqpzTmADW5QhG9052MyZZKM4xQF22NekB9fTkAJ24qeH+1JwV/CsdPSiYHUC4znBAcotMVVLQNchii3fbGrZymZ3B/00VYvsOgfIz9mU7LS15S/DPC64brePykZgMi9Ni+cE8SEd4x8ehg1jnwNd0eGx0WNbSAE2a2cORTD0WOUAA34wjRxZQwrYeYVAyUsDF+EOH06U3vgL02ftnxPun7LV5oAFb5RyH9jUnyzbPxBFcwlZhjEHXCaqdto2Vy8xIZXNgFTvDTjBp/CqjOAyFVLuDjJG9gPoLiA/oK7F36QgIrXpNRHHucGcUr0IQw7gcQ3Qqv39MA4a/wqdA7z9Z2YgOQD3iLBLYNl7If0KDrQShMRaZ54Oau2cSp2Kwqx42GFtRt9dobOvKokRExrr/8kjFV6YfeqUpt7kObYRdd2QA05a0DhsYcngDcyZ1HbIARrCOtYtw7wp6LgZMiusexlC3ZBBNj82s72tX+pvzAH9M7UOZWgu0vY2A+9FuPEN7QPuFP8YsIGNIkabK9De2UB/C02GHEDBkVfo+LPCMZTycva2Cx8TzUJkmqTFZYxFIFTixDmkb4D7ABvZWuscjU1eP1V2Nh1zAAWHCvHXeV8ZWkJOXrdSmBGFZKdBqwEVBtvh2XXrCNwU8WELiAQPCDd6UVvlgLTrLHs7bRsBGOBnK0uQzjkBnQl882yr9nCSKOKFVdkSXecADT6Wh468hbAF3LYcVMTbIjjggw1sYVM1wzlG+k3meem7r0roFAfQ+2Qe7unttdcO+7bI+xtmRLOBvYENbKmDuiY/KAU2r5x8dAbPAeRD6LZ12V6FyfsZ6wI9+ZRia1zLT2lLR/LEbwpsUIZ2e0dftiqvxakroHb0zzDXC/qRM6SAsPO/cCcHpwA9UabdrPBkduspfVwzSt60scMW+G2ewvVQaEzVMGzqAL1IQjw0TPtDhn4sudtGvg78T8CYjvP9WF2VG+MTKRgzpABbHhaObSHToe1kequuE4OlqNvo4O29IZ0cNTpYDelmEPTtgmSsqsAGCZFVjq26S3RbB+hIdPADpsOJMpSjk6L2lpQ3Rd/w2H5wu3Sm75uHVnBWYQNbxtpV3UF6FAfo8NN53DvYDs4J74zMtx6yBPdZkhwX3O84u8A5AL0jEn2HFOAsfbGhHb9UTn0c1QHG8f1dOExrhE3K/XuofwcUu7cJpFkBbcVuy7kIeg//afKuRqattLixG/Hm7JCBm/fSdc4HcnDt56BvCZQ2TNW+pdjvkAJHcAj+2imbWMgSiD7Sc/Shu4DIs6S4qYCRm7YZ0/c25PPbtyhMfSgNnNZCFsC5nSNMxu1toXKg4DunD401oLK5aJcOMLr/5XlGGBmZkAJWgB8wndeLYMKDrryg3wUuOEF/a5VdO4Ah3pQUmoOJMnRUfV2YKbdIOnSfF33/WTKU90vVbmAfDrChicliNr5a6rLi1yV39irrU3V06KpzJvAvMfi94D4cUA39SRg/VDqyhi3guip1LWoUQfOwq6ujU8U2V/9FWss7p/t0AGNFAf8AJcQpV/Sv8XKM3jAZ3uTxFbXRVoanynZO9+0ABrst+tlKuFOGUlbvCeNXJr83vDc8WUgButLak291pdUWjzkcwKxP5SE6SFGFLSBpKavr9zu3uCLMgw5dbVLcL8zlALMQHfyTpCSlMhQd2uOtusekYm0mJzo7gTkdwGD5OWFu6MRHJrEpD9lGD+32hnM7wETc4K4Yxg+YLfrxczR7G/29wCEcYCKyP5cO06LlH9G8cCgHmKVl3iLZ7HhIB8w+2aEBTzhgyCvnJtlRbT0LAAD//zE5ws0AAAAGSURBVAMAUx6BkKv1fxYAAAAASUVORK5CYII=" preserveAspectRatio="xMidYMid meet"></image>
+    <text x="460" y="401" class="mono" font-size="9.5" fill="var(--faint)">remote</text>
+    <g class="snapchip">
+      <rect x="527" y="387" width="96" height="20" rx="10" fill="var(--row)" stroke="var(--border)"></rect>
+      <text x="575" y="400.5" text-anchor="middle" class="mono" font-size="9.5" fill="var(--muted)">branch a3f9c2</text>
+    </g>
+  </g>
+
+  <!-- ================= edges ================= -->
+  <!-- enqueue -->
+  <line x1="352" y1="190" x2="414" y2="190" stroke="var(--faint)" marker-end="url(#nxt-arrow)"></line>
+  <g text-anchor="middle" class="s1">
+    <circle cx="383" cy="154" r="7.5" fill="none" stroke="var(--running)"></circle>
+    <text x="383" y="157.5" font-size="9.5" fill="var(--running)">1</text>
+    <text x="383" y="176" font-size="9.5" fill="var(--muted)" letter-spacing="0.5">ENQUEUE</text>
+  </g>
+  <circle class="dot-e" cx="352" cy="190" r="5" fill="var(--running)" opacity="0"></circle>
+
+  <!-- claim -->
+  <path d="M639,180 C669,180 674,162 699,162" fill="none" stroke="var(--faint)" marker-end="url(#nxt-arrow)"></path>
+  <g text-anchor="middle" class="s3">
+    <circle cx="650" cy="144" r="7.5" fill="none" stroke="var(--running)"></circle>
+    <text x="650" y="147.5" font-size="9.5" fill="var(--running)">3</text>
+    <text x="686" y="148" font-size="10" fill="var(--muted)" letter-spacing="1">CLAIM</text>
+  </g>
+  <circle class="dot-c" cx="639" cy="180" r="5" fill="var(--running)" opacity="0"></circle>
+
+  <!-- log stream: worker -> queue -> CLI -->
+  <path d="M701,200 C672,200 668,214 641,214" fill="none" stroke="var(--border)" stroke-dasharray="8 6" marker-end="url(#nxt-arrow)"></path>
+  <path class="stream" d="M701,200 C672,200 668,214 641,214" fill="none" stroke="var(--running)" stroke-width="1.8" stroke-dasharray="8 6" opacity="0"></path>
+  <path d="M418,240 L356,240" fill="none" stroke="var(--border)" stroke-dasharray="8 6" marker-end="url(#nxt-arrow)"></path>
+  <path class="stream" d="M418,240 L356,240" fill="none" stroke="var(--running)" stroke-width="1.8" stroke-dasharray="8 6" opacity="0"></path>
+  <path d="M701,314 C672,314 668,328 641,328" fill="none" stroke="var(--border)" stroke-dasharray="8 6" marker-end="url(#nxt-arrow)"></path>
+  <path class="stream2" d="M701,314 C672,314 668,328 641,328" fill="none" stroke="var(--running)" stroke-width="1.8" stroke-dasharray="8 6" opacity="0.45"></path>
+  <g text-anchor="middle" class="s4">
+    <circle cx="670" cy="246" r="7.5" fill="none" stroke="var(--running)"></circle>
+    <text x="670" y="249.5" font-size="9.5" fill="var(--running)">4</text>
+    <text x="670" y="268" font-size="9.5" fill="var(--muted)" letter-spacing="0.5">STREAM</text>
+    <text x="670" y="281" font-size="9.5" fill="var(--muted)" letter-spacing="0.5">LOGS</text>
+  </g>
+
+  <!-- ================= queue ================= -->
+  <g>
+    <rect x="420" y="110" width="215" height="250" rx="10" fill="var(--card)" stroke="var(--border)"></rect>
+    <text x="436" y="134" class="mono" font-size="12.5" font-weight="600" fill="var(--ink)">queue</text>
+    <image class="pgicon" x="555" y="122.5" width="13" height="13" href="data:image/png;base64,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" preserveAspectRatio="xMidYMid meet"></image>
+    <text x="619" y="134" text-anchor="end" class="mono" font-size="9.5" fill="var(--faint)">postgres</text>
+    <line x1="420" y1="146" x2="635" y2="146" stroke="var(--border)"></line>
+
+    <!-- animated row: the task (newest on top) -->
+    <g class="qrow">
+      <rect x="432" y="158" width="191" height="32" rx="6" fill="var(--row-hi)"></rect>
+      <text x="444" y="178" class="mono" font-size="11" fill="var(--ink)">a3f9c2</text>
+    </g>
+    <g class="chip-pending">
+      <rect x="557" y="165" width="56" height="18" rx="9" fill="none" stroke="var(--pending-soft)"></rect>
+      <text x="585" y="177.5" text-anchor="middle" font-size="9" fill="var(--pending)" letter-spacing="0.3">pending</text>
+    </g>
+    <g class="chip-running">
+      <rect x="557" y="165" width="56" height="18" rx="9" fill="none" stroke="var(--running-soft)"></rect>
+      <text x="585" y="177.5" text-anchor="middle" font-size="9" fill="var(--running)" letter-spacing="0.3">running</text>
+    </g>
+    <g class="chip-done">
+      <rect x="547" y="165" width="66" height="18" rx="9" fill="none" stroke="var(--done-soft)"></rect>
+      <text x="580" y="177.5" text-anchor="middle" font-size="9" fill="var(--done)" letter-spacing="0.3">completed</text>
+    </g>
+
+    <!-- existing rows: shift down when the new task arrives -->
+    <g class="qshift">
+      <g opacity="0.55">
+        <rect x="432" y="158" width="191" height="32" rx="6" fill="var(--row)"></rect>
+        <text x="444" y="178" class="mono" font-size="11" fill="var(--muted)">c4a811</text>
+        <rect x="557" y="165" width="56" height="18" rx="9" fill="none" stroke="var(--running-soft)"></rect>
+        <text x="585" y="177.5" text-anchor="middle" font-size="9" fill="var(--running)" letter-spacing="0.3">running</text>
+      </g>
+      <g opacity="0.55">
+        <rect x="432" y="200" width="191" height="32" rx="6" fill="var(--row)"></rect>
+        <text x="444" y="220" class="mono" font-size="11" fill="var(--muted)">b7d2e1</text>
+        <rect x="547" y="207" width="66" height="18" rx="9" fill="none" stroke="var(--done-soft)"></rect>
+        <text x="580" y="219.5" text-anchor="middle" font-size="9" fill="var(--done)" letter-spacing="0.3">completed</text>
+      </g>
+    </g>
+
+    <text x="527" y="338" text-anchor="middle" class="mono" font-size="9.5" fill="var(--faint)">atomic claim &#183; heartbeats</text>
+  </g>
+
+  <!-- ================= workers ================= -->
+  <!-- worker-1 -->
+  <g>
+    <rect x="705" y="110" width="215" height="104" rx="10" fill="var(--card)" stroke="var(--border)"></rect>
+    <rect class="worker-glow" x="705" y="110" width="215" height="104" rx="10" fill="none" stroke="var(--running)" stroke-width="1.5" stroke-dasharray="8 6" opacity="0"></rect>
+    <text x="721" y="136" class="mono" font-size="12.5" font-weight="600" fill="var(--ink)">worker-1</text>
+    <text class="worker-run mono" x="795" y="136" font-size="9.5" fill="var(--faint)" opacity="0">a3f9c2</text>
+    <circle cx="898" cy="131" r="3.5" fill="var(--done)"></circle>
+    <circle class="pulse" cx="898" cy="131" r="3.5" fill="none" stroke="var(--done)"></circle>
+    <rect x="721" y="148" width="74" height="18" rx="9" fill="var(--row)"></rect>
+    <text x="758" y="160.5" text-anchor="middle" class="mono" font-size="9" fill="var(--muted)">gpu=a100</text>
+    <text class="worker-idle mono" x="721" y="192" font-size="11" fill="var(--faint)">idle</text>
+    <text class="worker-run mono" x="721" y="192" font-size="11" fill="var(--running)" opacity="0">&#8250; python train.py</text>
+  </g>
+
+  <!-- worker-2 -->
+  <g>
+    <rect x="705" y="256" width="215" height="104" rx="10" fill="var(--card)" stroke="var(--border)"></rect>
+    <rect class="worker-busy" x="705" y="256" width="215" height="104" rx="10" fill="none" stroke="var(--running)" stroke-width="1.5" stroke-dasharray="8 6"></rect>
+    <text x="721" y="282" class="mono" font-size="12.5" font-weight="600" fill="var(--ink)">worker-2</text>
+    <text x="795" y="282" class="mono" font-size="9.5" fill="var(--faint)">c4a811</text>
+    <circle cx="898" cy="277" r="3.5" fill="var(--done)"></circle>
+    <circle class="pulse pulse2" cx="898" cy="277" r="3.5" fill="none" stroke="var(--done)"></circle>
+    <rect x="721" y="294" width="104" height="18" rx="9" fill="var(--row)"></rect>
+    <text x="773" y="306.5" text-anchor="middle" class="mono" font-size="9" fill="var(--muted)">image=pytorch</text>
+    <text x="721" y="338" class="mono" font-size="11" fill="var(--running)">&#8250; python eval.py</text>
+  </g>
+
 <style>
-/* Logs: animated dashes only */
-@keyframes dash { to { stroke-dashoffset: -20; } }
-.dashed-flow { animation: dash 0.8s linear infinite; }
+  /* Theme tokens, scoped to the SVG so they can't leak into the page (the
+     site defines its own --border etc. on :root). Neutrals map to the site's
+     zinc scale, "running" to the site's link blue; status colors stay fixed. */
+  .nxt {
+    --card: var(--color-white, #fff);
+    --border: var(--color-zinc-200, #d8dde4);
+    --ink: var(--color-zinc-800, #1a1f27);
+    --muted: var(--color-zinc-600, #57606a);
+    --faint: var(--color-zinc-400, #8c959f);
+    --term-bg: var(--color-zinc-100, #f6f8fa);
+    --row: var(--color-zinc-100, #f6f8fa);
+    --row-hi: #eef4fc;
+    --pending: #9a6700;
+    --pending-soft: #e3c886;
+    --running: var(--color-blue-600);
+    --running-soft: #a3c7f0;
+    --done: #1a7f37;
+    --done-soft: #9fd2ae;
 
-/* 9s cycle: CLI → junction → DB+git → worker junction → worker → 1s pause */
-@keyframes step1 {
-  0%   { offset-distance: 0%; opacity: 0; }
-  2%   { opacity: 1; }
-  15%  { offset-distance: 100%; opacity: 1; }
-  17%  { opacity: 0; }
-  100% { opacity: 0; }
-}
-@keyframes step2a {
-  0%, 17%  { offset-distance: 0%; opacity: 0; }
-  19%  { opacity: 1; }
-  33%  { offset-distance: 100%; opacity: 1; }
-  35%  { opacity: 0; }
-  100% { opacity: 0; }
-}
-@keyframes step2b {
-  0%, 17%  { offset-distance: 0%; opacity: 0; }
-  19%  { opacity: 1; }
-  39%  { offset-distance: 100%; opacity: 1; }
-  41%  { opacity: 0; }
-  100% { opacity: 0; }
-}
-@keyframes step3a {
-  0%, 44% { offset-distance: 0%; opacity: 0; }
-  46%  { opacity: 1; }
-  60%  { offset-distance: 100%; opacity: 1; }
-  62%  { opacity: 0; }
-  100% { opacity: 0; }
-}
-@keyframes step3b {
-  0%, 44% { offset-distance: 0%; opacity: 0; }
-  46%  { opacity: 1; }
-  64%  { offset-distance: 100%; opacity: 1; }
-  66%  { opacity: 0; }
-  100% { opacity: 0; }
-}
-@keyframes step4 {
-  0%, 66% { offset-distance: 0%; opacity: 0; }
-  68%  { opacity: 1; }
-  78%  { offset-distance: 100%; opacity: 1; }
-  80%  { opacity: 0; }
-  100% { opacity: 0; }
-}
+    display: block;
+    width: 100%;
+    max-width: 60rem;
+    height: auto;
+    margin-inline: auto;
+  }
 
-/* Worker border animations */
-@keyframes worker-active { to { stroke-dashoffset: -20; } }
-@keyframes worker-activate {
-  0%, 77% { opacity: 0; }
-  78%  { opacity: 1; stroke-dashoffset: 0; }
-  95%  { opacity: 1; stroke-dashoffset: -100; }
-  96%, 100% { opacity: 0; }
-}
-@keyframes worker-solid-hide {
-  0%, 77% { opacity: 1; }
-  78%, 95% { opacity: 0; }
-  96%, 100% { opacity: 1; }
-}
+  html[data-theme="dark"] .nxt {
+    --card: var(--color-zinc-800, #27272a);
+    --border: var(--color-zinc-700, #3f3f46);
+    --ink: var(--color-zinc-200, #e4e4e7);
+    --muted: var(--color-zinc-400, #a1a1aa);
+    --faint: var(--color-zinc-500, #71717a);
+    --term-bg: var(--color-zinc-800, #27272a);
+    --row: var(--color-zinc-700, #3f3f46);
+    --row-hi: #1c2635;
+    --pending: #d29922;
+    --pending-soft: #6b5618;
+    --running: var(--color-blue-400, #60a5fa);
+    --running-soft: #234a75;
+    --done: #3fb950;
+    --done-soft: #1f5b2d;
+  }
+  html[data-theme="dark"] .nxt .pgicon {
+    filter: invert(1);
+    opacity: 0.58;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root.nxt,
+    html[data-theme="device"] .nxt {
+      --card: var(--color-zinc-800, #27272a);
+      --border: var(--color-zinc-700, #3f3f46);
+      --ink: var(--color-zinc-200, #e4e4e7);
+      --muted: var(--color-zinc-400, #a1a1aa);
+      --faint: var(--color-zinc-500, #71717a);
+      --term-bg: var(--color-zinc-800, #27272a);
+      --row: var(--color-zinc-700, #3f3f46);
+      --row-hi: #1c2635;
+      --pending: #d29922;
+      --pending-soft: #6b5618;
+      --running: var(--color-blue-400, #60a5fa);
+      --running-soft: #234a75;
+      --done: #3fb950;
+      --done-soft: #1f5b2d;
+    }
+    :root.nxt .pgicon,
+    html[data-theme="device"] .nxt .pgicon {
+      filter: invert(1);
+      opacity: 0.58;
+    }
+  }
 
-.dot-cli-to-junc   { offset-path: path("M 142 160 L 200 160"); animation: step1 9s ease-in-out infinite; }
-.dot-junc-to-db    { offset-path: path("M 200 160 L 266 160"); animation: step2a 9s ease-in-out infinite; }
-.dot-junc-to-git   { offset-path: path("M 200 162 L 200 268 L 266 268"); animation: step2b 9s ease-in-out infinite; }
-.dot-db-to-wjunc   { offset-path: path("M 414 160 L 476 160"); animation: step3a 9s ease-in-out infinite; }
-.dot-git-to-wjunc  { offset-path: path("M 412 268 L 476 268 L 476 162"); animation: step3b 9s ease-in-out infinite; }
-.dot-wjunc-to-work { offset-path: path("M 476 160 L 538 160"); animation: step4 9s ease-in-out infinite; }
-.worker-idle   { }
-.worker-busy   { stroke-dasharray: 6 4; animation: worker-active 0.8s linear infinite; }
-.worker-recv   { stroke-dasharray: 6 4; opacity: 0; animation: worker-activate 9s ease-in-out infinite; }
+  .mono {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  }
+  .pgicon {
+    opacity: 0.62;
+  }
+
+  /* ---- 12s master loop ---- */
+  .l1 { animation: nxt-w2 12s linear infinite; }
+  .l2 { animation: nxt-w5 12s linear infinite; }
+  .l3 { animation: nxt-w16 12s linear infinite; }
+  .l4 { animation: nxt-w28 12s linear infinite; }
+  .l5 { animation: nxt-w36 12s linear infinite; }
+  .l6 { animation: nxt-w47 12s linear infinite; }
+  .l7 { animation: nxt-w58 12s linear infinite; }
+  .l8 { animation: nxt-w76 12s linear infinite; }
+  .qrow { animation: nxt-w14 12s linear infinite; }
+  .qshift { animation: nxt-qs 12s linear infinite; }
+  @keyframes nxt-qs { 0%, 12.5% { transform: translateY(0); } 14.5%, 90% { transform: translateY(42px); } 95%, 100% { transform: translateY(0); } }
+  .snapchip { animation: nxt-w15 12s linear infinite; }
+  .s1 { animation: nxt-w8 12s linear infinite; }
+  .s2 { animation: nxt-w15 12s linear infinite; }
+  .s3 { animation: nxt-w22 12s linear infinite; }
+  .s4 { animation: nxt-w30 12s linear infinite; }
+  @keyframes nxt-w8  { 0%, 8%  { opacity: 0; } 10%, 90% { opacity: 1; } 95%, 100% { opacity: 0; } }
+  @keyframes nxt-w15 { 0%, 14.5% { opacity: 0; } 16.5%, 90% { opacity: 1; } 95%, 100% { opacity: 0; } }
+  @keyframes nxt-w22 { 0%, 22% { opacity: 0; } 24%, 90% { opacity: 1; } 95%, 100% { opacity: 0; } }
+  @keyframes nxt-w30 { 0%, 30% { opacity: 0; } 32%, 90% { opacity: 1; } 95%, 100% { opacity: 0; } }
+  @keyframes nxt-w2  { 0%, 2%  { opacity: 0; } 4%,  90% { opacity: 1; } 95%, 100% { opacity: 0; } }
+  @keyframes nxt-w5  { 0%, 5%  { opacity: 0; } 7%,  90% { opacity: 1; } 95%, 100% { opacity: 0; } }
+  @keyframes nxt-w14 { 0%, 14% { opacity: 0; } 16%, 90% { opacity: 1; } 95%, 100% { opacity: 0; } }
+  @keyframes nxt-w16 { 0%, 16% { opacity: 0; } 18%, 90% { opacity: 1; } 95%, 100% { opacity: 0; } }
+  @keyframes nxt-w28 { 0%, 28% { opacity: 0; } 30%, 90% { opacity: 1; } 95%, 100% { opacity: 0; } }
+  @keyframes nxt-w36 { 0%, 36% { opacity: 0; } 38%, 90% { opacity: 1; } 95%, 100% { opacity: 0; } }
+  @keyframes nxt-w47 { 0%, 47% { opacity: 0; } 49%, 90% { opacity: 1; } 95%, 100% { opacity: 0; } }
+  @keyframes nxt-w58 { 0%, 58% { opacity: 0; } 60%, 90% { opacity: 1; } 95%, 100% { opacity: 0; } }
+  @keyframes nxt-w76 { 0%, 76% { opacity: 0; } 78%, 90% { opacity: 1; } 95%, 100% { opacity: 0; } }
+
+  .chip-pending { animation: nxt-cp 12s linear infinite; }
+  .chip-running { animation: nxt-cr 12s linear infinite; }
+  .chip-done { animation: nxt-cd 12s linear infinite; }
+  @keyframes nxt-cp { 0%, 14% { opacity: 0; } 16%, 27% { opacity: 1; } 29%, 100% { opacity: 0; } }
+  @keyframes nxt-cr { 0%, 27% { opacity: 0; } 29%, 72% { opacity: 1; } 74%, 100% { opacity: 0; } }
+  @keyframes nxt-cd { 0%, 72% { opacity: 0; } 74%, 90% { opacity: 1; } 95%, 100% { opacity: 0; } }
+
+  .worker-idle { animation: nxt-wi 12s linear infinite; }
+  .worker-run { animation: nxt-wr 12s linear infinite; }
+  .worker-glow { animation: nxt-wr 12s linear infinite, nxt-flow 1.4s linear infinite; }
+  .worker-busy { animation: nxt-flow 1.4s linear infinite; }
+  @keyframes nxt-wi { 0%, 26% { opacity: 1; } 28%, 74% { opacity: 0; } 76%, 100% { opacity: 1; } }
+  @keyframes nxt-wr { 0%, 26% { opacity: 0; } 28%, 74% { opacity: 1; } 76%, 100% { opacity: 0; } }
+
+  .stream { animation: nxt-son 12s linear infinite, nxt-flow 1.4s linear infinite; }
+  .stream2 { animation: nxt-flow 1.4s linear infinite; }
+  @keyframes nxt-son { 0%, 29% { opacity: 0; } 32%, 70% { opacity: 1; } 73%, 100% { opacity: 0; } }
+  @keyframes nxt-flow { to { stroke-dashoffset: -56; } }
+
+  .dot-e { animation: nxt-de 12s linear infinite; }
+  .dot-c { animation: nxt-dc 12s linear infinite; }
+  @keyframes nxt-de {
+    0%, 8% { opacity: 0; transform: translate(0px, 0px); }
+    9% { opacity: 1; }
+    13.5% { opacity: 1; }
+    14% { transform: translate(58px, 0px); }
+    14.5%, 100% { opacity: 0; transform: translate(58px, 0px); }
+  }
+  @keyframes nxt-dc {
+    0%, 22% { opacity: 0; transform: translate(0px, 0px); }
+    23% { opacity: 1; }
+    24.5% { transform: translate(30px, -4px); }
+    26.5% { opacity: 1; }
+    27% { transform: translate(58px, -18px); }
+    27.5%, 100% { opacity: 0; transform: translate(58px, -18px); }
+  }
+
+  .pulse {
+    transform-box: fill-box;
+    transform-origin: center;
+    animation: nxt-pulse 2.4s ease-out infinite;
+  }
+  .pulse2 {
+    animation-delay: 1.2s;
+  }
+  @keyframes nxt-pulse {
+    0% { transform: scale(1); opacity: 0.5; }
+    70% { transform: scale(2.8); opacity: 0; }
+    100% { transform: scale(2.8); opacity: 0; }
+  }
+
+  /* Static mid-lifecycle frame: terminal complete, task claimed and running,
+     snapshot pushed, log routes drawn. */
+  @media (prefers-reduced-motion: reduce) {
+    .l1, .l2, .l3, .l4, .l5, .l6, .l7, .l8,
+    .qrow, .snapchip, .s1, .s2, .s3, .s4,
+    .chip-running, .stream, .stream2 {
+      animation: none;
+    }
+    .qshift {
+      animation: none;
+      transform: translateY(42px);
+    }
+    .worker-run {
+      animation: none;
+      opacity: 1;
+    }
+    .worker-glow, .worker-busy {
+      animation: none;
+      opacity: 1;
+    }
+    .chip-pending, .chip-done, .worker-idle, .pulse {
+      display: none;
+    }
+  }
 </style>
-</defs>
-
-<g style="fill:rgb(0, 0, 0);stroke:none;color:rgb(0, 0, 0);stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, &quot;system-ui&quot;, &quot;Segoe UI&quot;, sans-serif;font-size:16px;font-weight:400;text-anchor:start;dominant-baseline:auto">
-<!-- CLI window frame -->
-<rect x="20" y="103" width="120" height="76" rx="6" style="fill:rgb(225, 245, 238);stroke:none"/>
-<!-- top bar -->
-<rect x="20" y="103" width="120" height="10" rx="6" style="fill:rgb(200, 232, 220);stroke:none"/>
-<rect x="20" y="107" width="120" height="6" style="fill:rgb(200, 232, 220);stroke:none"/>
-<line x1="20" y1="113" x2="140" y2="113" style="stroke:rgb(15, 110, 86);stroke-width:0.3px"/>
-<circle cx="31" cy="108" r="2" fill="#ff5f56"/>
-<circle cx="38" cy="108" r="2" fill="#ffbd2e"/>
-<circle cx="45" cy="108" r="2" fill="#27c93f"/>
-<!-- bottom bar -->
-<line x1="20" y1="169" x2="140" y2="169" style="stroke:rgb(15, 110, 86);stroke-width:0.3px"/>
-<rect x="20.25" y="169" width="119.5" height="9.5" rx="5.5" style="fill:rgb(200, 232, 220);stroke:none"/>
-<rect x="20.25" y="169" width="119.5" height="3" style="fill:rgb(200, 232, 220);stroke:none"/>
-<rect x="20" y="103" width="120" height="76" rx="6" style="fill:none;stroke:rgb(15, 110, 86);stroke-width:1px"/>
-<!-- Terminal prompt icon >_ -->
-<text x="45" y="141" text-anchor="middle" dominant-baseline="central" style="fill:rgb(15, 110, 86);stroke:none;font-family:&quot;SF Mono&quot;, &quot;Menlo&quot;, &quot;Consolas&quot;, monospace;font-size:15px;font-weight:500">&gt;_</text>
-<text x="88" y="141" text-anchor="middle" dominant-baseline="central" style="fill:rgb(8, 80, 65);stroke:none;font-family:&quot;Anthropic Sans&quot;, -apple-system, &quot;system-ui&quot;, &quot;Segoe UI&quot;, sans-serif;font-size:14px;font-weight:500">nextask</text>
-</g>
-<g style="fill:rgb(0, 0, 0);stroke:none;color:rgb(0, 0, 0);stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, &quot;system-ui&quot;, &quot;Segoe UI&quot;, sans-serif;font-size:16px;font-weight:400;text-anchor:start;dominant-baseline:auto">
-<rect x="268" y="46" width="144" height="184" rx="4" stroke-width="0.5" style="fill:rgb(238, 237, 254);stroke:rgb(83, 74, 183);color:rgb(0, 0, 0);stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, &quot;system-ui&quot;, &quot;Segoe UI&quot;, sans-serif;font-size:16px;font-weight:400;text-anchor:start;dominant-baseline:auto"/>
-<!-- PostgreSQL elephant icon (from simpleicons.org) -->
-<g transform="translate(289, 71) scale(0.55)">
-<path fill="rgb(83, 74, 183)" d="M23.5594 14.7228a.5269.5269 0 0 0-.0563-.1191c-.139-.2632-.4768-.3418-1.0074-.2321-1.6533.3411-2.2935.1312-2.5256-.0191 1.342-2.0482 2.445-4.522 3.0411-6.8297.2714-1.0507.7982-3.5237.1222-4.7316a1.5641 1.5641 0 0 0-.1509-.235C21.6931.9086 19.8007.0248 17.5099.0005c-1.4947-.0158-2.7705.3461-3.1161.4794a9.449 9.449 0 0 0-.5159-.0816 8.044 8.044 0 0 0-1.3114-.1278c-1.1822-.0184-2.2038.2642-3.0498.8406-.8573-.3211-4.7888-1.645-7.2219.0788C.9359 2.1526.3086 3.8733.4302 6.3043c.0409.818.5069 3.334 1.2423 5.7436.4598 1.5065.9387 2.7019 1.4334 3.582.553.9942 1.1259 1.5933 1.7143 1.7895.4474.1491 1.1327.1441 1.8581-.7279.8012-.9635 1.5903-1.8258 1.9446-2.2069.4351.2355.9064.3625 1.39.3772a.0569.0569 0 0 0 .0004.0041 11.0312 11.0312 0 0 0-.2472.3054c-.3389.4302-.4094.5197-1.5002.7443-.3102.064-1.1344.2339-1.1464.8115-.0025.1224.0329.2309.0919.3268.2269.4231.9216.6097 1.015.6331 1.3345.3335 2.5044.092 3.3714-.6787-.017 2.231.0775 4.4174.3454 5.0874.2212.5529.7618 1.9045 2.4692 1.9043.2505 0 .5263-.0291.8296-.0941 1.7819-.3821 2.5557-1.1696 2.855-2.9059.1503-.8707.4016-2.8753.5388-4.1012.0169-.0703.0357-.1207.057-.1362.0007-.0005.0697-.0471.4272.0307a.3673.3673 0 0 0 .0443.0068l.2539.0223.0149.001c.8468.0384 1.9114-.1426 2.5312-.4308.6438-.2988 1.8057-1.0323 1.5951-1.6698z"/>
-</g>
-<text x="350" y="76" text-anchor="middle" dominant-baseline="central" style="fill:rgb(60, 52, 137);stroke:none;font-family:&quot;Anthropic Sans&quot;, -apple-system, &quot;system-ui&quot;, &quot;Segoe UI&quot;, sans-serif;font-size:14px;font-weight:500">PostgreSQL</text>
-<text x="340" y="94" text-anchor="middle" dominant-baseline="central" style="fill:rgb(83, 74, 183);stroke:none;color:rgb(0, 0, 0);stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, &quot;system-ui&quot;, &quot;Segoe UI&quot;, sans-serif;font-size:12px;font-weight:400;text-anchor:middle;dominant-baseline:central">queue</text>
-<circle cx="300" cy="128" r="4" fill="none" stroke-width="0.8" style="fill:rgb(238, 237, 254);stroke:rgb(83, 74, 183);color:rgb(0, 0, 0);stroke-width:0.8px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, &quot;system-ui&quot;, &quot;Segoe UI&quot;, sans-serif;font-size:16px;font-weight:400;text-anchor:start;dominant-baseline:auto"/>
-<text x="313" y="128" dominant-baseline="central" style="fill:rgb(83, 74, 183);stroke:none;color:rgb(0, 0, 0);stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, &quot;system-ui&quot;, &quot;Segoe UI&quot;, sans-serif;font-size:12px;font-weight:400;text-anchor:start;dominant-baseline:central">tasks</text>
-<circle cx="300" cy="153" r="4" fill="none" stroke-width="0.8" style="fill:rgb(238, 237, 254);stroke:rgb(83, 74, 183);color:rgb(0, 0, 0);stroke-width:0.8px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, &quot;system-ui&quot;, &quot;Segoe UI&quot;, sans-serif;font-size:16px;font-weight:400;text-anchor:start;dominant-baseline:auto"/>
-<text x="313" y="153" dominant-baseline="central" style="fill:rgb(83, 74, 183);stroke:none;color:rgb(0, 0, 0);stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, &quot;system-ui&quot;, &quot;Segoe UI&quot;, sans-serif;font-size:12px;font-weight:400;text-anchor:start;dominant-baseline:central">logs</text>
-<circle cx="300" cy="178" r="4" fill="none" stroke-width="0.8" style="fill:rgb(238, 237, 254);stroke:rgb(83, 74, 183);color:rgb(0, 0, 0);stroke-width:0.8px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, &quot;system-ui&quot;, &quot;Segoe UI&quot;, sans-serif;font-size:16px;font-weight:400;text-anchor:start;dominant-baseline:auto"/>
-<text x="313" y="178" dominant-baseline="central" style="fill:rgb(83, 74, 183);stroke:none;color:rgb(0, 0, 0);stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, &quot;system-ui&quot;, &quot;Segoe UI&quot;, sans-serif;font-size:12px;font-weight:400;text-anchor:start;dominant-baseline:central">workers</text>
-</g>
-<g style="fill:rgb(0, 0, 0);stroke:none;color:rgb(0, 0, 0);stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, &quot;system-ui&quot;, &quot;Segoe UI&quot;, sans-serif;font-size:16px;font-weight:400;text-anchor:start;dominant-baseline:auto">
-<!-- Back worker: idle (solid border) -->
-<rect x="556" y="99" width="120" height="64" rx="4" class="worker-idle" style="fill:rgb(250, 236, 231);stroke:rgb(153, 60, 29);stroke-width:1px"/>
-<!-- Middle worker: busy (flowing dashed border) -->
-<rect x="548" y="107" width="120" height="64" rx="4" style="fill:rgb(250, 236, 231);stroke:rgb(153, 60, 29);stroke-width:1px"/>
-<!-- Front worker: receives task (solid border hides, dashed activates on arrival) -->
-<rect x="540" y="115" width="120" height="64" rx="4" style="fill:rgb(250, 236, 231);stroke:none"/>
-<rect x="540" y="115" width="120" height="64" rx="4" style="fill:none;stroke:rgb(153, 60, 29);stroke-width:1px;animation:worker-solid-hide 9s ease-in-out infinite"/>
-<rect x="540" y="115" width="120" height="64" rx="4" class="worker-recv" style="fill:none;stroke:rgb(153, 60, 29);stroke-width:1px"/>
-<!-- Server rack icon (Lucide) -->
-<g transform="translate(560, 139)" fill="none" stroke="rgb(153, 60, 29)" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round">
-  <rect width="16" height="6" rx="1.5"/>
-  <rect y="8" width="16" height="6" rx="1.5"/>
-  <circle cx="3.5" cy="3" r="0.5" fill="rgb(153, 60, 29)"/>
-  <circle cx="3.5" cy="11" r="0.5" fill="rgb(153, 60, 29)"/>
-</g>
-<text x="607" y="147" text-anchor="middle" dominant-baseline="central" style="fill:rgb(113, 43, 19);stroke:none;font-family:&quot;Anthropic Sans&quot;, -apple-system, &quot;system-ui&quot;, &quot;Segoe UI&quot;, sans-serif;font-size:14px;font-weight:500">worker</text>
-</g>
-<g style="fill:rgb(0, 0, 0);stroke:none;color:rgb(0, 0, 0);stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, &quot;system-ui&quot;, &quot;Segoe UI&quot;, sans-serif;font-size:16px;font-weight:400;text-anchor:start;dominant-baseline:auto">
-<rect x="268" y="246" width="144" height="44" rx="4" stroke-width="0.5" style="fill:rgb(241, 239, 232);stroke:rgb(95, 94, 90);color:rgb(0, 0, 0);stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, &quot;system-ui&quot;, &quot;Segoe UI&quot;, sans-serif;font-size:16px;font-weight:400;text-anchor:start;dominant-baseline:auto"/>
-<!-- Git icon (from simpleicons.org) -->
-<g transform="translate(289, 262) scale(0.5)">
-<path fill="rgb(95, 94, 90)" d="M23.546 10.93L13.067.452c-.604-.603-1.582-.603-2.188 0L8.708 2.627l2.76 2.76c.645-.215 1.379-.07 1.889.441.516.515.658 1.258.438 1.9l2.658 2.66c.645-.223 1.387-.078 1.9.435.721.72.721 1.884 0 2.604-.719.719-1.881.719-2.6 0-.539-.541-.674-1.337-.404-1.996L12.86 8.955v6.525c.176.086.342.203.488.348.713.721.713 1.883 0 2.6-.719.721-1.889.721-2.609 0-.719-.719-.719-1.879 0-2.598.182-.18.387-.316.605-.406V8.835c-.217-.091-.424-.222-.6-.401-.545-.545-.676-1.342-.396-2.009L7.636 3.7.45 10.881c-.6.605-.6 1.584 0 2.189l10.48 10.477c.604.604 1.582.604 2.186 0l10.43-10.43c.605-.603.605-1.582 0-2.187"/>
-</g>
-<text x="347" y="268" text-anchor="middle" dominant-baseline="central" style="fill:rgb(68, 68, 65);stroke:none;font-family:&quot;Anthropic Sans&quot;, -apple-system, &quot;system-ui&quot;, &quot;Segoe UI&quot;, sans-serif;font-size:14px;font-weight:500">git remote</text>
-</g>
-<text x="200" y="118" text-anchor="middle" style="fill:rgb(61, 61, 58);stroke:none;color:rgb(0, 0, 0);stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, &quot;system-ui&quot;, &quot;Segoe UI&quot;, sans-serif;font-size:12px;font-weight:400;text-anchor:middle;dominant-baseline:auto">logs</text>
-<line x1="266" y1="128" x2="142" y2="128" stroke="var(--s)" stroke-width="1.5" marker-end="url(#arrow)" class="dashed-flow" style="fill:rgb(0, 0, 0);stroke:rgb(61, 61, 58);color:rgb(0, 0, 0);stroke-width:1px;stroke-dasharray:6px, 4px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, &quot;system-ui&quot;, &quot;Segoe UI&quot;, sans-serif;font-size:16px;font-weight:400;text-anchor:start;dominant-baseline:auto"/>
-<text x="200" y="152" text-anchor="middle" style="fill:rgb(61, 61, 58);stroke:none;color:rgb(0, 0, 0);stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, &quot;system-ui&quot;, &quot;Segoe UI&quot;, sans-serif;font-size:12px;font-weight:400;text-anchor:middle;dominant-baseline:auto">enqueue</text>
-<line x1="142" y1="160" x2="266" y2="160" marker-end="url(#arrow)" style="fill:none;stroke:rgb(115, 114, 108);color:rgb(0, 0, 0);stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, &quot;system-ui&quot;, &quot;Segoe UI&quot;, sans-serif;font-size:16px;font-weight:400;text-anchor:start;dominant-baseline:auto"/>
-<text x="476" y="118" text-anchor="middle" style="fill:rgb(61, 61, 58);stroke:none;color:rgb(0, 0, 0);stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, &quot;system-ui&quot;, &quot;Segoe UI&quot;, sans-serif;font-size:12px;font-weight:400;text-anchor:middle;dominant-baseline:auto">logs</text>
-<line x1="538" y1="128" x2="414" y2="128" stroke="var(--s)" stroke-width="1.5" marker-end="url(#arrow)" class="dashed-flow" style="fill:rgb(0, 0, 0);stroke:rgb(61, 61, 58);color:rgb(0, 0, 0);stroke-width:1px;stroke-dasharray:6px, 4px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, &quot;system-ui&quot;, &quot;Segoe UI&quot;, sans-serif;font-size:16px;font-weight:400;text-anchor:start;dominant-baseline:auto"/>
-<text x="476" y="152" text-anchor="middle" style="fill:rgb(61, 61, 58);stroke:none;color:rgb(0, 0, 0);stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, &quot;system-ui&quot;, &quot;Segoe UI&quot;, sans-serif;font-size:12px;font-weight:400;text-anchor:middle;dominant-baseline:auto">claim</text>
-<line x1="414" y1="160" x2="538" y2="160" marker-end="url(#arrow)" style="fill:none;stroke:rgb(115, 114, 108);color:rgb(0, 0, 0);stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, &quot;system-ui&quot;, &quot;Segoe UI&quot;, sans-serif;font-size:16px;font-weight:400;text-anchor:start;dominant-baseline:auto"/>
-<text x="188" y="222" text-anchor="end" style="fill:rgb(61, 61, 58);stroke:none;font-family:&quot;SF Mono&quot;, &quot;Menlo&quot;, &quot;Consolas&quot;, monospace;font-size:11px;font-weight:400">--snapshot</text>
-<path d="M 200 162 L 200 268 L 266 268" fill="none" marker-end="url(#arrow)" style="fill:none;stroke:rgb(115, 114, 108);color:rgb(0, 0, 0);stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, &quot;system-ui&quot;, &quot;Segoe UI&quot;, sans-serif;font-size:16px;font-weight:400;text-anchor:start;dominant-baseline:auto"/>
-<text x="488" y="222" text-anchor="start" style="fill:rgb(61, 61, 58);stroke:none;color:rgb(0, 0, 0);stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, &quot;system-ui&quot;, &quot;Segoe UI&quot;, sans-serif;font-size:12px;font-weight:400;text-anchor:start;dominant-baseline:auto">clone</text>
-<path d="M 412 268 L 476 268 L 476 160" fill="none" stroke="var(--s)" stroke-width="1.5" style="fill:none;stroke:rgb(61, 61, 58);color:rgb(0, 0, 0);stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, &quot;system-ui&quot;, &quot;Segoe UI&quot;, sans-serif;font-size:16px;font-weight:400;text-anchor:start;dominant-baseline:auto"/>
-<!-- Animated flow dots -->
-<circle r="3.5" fill="rgb(115, 114, 108)" class="dot-cli-to-junc"/>
-<circle r="3.5" fill="rgb(115, 114, 108)" class="dot-junc-to-db"/>
-<circle r="3.5" fill="rgb(115, 114, 108)" class="dot-junc-to-git"/>
-<circle r="3.5" fill="rgb(115, 114, 108)" class="dot-db-to-wjunc"/>
-<circle r="3.5" fill="rgb(115, 114, 108)" class="dot-git-to-wjunc"/>
-<circle r="3.5" fill="rgb(115, 114, 108)" class="dot-wjunc-to-work"/>
 </svg>
