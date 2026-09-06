@@ -167,10 +167,10 @@ var workerListCmd = &cobra.Command{
 		if statusFlag != "" {
 			s := db.WorkerStatus(statusFlag)
 			switch s {
-			case db.WorkerStatusRunning, db.WorkerStatusStopped:
+			case db.WorkerStatusRunning, db.WorkerStatusStopped, db.WorkerStatusStale:
 			default:
 				return errWithHints(fmt.Sprintf("unknown status: %s", statusFlag),
-					"Valid: "+codeStyle.Render("running")+", "+codeStyle.Render("stopped"),
+					"Valid: "+codeStyle.Render("running")+", "+codeStyle.Render("stopped")+", "+codeStyle.Render("stale"),
 				)
 			}
 			statusFilter = &s
@@ -200,10 +200,11 @@ var workerListCmd = &cobra.Command{
 		}
 
 		filter := db.WorkerListFilter{
-			Status: statusFilter,
-			Since:  since,
-			Limit:  uint64(workerListLimit),
-			Offset: uint64(workerListOffset),
+			Status:         statusFilter,
+			Since:          since,
+			Limit:          uint64(workerListLimit),
+			Offset:         uint64(workerListOffset),
+			StaleThreshold: cfg.Worker.StaleDuration(),
 		}
 
 		workers, err := db.ListWorkers(ctx, pool, filter)
@@ -227,15 +228,11 @@ var workerListCmd = &cobra.Command{
 			return nil
 		}
 
-		staleThreshold := cfg.Worker.StaleDuration()
 		plain := workerListJSON || workerListCSV
 
 		rows := [][]string{}
 		for _, w := range workers {
 			status := string(w.Status)
-			if w.Status == db.WorkerStatusRunning && time.Since(w.LastHeartbeat) > staleThreshold {
-				status = "stale"
-			}
 			displayStatus := status
 			if !plain {
 				displayStatus = statusStyle(db.TaskStatus(status)).Render(status)
@@ -364,7 +361,7 @@ func init() {
 	workerCmd.Flags().StringVar(&workerID, "_id", "", "Worker ID (internal use)")
 	workerCmd.Flags().MarkHidden("_id")
 
-	workerListCmd.Flags().String("status", "", "Filter by status (running, stopped)")
+	workerListCmd.Flags().String("status", "", "Filter by status (running, stopped, stale)")
 	workerListCmd.Flags().IntVar(&workerListLimit, "limit", 50, "Max results")
 	workerListCmd.Flags().IntVar(&workerListOffset, "offset", 0, "Skip first N results")
 	workerListCmd.Flags().StringVar(&workerListSince, "since", "", "Workers started after (e.g., 1h, 24h, 7d)")
