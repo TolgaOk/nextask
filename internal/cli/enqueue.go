@@ -11,8 +11,7 @@ import (
 
 	"github.com/TolgaOk/nextask/internal/config"
 	"github.com/TolgaOk/nextask/internal/db"
-	"github.com/TolgaOk/nextask/internal/source"
-	"github.com/TolgaOk/nextask/internal/worker"
+	"github.com/TolgaOk/nextask/internal/integrations"
 	"github.com/jackc/pgx/v5/pgxpool"
 	gonanoid "github.com/matoous/go-nanoid/v2"
 	"github.com/spf13/cobra"
@@ -53,11 +52,6 @@ var enqueueCmd = &cobra.Command{
 			return errDBRequired()
 		}
 
-		// Apply command-specific flag
-		if remote != "" {
-			cfg.Source.Remote = config.NormalizeRemote(remote)
-		}
-
 		command := args[0]
 
 		parsedTags, err := parseTags(tags)
@@ -73,14 +67,6 @@ var enqueueCmd = &cobra.Command{
 			}
 		}
 
-		if snapshot && cfg.Source.Remote == "" {
-			return errWithHints("remote is required when using --snapshot",
-				"Provide: "+codeStyle.Render("--remote ~/.nextask/source.git"),
-				"Or set "+codeStyle.Render("source.remote")+" in config file",
-				"Create with: "+codeStyle.Render("nextask init source"),
-			)
-		}
-
 		task := &db.Task{
 			ID:         id,
 			Command:    command,
@@ -89,7 +75,13 @@ var enqueueCmd = &cobra.Command{
 			SourceType: "noop",
 		}
 
-		ctx := cmd.Context()
+		plan, err := enqueueIntegrations(cmd)
+		if err != nil {
+			return err
+		}
+		baseCtx := cmd.Context()
+		ctx, stopSignals := signal.NotifyContext(baseCtx, os.Interrupt, syscall.SIGTERM)
+		defer stopSignals()
 		pool, err := db.Connect(ctx, cfg.DB.URL)
 		if err != nil {
 			return err
@@ -107,43 +99,22 @@ var enqueueCmd = &cobra.Command{
 			return err
 		}
 
-		if snapshot {
-			result, err := source.CreateSnapshot(".", id)
-			if err != nil {
-				return withHints(fmt.Errorf("failed to create snapshot: %w", err),
-					"Ensure you are in a git repository",
-				)
-			}
-
-			if err := source.PushSnapshot(".", cfg.Source.Remote, result); err != nil {
-				return withHints(fmt.Errorf("failed to push snapshot: %w", err),
-					"Check that remote exists: "+codeStyle.Render(cfg.Source.Remote),
-				)
-			}
-
-			// Resolve remote name (e.g. "origin") to URL for storage
-			resolvedRemote, err := source.ResolveRemote(".", cfg.Source.Remote)
-			if err != nil {
-				resolvedRemote = cfg.Source.Remote
-			}
-
-			task.SourceType = "git"
-			task.SourceConfig, _ = json.Marshal(worker.GitSourceConfig{
-				Remote: resolvedRemote,
-				Ref:    result.Ref,
-				Commit: result.Commit,
-			})
+		prepared, err := plan.Prepare(ctx, integrations.Task{ID: task.ID, Command: task.Command})
+		if err != nil {
+			return err
 		}
-
-		if snapshot {
-			if _, err := tx.Exec(ctx, "UPDATE tasks SET source_type = $2, source_config = $3 WHERE id = $1", task.ID, task.SourceType, task.SourceConfig); err != nil {
+		if prepared.Command != task.Command {
+			if _, err := tx.Exec(ctx, "UPDATE tasks SET execution_command = $2, source_type = 'command' WHERE id = $1", task.ID, prepared.Command); err != nil {
 				return err
 			}
 		}
+
 		if err := tx.Commit(ctx); err != nil {
 			return err
 		}
 
+		stopSignals()
+		ctx = baseCtx
 		if attach {
 			return enqueueAndAttach(ctx, pool, id)
 		}
@@ -158,11 +129,16 @@ var enqueueCmd = &cobra.Command{
 }
 
 func init() {
+	enqueueCmd.Flags().StringArray("with", nil, "Enable integration (repeatable)")
+	enqueueCmd.Flags().StringArray("without", nil, "Disable default integration (repeatable)")
+	enqueueCmd.Flags().StringArray("set", nil, "Override TOOL.KEY=VALUE (repeatable)")
 	enqueueCmd.Flags().String("id", "", "Task ID (1–53 letters, digits, underscores or hyphens; starts with a letter or digit)")
 	enqueueCmd.Flags().StringSliceVar(&tags, "tag", nil, "Tags (key=value, can specify multiple)")
 	enqueueCmd.Flags().BoolVar(&snapshot, "snapshot", false, "Create and push source snapshot")
 	enqueueCmd.Flags().StringVar(&remote, "remote", "", "Git remote name or path for snapshot (required if --snapshot)")
 	enqueueCmd.Flags().BoolVarP(&attach, "attach", "a", false, "Watch task output and wait for completion")
+	enqueueCmd.Flags().MarkDeprecated("snapshot", "use --with git")
+	enqueueCmd.Flags().MarkDeprecated("remote", "use --set git.remote=REMOTE")
 	RootCmd.AddCommand(enqueueCmd)
 }
 
@@ -309,4 +285,29 @@ func printLogLine(log db.TaskLog) {
 	} else {
 		fmt.Println(log.Data)
 	}
+}
+
+func enqueueIntegrations(cmd *cobra.Command) (*integrations.Plan, error) {
+	with, _ := cmd.Flags().GetStringArray("with")
+	without, _ := cmd.Flags().GetStringArray("without")
+	overrides, _ := cmd.Flags().GetStringArray("set")
+	if snapshot {
+		with = append(with, "git")
+	} else if cmd.Flags().Changed("snapshot") {
+		without = append(without, "git")
+	}
+	values := make(map[string]map[string]string)
+	for name, options := range cfg.Integrations {
+		values[name] = make(map[string]string)
+		for key, value := range options {
+			values[name][key] = value
+		}
+	}
+	if values["git"] == nil && cfg.Source.Remote != "" {
+		values["git"] = map[string]string{"remote": cfg.Source.Remote}
+	}
+	if remote != "" {
+		overrides = append([]string{"git.remote=" + config.NormalizeRemote(remote)}, overrides...)
+	}
+	return integrations.Builtins().Resolve(cfg.Enqueue.With, with, without, values, overrides)
 }

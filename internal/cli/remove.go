@@ -2,18 +2,16 @@ package cli
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 
 	"github.com/TolgaOk/nextask/internal/db"
-	"github.com/TolgaOk/nextask/internal/source"
 	"github.com/spf13/cobra"
 )
 
 var removeCmd = &cobra.Command{
 	Use:   "remove TASK_ID",
-	Short: "Remove a task, its logs, and snapshot",
+	Short: "Remove a task and its logs",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if cfg.DB.URL == "" {
@@ -45,19 +43,6 @@ var removeCmd = &cobra.Command{
 			)
 		}
 
-		var snapshotDeleted bool
-		if task.SourceType == "git" && len(task.SourceConfig) > 0 {
-			var cfg struct {
-				Remote string `json:"remote"`
-				Ref    string `json:"ref"`
-			}
-			if err := json.Unmarshal(task.SourceConfig, &cfg); err == nil && cfg.Remote != "" && cfg.Ref != "" {
-				if err := source.DeleteSnapshot(cfg.Remote, cfg.Ref); err == nil {
-					snapshotDeleted = true
-				}
-			}
-		}
-
 		deleted, err := db.DeleteTask(ctx, pool, taskID)
 		if err != nil {
 			return err
@@ -68,11 +53,7 @@ var removeCmd = &cobra.Command{
 			)
 		}
 
-		if snapshotDeleted {
-			fmt.Fprintln(os.Stderr, "Task and snapshot removed")
-		} else {
-			fmt.Fprintln(os.Stderr, "Task removed")
-		}
+		fmt.Fprintln(os.Stderr, "Task removed")
 		return nil
 	},
 }

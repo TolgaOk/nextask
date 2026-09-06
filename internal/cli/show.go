@@ -115,7 +115,7 @@ func printTask(task *db.Task) {
 		}
 	}
 
-	if task.SourceType != "noop" && task.SourceType != "" {
+	if task.SourceType != "noop" && task.SourceType != "" && task.SourceType != "command" {
 		fmt.Println(showSectionStyle.Render("Source"))
 		printField(showIndentLabel, "Type", task.SourceType)
 		printSourceConfig(task.SourceType, task.SourceConfig)

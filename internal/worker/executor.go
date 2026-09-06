@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/TolgaOk/nextask/internal/db"
+	"github.com/TolgaOk/nextask/internal/integrations"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -46,13 +47,21 @@ func (e *Executor) Execute(ctx context.Context, task *db.Task) *ExitResult {
 	taskDir := filepath.Join(e.Workdir, task.ID)
 	dbLog := NewDBLogger(e.Pool, task.ID)
 
-	src, err := GetSource(task.SourceType)
-	if err != nil {
-		dbLog.Log(ctx, "nextask", fmt.Sprintf("[error] unable to instantiate source '%s': %v", task.SourceType, err))
+	if err := db.ValidateTaskID(task.ID); err != nil {
 		return &ExitResult{Code: 1, Err: err}
 	}
-	if err := src.Fetch(ctx, task.SourceConfig, taskDir, dbLog); err != nil {
-		dbLog.Log(ctx, "nextask", fmt.Sprintf("[error] source fetch failed: %v", err))
+	command := task.Command
+	if task.ExecutionCommand != nil {
+		command = *task.ExecutionCommand
+	} else {
+		var err error
+		command, err = integrations.LegacyCommand(task.SourceType, task.SourceConfig, task.Command)
+		if err != nil {
+			dbLog.Log(ctx, "nextask", fmt.Sprintf("[error] prepare legacy task: %v", err))
+			return &ExitResult{Code: 1, Err: err}
+		}
+	}
+	if err := os.MkdirAll(taskDir, 0755); err != nil {
 		return &ExitResult{Code: 1, Err: err}
 	}
 
@@ -69,7 +78,9 @@ func (e *Executor) Execute(ctx context.Context, task *db.Task) *ExitResult {
 	defer log.Close()
 
 	log.Log(ctx, "nextask", fmt.Sprintf("[info] running: %s", task.Command))
-	return e.runCommand(ctx, task, taskDir, log)
+	executable := *task
+	executable.Command = command
+	return e.runCommand(ctx, &executable, taskDir, log)
 }
 
 func (e *Executor) runCommand(ctx context.Context, task *db.Task, taskDir string, log Logger) *ExitResult {
