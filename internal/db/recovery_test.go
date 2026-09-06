@@ -326,7 +326,7 @@ func TestRetry_HeartbeatRecovery(t *testing.T) {
 	}
 
 	// Get initial heartbeat
-	workers, _ := ListWorkers(ctx, pool, nil)
+	workers, _ := ListWorkers(ctx, pool, WorkerListFilter{})
 	if len(workers) == 0 {
 		t.Fatal("worker not found")
 	}
@@ -359,7 +359,7 @@ func TestRetry_HeartbeatRecovery(t *testing.T) {
 	}
 
 	// Verify heartbeat was updated
-	workers, _ = ListWorkers(ctx, pool, nil)
+	workers, _ = ListWorkers(ctx, pool, WorkerListFilter{})
 	if !workers[0].LastHeartbeat.After(initialHeartbeat) {
 		t.Error("heartbeat was not updated after recovery")
 	}

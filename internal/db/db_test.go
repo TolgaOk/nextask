@@ -1289,7 +1289,7 @@ func TestRegisterWorker(t *testing.T) {
 	}
 
 	// Verify worker was registered
-	workers, err := ListWorkers(ctx, pool, nil)
+	workers, err := ListWorkers(ctx, pool, WorkerListFilter{})
 	if err != nil {
 		t.Fatalf("ListWorkers() error = %v", err)
 	}
@@ -1326,7 +1326,7 @@ func TestUnregisterWorker(t *testing.T) {
 	}
 
 	// Verify worker was marked as stopped
-	workers, err := ListWorkers(ctx, pool, nil)
+	workers, err := ListWorkers(ctx, pool, WorkerListFilter{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1352,7 +1352,7 @@ func TestUpdateHeartbeat(t *testing.T) {
 	}
 
 	// Get initial heartbeat
-	workers, _ := ListWorkers(ctx, pool, nil)
+	workers, _ := ListWorkers(ctx, pool, WorkerListFilter{})
 	initialHeartbeat := workers[0].LastHeartbeat
 
 	// Wait a moment and update heartbeat
@@ -1362,7 +1362,7 @@ func TestUpdateHeartbeat(t *testing.T) {
 	}
 
 	// Verify heartbeat was updated
-	workers, _ = ListWorkers(ctx, pool, nil)
+	workers, _ = ListWorkers(ctx, pool, WorkerListFilter{})
 	if !workers[0].LastHeartbeat.After(initialHeartbeat) {
 		t.Error("heartbeat was not updated")
 	}
@@ -1380,7 +1380,7 @@ func TestListWorkers_FilterByStatus(t *testing.T) {
 
 	// List running workers only
 	running := WorkerStatusRunning
-	workers, err := ListWorkers(ctx, pool, &running)
+	workers, err := ListWorkers(ctx, pool, WorkerListFilter{Status: &running})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1393,7 +1393,7 @@ func TestListWorkers_FilterByStatus(t *testing.T) {
 
 	// List stopped workers only
 	stopped := WorkerStatusStopped
-	workers, err = ListWorkers(ctx, pool, &stopped)
+	workers, err = ListWorkers(ctx, pool, WorkerListFilter{Status: &stopped})
 	if err != nil {
 		t.Fatal(err)
 	}
