@@ -73,3 +73,18 @@ The join key in Nextask is `tasks.id`; task metadata includes `command`, `status
 key is required in another tool's tables.
 
 See [integrations](integrations.md) for Git and S3 usage and [upgrading](upgrading.md) for migration steps.
+
+## Worker files and shutdown
+
+Each execution creates a fresh `<worker.workdir>/<TASK_ID>` directory. If that path
+already exists, the task fails with a clear error and preserves the existing files.
+Move that directory aside or use a new task ID. `worker --rm` removes only the
+directory created by that execution, after its integrations and log flushing finish.
+
+Log batches retry temporary database failures. Shutdown allows up to five seconds
+to flush pending batches; longer outages can leave output only in local task logs.
+Those files are also removed when `--rm` is selected.
+
+Abrupt instance loss preserves completed uploads. A hard-killed worker cannot
+finalize its task; the task becomes stale and is not automatically retried. Killing
+only the worker process can leave its child commands running on the same host.
