@@ -14,26 +14,6 @@ import (
 
 const completionShutdownTimeout = 30 * time.Second
 
-// awaitCompletion keeps worker-stop notifications responsive while persistence
-// or startup recovery waits for the database.
-func awaitCompletion(ctx context.Context, stop context.CancelFunc, notifier *db.Notifier, channel string, save func() error) error {
-	done := make(chan error, 1)
-	go func() { done <- save() }()
-	for {
-		select {
-		case err := <-done:
-			return err
-		case notif, ok := <-notifier.C:
-			if !ok || notif.Channel == channel {
-				stop()
-				return <-done
-			}
-		case <-ctx.Done():
-			return <-done
-		}
-	}
-}
-
 // finishTask journals an outcome before cleanup or any database write.
 func (w *Worker) finishTask(ctx context.Context, task *db.Task, execution taskExecution, wasCancelled bool) error {
 	if task.WorkerID == nil || task.StartedAt == nil {

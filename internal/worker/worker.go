@@ -149,6 +149,12 @@ func (w *Worker) Run(parentCtx context.Context) (runErr error) {
 		}
 	}()
 
+	control := watchWorker(ctx, cancel, notifier.C, toWorkerCh)
+	defer func() {
+		cancel()
+		<-control.done
+	}()
+
 	heartbeatDone := make(chan struct{})
 	go func() {
 		defer close(heartbeatDone)
@@ -161,13 +167,9 @@ func (w *Worker) Run(parentCtx context.Context) (runErr error) {
 
 	fmt.Printf("Worker %s started\n", w.ID)
 
-	if err := awaitCompletion(ctx, cancel, notifier, toWorkerCh, func() error {
-		return w.recoverCompletions(ctx)
-	}); err != nil {
+	if err := w.recoverCompletions(ctx); err != nil {
 		return err
 	}
-
-	claimBackoff := w.newBackoff()
 
 	var idleTimer *time.Timer
 	var idleCh <-chan time.Time
@@ -182,21 +184,16 @@ func (w *Worker) Run(parentCtx context.Context) (runErr error) {
 			return nil
 		}
 
-		task, err := db.ClaimTask(ctx, w.Pool, w.ID, w.Info, w.tagFilter)
+		task, err := w.claimTask(ctx)
 		if err != nil {
-			wait := claimBackoff.NextBackOff()
-			fmt.Fprintf(os.Stderr, "failed to claim task: %v (retry in %v)\n", err, wait)
-			select {
-			case <-time.After(wait):
-			case <-ctx.Done():
+			if ctx.Err() != nil && (errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)) {
 				return nil
 			}
-			continue
+			return fmt.Errorf("failed to claim task: %w", err)
 		}
-		claimBackoff.Reset()
 
 		if task != nil {
-			if err := w.processTask(ctx, cancel, notifier, toWorkerCh, task); err != nil {
+			if err := w.processTask(ctx, notifier, control.events, task); err != nil {
 				return err
 			}
 			if idleTimer != nil {
@@ -222,12 +219,8 @@ func (w *Worker) Run(parentCtx context.Context) (runErr error) {
 		}
 
 		select {
-		case notif, ok := <-notifier.C:
+		case _, ok := <-control.events:
 			if !ok {
-				return nil
-			}
-			if notif.Channel == toWorkerCh {
-				fmt.Println("Received stop signal, shutting down...")
 				return nil
 			}
 			// wake event — loop to claim
@@ -238,6 +231,19 @@ func (w *Worker) Run(parentCtx context.Context) (runErr error) {
 			return nil
 		}
 	}
+}
+
+// claimTask uses the same transient-error policy as completion and cancellation.
+func (w *Worker) claimTask(ctx context.Context) (*db.Task, error) {
+	return db.RetryValue(ctx, func() (*db.Task, error) {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		return db.ClaimTask(ctx, w.Pool, w.ID, w.Info, w.tagFilter)
+	}, backoff.WithBackOff(w.newBackoff()), backoff.WithMaxElapsedTime(0),
+		backoff.WithNotify(func(err error, delay time.Duration) {
+			fmt.Fprintf(os.Stderr, "failed to claim task: %s (retry in %v)\n", db.HumanError(err), delay)
+		}))
 }
 
 // unregister also runs on partial startup failure, using an independent deadline.

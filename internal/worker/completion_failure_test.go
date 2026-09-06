@@ -111,8 +111,10 @@ func TestWorkerStopDuringCompletion(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer notifier.Close(context.Background())
+	control := watchWorker(ctx, cancel, notifier.C, channel)
+	defer func() { cancel(); <-control.done }()
 	done := make(chan error, 1)
-	go func() { done <- w.processTask(ctx, cancel, notifier, channel, task) }()
+	go func() { done <- w.processTask(ctx, notifier, control.events, task) }()
 	defer func() { cancel(); gate.Rollback(context.Background()); <-done }()
 	deadline := time.Now().Add(5 * time.Second)
 	for {

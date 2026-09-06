@@ -8,18 +8,17 @@ import (
 
 	"github.com/TolgaOk/nextask/internal/db"
 	"github.com/cenkalti/backoff/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
-func (w *Worker) processTask(ctx context.Context, runCancel context.CancelFunc, notifier *db.Notifier, toWorkerCh string, task *db.Task) error {
+func (w *Worker) processTask(ctx context.Context, notifier *db.Notifier, events <-chan *pgconn.Notification, task *db.Task) error {
 	fmt.Printf("Processing %s: %s\n", task.ID, task.Command)
 
 	taskCtx, taskCancel := context.WithCancel(ctx)
 	defer taskCancel()
 
 	finish := func(execution taskExecution, cancelled bool) error {
-		return awaitCompletion(ctx, runCancel, notifier, toWorkerCh, func() error {
-			return w.finishTask(ctx, task, execution, cancelled)
-		})
+		return w.finishTask(ctx, task, execution, cancelled)
 	}
 
 	// Subscribe to task cancel channel on the existing connection
@@ -60,14 +59,13 @@ func (w *Worker) processTask(ctx context.Context, runCancel context.CancelFunc, 
 		case result = <-resultCh:
 			goto finish
 
-		case notif, ok := <-notifier.C:
+		case notif, ok := <-events:
 			if !ok {
 				taskCancel()
 				result = <-resultCh
 				goto finish
 			}
-			switch notif.Channel {
-			case toTaskCh:
+			if notif.Channel == toTaskCh {
 				eventType, _, err := db.ParseEvent(notif.Payload)
 				if err == nil && eventType == db.EventTypeCancel {
 					wasCancelled = true
@@ -75,12 +73,6 @@ func (w *Worker) processTask(ctx context.Context, runCancel context.CancelFunc, 
 					result = <-resultCh
 					goto finish
 				}
-			case toWorkerCh:
-				fmt.Println("Received stop signal, shutting down...")
-				runCancel()
-				taskCancel()
-				result = <-resultCh
-				goto finish
 			}
 
 		case <-poll.C:

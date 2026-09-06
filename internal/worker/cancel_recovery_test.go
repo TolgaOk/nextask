@@ -75,7 +75,9 @@ func TestWorkerChecksCancellationBeforeExecution(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer notifier.Close(context.Background())
-	if err := w.processTask(ctx, cancel, notifier, channel, task); err != nil {
+	control := watchWorker(ctx, cancel, notifier.C, channel)
+	defer func() { cancel(); <-control.done }()
+	if err := w.processTask(ctx, notifier, control.events, task); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(root, task.ID)); !os.IsNotExist(err) {
