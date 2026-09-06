@@ -3,6 +3,7 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"runtime"
@@ -111,7 +112,7 @@ func (w *Worker) Close() {
 }
 
 // Run starts the worker loop, processing tasks until context is cancelled.
-func (w *Worker) Run(parentCtx context.Context) error {
+func (w *Worker) Run(parentCtx context.Context) (runErr error) {
 	ctx, cancel := context.WithCancel(parentCtx)
 	defer cancel()
 	if err := w.journal.init(); err != nil {
@@ -122,9 +123,13 @@ func (w *Worker) Run(parentCtx context.Context) error {
 
 	// Register worker in DB
 	if err := db.RegisterWorker(ctx, w.Pool, w.ID, os.Getpid(), hostname, w.workdir); err != nil {
-		cancel()
 		return fmt.Errorf("failed to register worker: %w", err)
 	}
+
+	defer func() {
+		cancel()
+		runErr = errors.Join(runErr, w.unregister())
+	}()
 
 	// Single notifier for all channels (wake, stop, cancel)
 	toWorkerCh := db.ToWorkerChannel(w.ID)
@@ -133,33 +138,25 @@ func (w *Worker) Run(parentCtx context.Context) error {
 		toWorkerCh,
 	})
 	if err != nil {
-		cancel()
 		return fmt.Errorf("failed to start notifier: %w", err)
 	}
+	defer func() {
+		cancel()
+		closeCtx, closeCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer closeCancel()
+		if err := notifier.Close(closeCtx); err != nil {
+			runErr = errors.Join(runErr, fmt.Errorf("close worker notifier: %w", err))
+		}
+	}()
 
-	// Start heartbeat goroutine
 	heartbeatDone := make(chan struct{})
 	go func() {
 		defer close(heartbeatDone)
 		w.runHeartbeat(ctx)
 	}()
-
-	// Cleanup
 	defer func() {
 		cancel()
-
-		closeCtx, closeCancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer closeCancel()
-
-		notifier.Close(closeCtx)
 		<-heartbeatDone
-
-		// Notify and unregister
-		unregCtx, unregCancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer unregCancel()
-		fromWorkerCh := db.FromWorkerChannel(w.ID)
-		w.Pool.Exec(unregCtx, "SELECT pg_notify($1, 'stopped')", fromWorkerCh)
-		db.UnregisterWorker(unregCtx, w.Pool, w.ID)
 	}()
 
 	fmt.Printf("Worker %s started\n", w.ID)
@@ -241,6 +238,20 @@ func (w *Worker) Run(parentCtx context.Context) error {
 			return nil
 		}
 	}
+}
+
+// unregister also runs on partial startup failure, using an independent deadline.
+// Confirm shutdown only after the worker record has been updated.
+func (w *Worker) unregister() error {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := db.UnregisterWorker(ctx, w.Pool, w.ID); err != nil {
+		return fmt.Errorf("unregister worker %s: %w", w.ID, err)
+	}
+	if _, err := w.Pool.Exec(ctx, "SELECT pg_notify($1, 'stopped')", db.FromWorkerChannel(w.ID)); err != nil {
+		return fmt.Errorf("notify worker %s stopped: %w", w.ID, err)
+	}
+	return nil
 }
 
 // runHeartbeat periodically updates the worker's heartbeat timestamp.
