@@ -77,12 +77,19 @@ func (w WorkerConfig) StaleDuration() time.Duration {
 	return w.HeartbeatInterval * time.Duration(w.StaleThreshold)
 }
 
+// EnqueueConfig selects default integrations. Higher-priority lists replace lower ones.
+type EnqueueConfig struct {
+	With []string `toml:"with"`
+}
+
 // Config holds the complete nextask configuration.
 type Config struct {
-	DB     DBConfig     `toml:"db"`
-	Source SourceConfig `toml:"source"`
-	Worker WorkerConfig `toml:"worker"`
-	Retry  RetryConfig  `toml:"retry"`
+	DB           DBConfig                     `toml:"db"`
+	Source       SourceConfig                 `toml:"source"`
+	Worker       WorkerConfig                 `toml:"worker"`
+	Retry        RetryConfig                  `toml:"retry"`
+	Enqueue      EnqueueConfig                `toml:"enqueue"`
+	Integrations map[string]map[string]string `toml:"integrations"`
 
 	// LoadedFiles tracks which config files were loaded (not serialized to TOML).
 	LoadedFiles []string `toml:"-"`
@@ -174,10 +181,14 @@ func decodeShared(path string, cfg *Config) error {
 		cfg.SetDBURL(shared.Defaults.DBURL, path+" [defaults.db_url]")
 	}
 	if meta.IsDefined("nextask") {
+		previous := cfg.Integrations
+		cfg.Integrations = nil
 		if err := meta.PrimitiveDecode(shared.Nextask, cfg); err != nil {
 			return fmt.Errorf("%s: %w", path, err)
 		}
+		cfg.Integrations = mergeIntegrationOptions(previous, cfg.Integrations)
 		cfg.recordSources(meta, path, []string{"nextask"})
+		cfg.applySourceAlias(meta, path, []string{"nextask"})
 	}
 	cfg.LoadedFiles = append(cfg.LoadedFiles, path)
 	return nil
@@ -194,12 +205,16 @@ func decodeIfExists(path string, cfg *Config) error {
 	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
+	previous := cfg.Integrations
+	cfg.Integrations = nil
 	meta, err := toml.DecodeFile(path, cfg)
 	if err != nil {
 		return fmt.Errorf("%s: %w", path, err)
 	}
+	cfg.Integrations = mergeIntegrationOptions(previous, cfg.Integrations)
 	cfg.LoadedFiles = append(cfg.LoadedFiles, path)
 	cfg.recordSources(meta, path, nil)
+	cfg.applySourceAlias(meta, path, nil)
 	return nil
 }
 
@@ -211,6 +226,10 @@ func applyEnv(cfg *Config) {
 	if v := os.Getenv("NEXTASK_SOURCE_REMOTE"); v != "" {
 		cfg.Source.Remote = v
 		cfg.setSource("source.remote", "env:NEXTASK_SOURCE_REMOTE")
+		cfg.setGitRemote(v, "env:NEXTASK_SOURCE_REMOTE")
+	}
+	if v := os.Getenv("NEXTASK_GIT_REMOTE"); v != "" {
+		cfg.setGitRemote(v, "env:NEXTASK_GIT_REMOTE")
 	}
 	if v := os.Getenv("NEXTASK_WORKER_WORKDIR"); v != "" {
 		cfg.Worker.Workdir = v
@@ -254,6 +273,11 @@ func applyEnv(cfg *Config) {
 
 func normalizePaths(cfg *Config) {
 	cfg.Source.Remote = NormalizeRemote(cfg.Source.Remote)
+	if git := cfg.Integrations["git"]; git != nil {
+		if remote, ok := git["remote"]; ok {
+			git["remote"] = NormalizeRemote(remote)
+		}
+	}
 	cfg.Worker.Workdir = ToAbsPath(cfg.Worker.Workdir)
 }
 
@@ -303,4 +327,40 @@ func ToAbsPath(path string) string {
 		return abs
 	}
 	return path
+}
+
+func (cfg *Config) setGitRemote(value, source string) {
+	if cfg.Integrations == nil {
+		cfg.Integrations = make(map[string]map[string]string)
+	}
+	if cfg.Integrations["git"] == nil {
+		cfg.Integrations["git"] = make(map[string]string)
+	}
+	cfg.Integrations["git"]["remote"] = value
+	cfg.setSource("integrations.git.remote", source)
+}
+
+// Apply deprecated source.remote at its original layer, unless the same file
+// supplies the canonical integration setting.
+func (cfg *Config) applySourceAlias(meta toml.MetaData, path string, prefix []string) {
+	oldKey := append(append([]string{}, prefix...), "source", "remote")
+	newKey := append(append([]string{}, prefix...), "integrations", "git", "remote")
+	if meta.IsDefined(oldKey...) && !meta.IsDefined(newKey...) {
+		cfg.setGitRemote(cfg.Source.Remote, path+" ["+strings.Join(oldKey, ".")+"]")
+	}
+}
+
+func mergeIntegrationOptions(base, overlay map[string]map[string]string) map[string]map[string]string {
+	if base == nil {
+		base = make(map[string]map[string]string)
+	}
+	for name, options := range overlay {
+		if base[name] == nil {
+			base[name] = make(map[string]string)
+		}
+		for key, value := range options {
+			base[name][key] = value
+		}
+	}
+	return base
 }

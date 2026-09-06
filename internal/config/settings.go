@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"net/url"
+	"sort"
 	"strings"
 	"time"
 
@@ -20,6 +21,7 @@ type Setting struct {
 func (c *Config) Settings() []Setting {
 	settings := []Setting{
 		{Key: "db.url", Value: redactURL(c.DB.URL, true)},
+		{Key: "enqueue.with", Value: c.Enqueue.With},
 		{Key: "source.remote", Value: redactURL(c.Source.Remote, false)},
 		{Key: "worker.workdir", Value: c.Worker.Workdir},
 		{Key: "worker.heartbeat_interval", Value: c.Worker.HeartbeatInterval.String()},
@@ -29,6 +31,26 @@ func (c *Config) Settings() []Setting {
 		{Key: "worker.log_buffer_size", Value: c.Worker.LogBufferSize},
 		{Key: "retry.initial_interval", Value: c.Retry.InitialInterval.String()},
 		{Key: "retry.max_interval", Value: c.Retry.MaxInterval.String()},
+	}
+	names := []string{}
+	for name := range c.Integrations {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		keys := []string{}
+		for key := range c.Integrations[name] {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		for _, key := range keys {
+			value := redactURL(c.Integrations[name][key], false)
+			lower := strings.ToLower(key)
+			if strings.Contains(lower, "password") || strings.Contains(lower, "token") || strings.Contains(lower, "secret") {
+				value = "REDACTED"
+			}
+			settings = append(settings, Setting{Key: "integrations." + name + "." + key, Value: value})
+		}
 	}
 	for i := range settings {
 		settings[i].Source = c.SourceFor(settings[i].Key)
