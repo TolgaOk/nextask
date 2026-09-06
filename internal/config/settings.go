@@ -43,7 +43,10 @@ func (c *Config) Settings() []Setting {
 		}
 		sort.Strings(keys)
 		for _, key := range keys {
-			value := redactURL(c.Integrations[name][key], false)
+			value := c.Integrations[name][key]
+			if text, ok := value.(string); ok {
+				value = redactURL(text, false)
+			}
 			lower := strings.ToLower(key)
 			if strings.Contains(lower, "password") || strings.Contains(lower, "token") || strings.Contains(lower, "secret") {
 				value = "REDACTED"

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"fmt"
 
 	"github.com/spf13/cobra"
@@ -27,7 +28,11 @@ func showConfig(cmd *cobra.Command, args []string) error {
 		if v, ok := setting.Value.(string); ok {
 			value = fmt.Sprintf("%q", v)
 		} else {
-			value = fmt.Sprint(setting.Value)
+			encoded, err := json.Marshal(setting.Value)
+			if err != nil {
+				return err
+			}
+			value = string(encoded)
 		}
 		line := setting.Key + " = " + value
 		if sources {

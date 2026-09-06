@@ -33,6 +33,7 @@ import (
 	"time"
 
 	"github.com/BurntSushi/toml"
+	"github.com/TolgaOk/nextask/internal/integrations"
 )
 
 // DBConfig holds database configuration.
@@ -79,11 +80,11 @@ func (w WorkerConfig) StaleDuration() time.Duration {
 
 // Config holds the complete nextask configuration.
 type Config struct {
-	DB           DBConfig                     `toml:"db"`
-	Source       SourceConfig                 `toml:"source"`
-	Worker       WorkerConfig                 `toml:"worker"`
-	Retry        RetryConfig                  `toml:"retry"`
-	Integrations map[string]map[string]string `toml:"integrations"`
+	DB           DBConfig                  `toml:"db"`
+	Source       SourceConfig              `toml:"source"`
+	Worker       WorkerConfig              `toml:"worker"`
+	Retry        RetryConfig               `toml:"retry"`
+	Integrations map[string]map[string]any `toml:"integrations"`
 
 	// LoadedFiles tracks which config files were loaded (not serialized to TOML).
 	LoadedFiles []string `toml:"-"`
@@ -151,6 +152,11 @@ func loadFiles(files []configFile) (*Config, error) {
 		}
 	}
 	applyEnv(cfg)
+	var err error
+	cfg.Integrations, err = integrations.Builtins().Configure(cfg.Integrations)
+	if err != nil {
+		return nil, err
+	}
 	if err := cfg.validate(); err != nil {
 		return nil, err
 	}
@@ -275,7 +281,9 @@ func normalizePaths(cfg *Config) {
 	cfg.Source.Remote = NormalizeRemote(cfg.Source.Remote)
 	if git := cfg.Integrations["git"]; git != nil {
 		if remote, ok := git["remote"]; ok {
-			git["remote"] = NormalizeRemote(remote)
+			if value, ok := remote.(string); ok {
+				git["remote"] = NormalizeRemote(value)
+			}
 		}
 	}
 	cfg.Worker.Workdir = ToAbsPath(cfg.Worker.Workdir)
@@ -331,10 +339,10 @@ func ToAbsPath(path string) string {
 
 func (cfg *Config) setGitRemote(value, source string) {
 	if cfg.Integrations == nil {
-		cfg.Integrations = make(map[string]map[string]string)
+		cfg.Integrations = make(map[string]map[string]any)
 	}
 	if cfg.Integrations["git"] == nil {
-		cfg.Integrations["git"] = make(map[string]string)
+		cfg.Integrations["git"] = make(map[string]any)
 	}
 	cfg.Integrations["git"]["remote"] = value
 	cfg.setSource("integrations.git.remote", source)
@@ -350,13 +358,13 @@ func (cfg *Config) applySourceAlias(meta toml.MetaData, path string, prefix []st
 	}
 }
 
-func mergeIntegrationOptions(base, overlay map[string]map[string]string) map[string]map[string]string {
+func mergeIntegrationOptions(base, overlay map[string]map[string]any) map[string]map[string]any {
 	if base == nil {
-		base = make(map[string]map[string]string)
+		base = make(map[string]map[string]any)
 	}
 	for name, options := range overlay {
 		if base[name] == nil {
-			base[name] = make(map[string]string)
+			base[name] = make(map[string]any)
 		}
 		for key, value := range options {
 			base[name][key] = value

@@ -65,22 +65,9 @@ func TestIntegrationConfigMalformed(t *testing.T) {
 }
 
 func TestIntegrationOptionsMergeByKey(t *testing.T) {
-	clearConfigEnv(t)
-	t.Setenv("NEXTASK_GIT_REMOTE", "")
-	dir := t.TempDir()
-	user := configFixture(t, dir, "user.toml", `[integrations.git]
-remote = "global"
-future_option = "old"
-`)
-	project := configFixture(t, dir, "project.toml", `[nextask.integrations.git]
-future_option = "new"
-`)
-	cfg, err := loadFiles([]configFile{{user, false}, {project, true}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if cfg.Integrations["git"]["remote"] != "global" || cfg.Integrations["git"]["future_option"] != "new" {
-		t.Fatalf("partial override lost values: %v", cfg.Integrations)
+	merged := mergeIntegrationOptions(map[string]map[string]any{"tool": {"one": "kept", "two": "old"}}, map[string]map[string]any{"tool": {"two": "new"}})
+	if merged["tool"]["one"] != "kept" || merged["tool"]["two"] != "new" {
+		t.Fatalf("partial override lost values: %v", merged)
 	}
 }
 

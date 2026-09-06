@@ -13,7 +13,7 @@ type fakeIntegration struct {
 	fail  bool
 }
 
-func (f fakeIntegration) Options() []string { return []string{"value"} }
+func (f fakeIntegration) Options() Schema { return Schema{"value": {Kind: String, Default: ""}} }
 func (f fakeIntegration) Validate(o Options) error {
 	if o["value"] == "invalid" {
 		return errors.New("invalid value")
@@ -21,7 +21,7 @@ func (f fakeIntegration) Validate(o Options) error {
 	return nil
 }
 func (f fakeIntegration) Prepare(_ context.Context, task Task, o Options) (Task, error) {
-	*f.calls = append(*f.calls, f.name+":"+o["value"])
+	*f.calls = append(*f.calls, f.name+":"+o.String("value"))
 	if f.fail {
 		return Task{}, errors.New("prepare failed")
 	}
@@ -32,7 +32,7 @@ func (f fakeIntegration) Prepare(_ context.Context, task Task, o Options) (Task,
 func TestSelectionAndComposition(t *testing.T) {
 	calls := []string{}
 	registry := Registry{"first": fakeIntegration{"first", &calls, false}, "second": fakeIntegration{"second", &calls, false}}
-	settings := map[string]map[string]string{"first": {"value": "configured"}}
+	settings := map[string]map[string]any{"first": {"value": "configured"}}
 	plan, err := registry.Resolve([]string{"first", "first", "second"}, settings, []string{"first.value=override=with=equals"})
 	if err != nil {
 		t.Fatal(err)
@@ -65,14 +65,14 @@ func TestValidateBeforePreparation(t *testing.T) {
 	registry := Registry{"git": fakeIntegration{"git", &calls, false}}
 	for _, tc := range []struct {
 		with, overrides []string
-		config          map[string]map[string]string
+		config          map[string]map[string]any
 	}{
 		{with: []string{"unknown"}},
 		{with: []string{"git"}, overrides: []string{"broken"}},
 		{overrides: []string{"git.value=x"}},
 		{with: []string{"git"}, overrides: []string{"git.unknown=x"}},
 		{with: []string{"git"}, overrides: []string{"git.value=invalid"}},
-		{config: map[string]map[string]string{"git": {"unknown": "x"}}},
+		{config: map[string]map[string]any{"git": {"unknown": "x"}}},
 	} {
 		if _, err := registry.Resolve(tc.with, tc.config, tc.overrides); err == nil {
 			t.Errorf("invalid selection accepted: %+v", tc)

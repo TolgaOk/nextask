@@ -292,15 +292,15 @@ func enqueueIntegrations(cmd *cobra.Command) (*integrations.Plan, error) {
 	if snapshot {
 		with = append(with, "git")
 	}
-	values := make(map[string]map[string]string)
+	values := make(map[string]map[string]any)
 	for name, options := range cfg.Integrations {
-		values[name] = make(map[string]string)
+		values[name] = make(map[string]any)
 		for key, value := range options {
 			values[name][key] = value
 		}
 	}
 	if values["git"] == nil && cfg.Source.Remote != "" {
-		values["git"] = map[string]string{"remote": cfg.Source.Remote}
+		values["git"] = map[string]any{"remote": cfg.Source.Remote}
 	}
 	if remote != "" {
 		overrides = append([]string{"git.remote=" + config.NormalizeRemote(remote)}, overrides...)

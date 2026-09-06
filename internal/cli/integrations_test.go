@@ -46,7 +46,7 @@ func TestEnqueueGitIntegration(t *testing.T) {
 	git("remote", "add", "snapshots", destination)
 	cfg = &config.Config{
 		DB:           config.DBConfig{URL: getTestDBURL(t)},
-		Integrations: map[string]map[string]string{"git": {"remote": "snapshots"}},
+		Integrations: map[string]map[string]any{"git": {"remote": "snapshots"}},
 	}
 	id := "integrated-task"
 	cmd := enqueueTestCommand(&id)

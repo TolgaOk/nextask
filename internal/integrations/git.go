@@ -11,18 +11,18 @@ import (
 // Git captures source at enqueue and wraps execution with an exact checkout.
 type Git struct{ Repo string }
 
-func (Git) Options() []string { return []string{"remote"} }
+func (Git) Options() Schema { return Schema{"remote": {Kind: String, Default: ""}} }
 func (Git) Validate(options Options) error {
-	if strings.TrimSpace(options["remote"]) == "" {
+	if strings.TrimSpace(options.String("remote")) == "" {
 		return fmt.Errorf("remote is required: set integrations.git.remote or --set git.remote=REMOTE")
 	}
-	if strings.ContainsRune(options["remote"], 0) {
+	if strings.ContainsRune(options.String("remote"), 0) {
 		return fmt.Errorf("remote contains a NUL byte")
 	}
 	return nil
 }
 func (g Git) Prepare(ctx context.Context, task Task, options Options) (Task, error) {
-	snapshot, err := publishSnapshot(ctx, g.Repo, task.ID, options["remote"])
+	snapshot, err := publishSnapshot(ctx, g.Repo, task.ID, options.String("remote"))
 	if err != nil {
 		return Task{}, err
 	}

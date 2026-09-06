@@ -9,15 +9,14 @@ import (
 )
 
 // Task is the execution information an integration may prepare.
-type Task struct{ ID, Command string }
-
-// Options contains string arguments owned by one integration.
-type Options map[string]string
+type Task struct {
+	ID, Command string
+}
 
 // Integration validates options and prepares a command. Runtime setup and
 // finalization belong in that command; the worker has no integration hooks.
 type Integration interface {
-	Options() []string
+	Options() Schema
 	Validate(Options) error
 	Prepare(context.Context, Task, Options) (Task, error)
 }
@@ -35,7 +34,7 @@ type Plan struct{ steps []step }
 
 // Resolve validates explicitly selected integrations and their options.
 // Configuration supplies options; it never enables an integration.
-func (r Registry) Resolve(with []string, configured map[string]map[string]string, overrides []string) (*Plan, error) {
+func (r Registry) Resolve(with []string, configured map[string]map[string]any, overrides []string) (*Plan, error) {
 	names := []string{}
 	for _, name := range with {
 		if _, ok := r[name]; !ok {
@@ -45,19 +44,9 @@ func (r Registry) Resolve(with []string, configured map[string]map[string]string
 			names = append(names, name)
 		}
 	}
-	options := map[string]Options{}
-	for name, values := range configured {
-		module, ok := r[name]
-		if !ok {
-			return nil, fmt.Errorf("unknown integration %q in config", name)
-		}
-		options[name] = Options{}
-		for key, value := range values {
-			if !slices.Contains(module.Options(), key) {
-				return nil, fmt.Errorf("unknown integration option %s.%s", name, key)
-			}
-			options[name][key] = value
-		}
+	options, err := r.Configure(configured)
+	if err != nil {
+		return nil, err
 	}
 	for _, override := range overrides {
 		qualified, value, ok := strings.Cut(override, "=")
@@ -72,13 +61,18 @@ func (r Registry) Resolve(with []string, configured map[string]map[string]string
 		if !slices.Contains(names, name) {
 			return nil, fmt.Errorf("--set %s requires enabled integration %q", qualified, name)
 		}
-		if !slices.Contains(module.Options(), key) {
+		spec, exists := module.Options()[key]
+		if !exists {
 			return nil, fmt.Errorf("unknown integration option %s", qualified)
 		}
 		if options[name] == nil {
 			options[name] = Options{}
 		}
-		options[name][key] = value
+		parsed, err := spec.parse(value)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", qualified, err)
+		}
+		options[name][key] = parsed
 	}
 	plan := &Plan{}
 	for _, name := range names {
@@ -113,3 +107,21 @@ func (p *Plan) Prepare(ctx context.Context, task Task) (Task, error) {
 
 // Quote preserves a literal argument through a POSIX shell, including newlines.
 func Quote(value string) string { return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'" }
+
+// Configure resolves defaults and validates supplied values without enabling tools.
+func (r Registry) Configure(configured map[string]map[string]any) (map[string]map[string]any, error) {
+	result := make(map[string]map[string]any)
+	for name := range configured {
+		if _, ok := r[name]; !ok {
+			return nil, fmt.Errorf("unknown integration %q in config", name)
+		}
+	}
+	for name, module := range r {
+		options, err := module.Options().Resolve(configured[name])
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", name, err)
+		}
+		result[name] = options
+	}
+	return result, nil
+}
