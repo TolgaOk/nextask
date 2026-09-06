@@ -4,9 +4,10 @@ import (
 	"context"
 	"os"
 	"testing"
+	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/TolgaOk/nextask/internal/db"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"go.uber.org/goleak"
 )
 
@@ -51,4 +52,29 @@ type testLogger struct {
 
 func (l *testLogger) Log(_ context.Context, stream, data string) {
 	l.logs = append(l.logs, stream+": "+data)
+}
+
+// waitForTaskStart waits until execution has begun after the cancel subscription
+// is established. A fixed sleep races the notifier's polling interval.
+func waitForTaskStart(t *testing.T, pool *pgxpool.Pool, id string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	ticker := time.NewTicker(20 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		var started bool
+		err := pool.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM task_logs WHERE task_id = $1 AND stream = 'nextask' AND data LIKE '[info] running:%')", id).Scan(&started)
+		if err != nil {
+			t.Fatalf("wait for task startup: %v", err)
+		}
+		if started {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatal("task did not start")
+		case <-ticker.C:
+		}
+	}
 }

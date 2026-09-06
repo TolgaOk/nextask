@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/TolgaOk/nextask/internal/db"
+	"github.com/jackc/pgx/v5"
 )
 
 // Test 8: Cancel during command execution
@@ -45,8 +45,8 @@ func TestWorker_CancelDuringExecution(t *testing.T) {
 		done <- w.Run(ctx)
 	}()
 
-	// Wait for task to start running
-	time.Sleep(500 * time.Millisecond)
+	// Wait for the task to establish its cancel subscription and begin execution.
+	waitForTaskStart(t, pool, task.ID)
 
 	// Send cancel notification
 	toChannel := db.ToTaskChannel(task.ID)
@@ -515,8 +515,8 @@ func TestWorker_CancelFallbackToSIGKILL(t *testing.T) {
 		done <- w.Run(ctx)
 	}()
 
-	// Wait for task to start
-	time.Sleep(500 * time.Millisecond)
+	// Wait for the task to establish its cancel subscription and begin execution.
+	waitForTaskStart(t, pool, task.ID)
 
 	// Send cancel notification
 	toChannel := db.ToTaskChannel(task.ID)
