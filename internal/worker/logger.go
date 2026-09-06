@@ -10,8 +10,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/TolgaOk/nextask/internal/db"
+	"github.com/cenkalti/backoff/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // LogConfig holds batching parameters for the task logger.
@@ -42,11 +43,13 @@ type TaskLogger struct {
 	stderr *os.File
 	cfg    LogConfig
 
-	seq      atomic.Int64
-	lines    chan logLine
-	done     chan struct{}
-	once     sync.Once
-	notifyWg sync.WaitGroup
+	seq       atomic.Int64
+	lines     chan logLine
+	done      chan struct{}
+	once      sync.Once
+	notifyWg  sync.WaitGroup
+	flushCtx  context.Context
+	stopFlush context.CancelFunc
 }
 
 // NewTaskLogger creates a batching logger that writes to DB and files.
@@ -67,27 +70,26 @@ func NewTaskLogger(pool *pgxpool.Pool, taskID, taskDir string, cfg LogConfig) (*
 		return nil, fmt.Errorf("create err.txt: %w", err)
 	}
 
+	flushCtx, stopFlush := context.WithCancel(context.Background())
 	l := &TaskLogger{
-		pool:   pool,
-		taskID: taskID,
-		stdout: stdout,
-		stderr: stderr,
-		cfg:    cfg,
-		lines:  make(chan logLine, cfg.BufferSize),
-		done:   make(chan struct{}),
+		pool:      pool,
+		taskID:    taskID,
+		stdout:    stdout,
+		stderr:    stderr,
+		cfg:       cfg,
+		lines:     make(chan logLine, cfg.BufferSize),
+		done:      make(chan struct{}),
+		flushCtx:  flushCtx,
+		stopFlush: stopFlush,
 	}
 	go l.run()
 	return l, nil
 }
 
-// Log writes a line to files immediately and buffers it for batched DB insertion.
-// Non-blocking: if the buffer is full, the line is written to file only.
+// Log writes local output even during cancellation cleanup.
+// A full DB queue applies backpressure until cancellation, then keeps only the local copy.
 func (l *TaskLogger) Log(ctx context.Context, stream, data string) {
-	if ctx.Err() != nil {
-		return
-	}
-
-	// File write — immediate, never lost.
+	// Local files retain the original bytes even when the DB cannot accept them.
 	switch stream {
 	case "stdout":
 		fmt.Fprintln(l.stdout, data)
@@ -95,12 +97,17 @@ func (l *TaskLogger) Log(ctx context.Context, stream, data string) {
 		fmt.Fprintln(l.stderr, data)
 	}
 
-	// Buffer for batch DB insert — blocks if buffer is full (back-pressure).
-	// Strip null bytes: PostgreSQL TEXT columns cannot store \x00.
-	data = strings.ReplaceAll(data, "\x00", "")
+	// PostgreSQL TEXT requires valid UTF-8 and cannot store NUL bytes.
+	data = strings.ToValidUTF8(strings.ReplaceAll(data, "\x00", ""), "\uFFFD")
 	seq := int(l.seq.Add(1))
+	line := logLine{seq: seq, stream: stream, data: data}
 	select {
-	case l.lines <- logLine{seq: seq, stream: stream, data: data}:
+	case l.lines <- line:
+		return
+	default:
+	}
+	select {
+	case l.lines <- line:
 	case <-ctx.Done():
 	}
 }
@@ -108,7 +115,10 @@ func (l *TaskLogger) Log(ctx context.Context, stream, data string) {
 // Close flushes remaining buffered lines, waits for in-flight notifies,
 // and closes log files.
 func (l *TaskLogger) Close() error {
-	l.once.Do(func() { close(l.lines) })
+	l.once.Do(func() {
+		close(l.lines)
+		l.stopFlush()
+	})
 	<-l.done
 	l.notifyWg.Wait()
 
@@ -122,68 +132,100 @@ func (l *TaskLogger) Close() error {
 	return firstErr
 }
 
-// run is the flush goroutine. It collects lines and flushes when
-// the batch is full or the flush interval expires.
+// run keeps at most one batch outside the bounded queue. If the database is
+// down, retries apply backpressure instead of growing a second unbounded buffer.
 func (l *TaskLogger) run() {
 	defer close(l.done)
-
-	buf := make([]db.LogEntry, 0, l.cfg.FlushLines)
-	timer := time.NewTimer(l.cfg.FlushInterval)
-	timer.Stop()
-	timerRunning := false
+	limit := max(l.cfg.FlushLines, 1)
+	buf := make([]db.LogEntry, 0, limit)
+	interval := max(l.cfg.FlushInterval, time.Millisecond)
+	timer := time.NewTimer(interval)
+	defer timer.Stop()
 
 	for {
+		if l.flushCtx.Err() != nil {
+			l.drain(buf, limit)
+			return
+		}
+		if len(buf) >= limit {
+			if l.flush(l.flushCtx, buf) {
+				buf = buf[:0]
+			} else if l.flushCtx.Err() == nil {
+				select {
+				case <-time.After(interval):
+				case <-l.flushCtx.Done():
+				}
+			}
+			continue
+		}
 		select {
+		case <-l.flushCtx.Done():
+			l.drain(buf, limit)
+			return
 		case line, ok := <-l.lines:
 			if !ok {
-				// Channel closed — flush remaining.
-				if len(buf) > 0 {
-					l.flush(buf)
-				}
+				l.drain(buf, limit)
 				return
 			}
 			buf = append(buf, db.LogEntry{Seq: line.seq, Stream: line.stream, Data: line.data})
-			if !timerRunning {
-				timer.Reset(l.cfg.FlushInterval)
-				timerRunning = true
-			}
-			if len(buf) >= l.cfg.FlushLines {
-				timer.Stop()
-				timerRunning = false
-				if l.flush(buf) {
-					buf = buf[:0]
-				}
-			}
-
 		case <-timer.C:
-			timerRunning = false
-			if len(buf) > 0 {
-				if l.flush(buf) {
-					buf = buf[:0]
-				}
+			if len(buf) > 0 && l.flush(l.flushCtx, buf) {
+				buf = buf[:0]
 			}
+			timer.Reset(interval)
 		}
 	}
 }
 
-// flush inserts a batch of log lines into the DB and sends a single NOTIFY.
-// Returns true if the insert succeeded, false if it should be retried.
-func (l *TaskLogger) flush(entries []db.LogEntry) bool {
+// drain shares one deadline across all remaining batches. Local files retain
+// output if the outage lasts longer than this shutdown window.
+func (l *TaskLogger) drain(buf []db.LogEntry, limit int) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+	for {
+		if len(buf) >= limit {
+			if !l.flush(ctx, buf) {
+				return
+			}
+			buf = buf[:0]
+		}
+		line, ok := <-l.lines
+		if !ok {
+			if len(buf) > 0 {
+				l.flush(ctx, buf)
+			}
+			return
+		}
+		buf = append(buf, db.LogEntry{Seq: line.seq, Stream: line.stream, Data: line.data})
+	}
+}
 
-	maxID, err := db.InsertLogBatch(ctx, l.pool, l.taskID, entries)
+// flush retries an idempotent batch within both its own and its caller's deadline.
+func (l *TaskLogger) flush(parent context.Context, entries []db.LogEntry) bool {
+	ctx, cancel := context.WithTimeout(parent, 5*time.Second)
+	defer cancel()
+
+	var maxID int
+	err := db.Retry(ctx, func() error {
+		var err error
+		maxID, err = db.InsertLogBatch(ctx, l.pool, l.taskID, entries)
+		return err
+	}, backoff.WithBackOff(db.NewBackOff(100*time.Millisecond, time.Second)))
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "log batch insert failed (%d lines): %s\n", len(entries), db.HumanError(err))
+		if parent.Err() != context.Canceled {
+			fmt.Fprintf(os.Stderr, "log batch insert failed (%d lines): %s\n", len(entries), db.HumanError(err))
+		}
 		return false
 	}
 
-	// Async NOTIFY — best-effort, consumer has poll fallback.
+	// Notifications are best effort; consumers can also poll for persisted logs.
 	channel := db.FromTaskChannel(l.taskID)
 	l.notifyWg.Add(1)
 	go func() {
 		defer l.notifyWg.Done()
-		if err := db.Notify(context.Background(), l.pool, channel, db.TaskLogEvent{ID: maxID}); err != nil {
+		notifyCtx, notifyCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer notifyCancel()
+		if err := db.Notify(notifyCtx, l.pool, channel, db.TaskLogEvent{ID: maxID}); err != nil {
 			fmt.Fprintf(os.Stderr, "log notify failed: %s\n", db.HumanError(err))
 		}
 	}()
