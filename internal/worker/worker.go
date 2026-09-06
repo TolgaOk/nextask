@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
@@ -23,7 +22,6 @@ type Worker struct {
 	Pool              *pgxpool.Pool
 	Executor          *Executor
 	Once              bool
-	Rm                bool
 	ExitIfIdle        *time.Duration
 	dbURL             string
 	workdir           string
@@ -80,12 +78,15 @@ func New(ctx context.Context, cfg Config) (*Worker, error) {
 	}
 
 	return &Worker{
-		ID:                workerID,
-		Info:              workerInfo,
-		Pool:              pool,
-		Executor:          &Executor{Pool: pool, DBURL: cfg.DBURL, Workdir: cfg.Workdir, LogFlushLines: cfg.LogFlushLines, LogFlushInterval: cfg.LogFlushInterval, LogBufferSize: cfg.LogBufferSize},
+		ID:   workerID,
+		Info: workerInfo,
+		Pool: pool,
+		Executor: &Executor{
+			Pool: pool, DBURL: cfg.DBURL, Workdir: cfg.Workdir,
+			LogFlushLines: cfg.LogFlushLines, LogFlushInterval: cfg.LogFlushInterval,
+			LogBufferSize: cfg.LogBufferSize, RemoveWorkdir: cfg.Rm,
+		},
 		Once:              cfg.Once,
-		Rm:                cfg.Rm,
 		ExitIfIdle:        cfg.ExitIfIdle, // nil = disabled, 0 = exit immediately, >0 = wait duration
 		dbURL:             cfg.DBURL,
 		workdir:           cfg.Workdir,
@@ -187,12 +188,6 @@ func (w *Worker) Run(parentCtx context.Context) error {
 
 		if task != nil {
 			w.processTask(ctx, cancel, notifier, toWorkerCh, task)
-			if w.Rm {
-				taskDir := filepath.Join(w.workdir, task.ID)
-				if err := os.RemoveAll(taskDir); err != nil {
-					fmt.Fprintf(os.Stderr, "cleanup failed: %v\n", err)
-				}
-			}
 			if idleTimer != nil {
 				idleTimer.Reset(*w.ExitIfIdle)
 			}

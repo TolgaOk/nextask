@@ -25,6 +25,7 @@ type Executor struct {
 	LogFlushLines    int
 	LogFlushInterval time.Duration
 	LogBufferSize    int
+	RemoveWorkdir    bool
 }
 
 // ExitResult is shared with integration runtimes.
@@ -49,8 +50,18 @@ func (e *Executor) Execute(ctx context.Context, task *db.Task) *ExitResult {
 			return &ExitResult{Code: 1, Err: err}
 		}
 	}
-	if err := os.MkdirAll(taskDir, 0755); err != nil {
+	if err := e.createTaskDir(taskDir); err != nil {
+		dbLog.Log(ctx, "nextask", fmt.Sprintf("[error] %v", err))
 		return &ExitResult{Code: 1, Err: err}
+	}
+	// Only remove directories created by this execution. A rejected existing
+	// directory may hold artifacts from a deleted or interrupted task.
+	if e.RemoveWorkdir {
+		defer func() {
+			if err := os.RemoveAll(taskDir); err != nil {
+				fmt.Fprintf(os.Stderr, "cleanup failed: %v\n", err)
+			}
+		}()
 	}
 
 	// Create task logger with file output now that taskDir exists
@@ -69,6 +80,18 @@ func (e *Executor) Execute(ctx context.Context, task *db.Task) *ExitResult {
 	executable := *task
 	executable.Command = command
 	return e.runCommand(ctx, &executable, taskDir, log)
+}
+
+func (e *Executor) createTaskDir(taskDir string) error {
+	if err := os.MkdirAll(e.Workdir, 0755); err != nil {
+		return fmt.Errorf("create worker directory: %w", err)
+	}
+	if err := os.Mkdir(taskDir, 0755); errors.Is(err, os.ErrExist) {
+		return fmt.Errorf("task directory already exists: %s; move it aside or use a new task ID", taskDir)
+	} else if err != nil {
+		return fmt.Errorf("create task directory: %w", err)
+	}
+	return nil
 }
 
 func (e *Executor) runCommand(ctx context.Context, task *db.Task, taskDir string, log Logger) *ExitResult {
