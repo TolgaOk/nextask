@@ -82,10 +82,10 @@ func New(ctx context.Context, cfg Config) (*Worker, error) {
 		ID:                workerID,
 		Info:              workerInfo,
 		Pool:              pool,
-		Executor:          &Executor{Pool: pool, Workdir: cfg.Workdir, LogFlushLines: cfg.LogFlushLines, LogFlushInterval: cfg.LogFlushInterval, LogBufferSize: cfg.LogBufferSize},
+		Executor:          &Executor{Pool: pool, DBURL: cfg.DBURL, Workdir: cfg.Workdir, LogFlushLines: cfg.LogFlushLines, LogFlushInterval: cfg.LogFlushInterval, LogBufferSize: cfg.LogBufferSize},
 		Once:              cfg.Once,
 		Rm:                cfg.Rm,
-		ExitIfIdle:        cfg.ExitIfIdle,  // nil = disabled, 0 = exit immediately, >0 = wait duration
+		ExitIfIdle:        cfg.ExitIfIdle, // nil = disabled, 0 = exit immediately, >0 = wait duration
 		dbURL:             cfg.DBURL,
 		workdir:           cfg.Workdir,
 		heartbeatInterval: cfg.HeartbeatInterval,

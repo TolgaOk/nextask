@@ -20,6 +20,7 @@ import (
 // Executor handles task execution including source fetching and command running.
 type Executor struct {
 	Pool             *pgxpool.Pool
+	DBURL            string
 	Workdir          string
 	LogFlushLines    int
 	LogFlushInterval time.Duration
@@ -74,6 +75,7 @@ func (e *Executor) Execute(ctx context.Context, task *db.Task) *ExitResult {
 func (e *Executor) runCommand(ctx context.Context, task *db.Task, taskDir string, log Logger) *ExitResult {
 	cmd := exec.CommandContext(ctx, "sh", "-c", task.Command)
 	cmd.Dir = taskDir
+	cmd.Env = append(cmd.Environ(), "NEXTASK_TASK_ID="+task.ID, "NEXTASK_DB_URL="+e.DBURL)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
 	processDone := make(chan struct{})

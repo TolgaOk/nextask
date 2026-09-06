@@ -20,6 +20,10 @@ The example below shows the local CLI in the left pane and a worker running on a
 
 See `nextask <command> --help` for all options and `nextask --help` for all commands.
 
+Task commands receive `NEXTASK_TASK_ID` and `NEXTASK_DB_URL` from their worker,
+overriding inherited values. Use these to pass task identity and the worker's database
+connection to independently usable tools. Other environment variables are inherited.
+
 ## Agent-ready
 
 `nextask` is agent-ready by design. Install the [skills](skills/) to let agents set up services, deploy workers, and manage tasks:
