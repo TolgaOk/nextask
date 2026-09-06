@@ -62,12 +62,16 @@ func staleStatusExpr(staleThreshold time.Duration) string {
 	)
 }
 
-func applyTaskFilters(query sq.SelectBuilder, filter ListFilter, statusExpr string) sq.SelectBuilder {
+func applyTaskFilters(query sq.SelectBuilder, filter ListFilter, statusExpr string) (sq.SelectBuilder, error) {
 	if len(filter.Statuses) > 0 {
 		query = query.Where(sq.Eq{statusExpr: filter.Statuses})
 	}
-	for k, v := range filter.Tags {
-		query = query.Where("t.tags @> ?::jsonb", fmt.Sprintf(`{"%s": "%s"}`, k, v))
+	if len(filter.Tags) > 0 {
+		tagsJSON, err := json.Marshal(filter.Tags)
+		if err != nil {
+			return query, err
+		}
+		query = query.Where("t.tags @> ?::jsonb", tagsJSON)
 	}
 	if len(filter.Commands) > 0 {
 		or := sq.Or{}
@@ -79,7 +83,7 @@ func applyTaskFilters(query sq.SelectBuilder, filter ListFilter, statusExpr stri
 	if !filter.Since.IsZero() {
 		query = query.Where(sq.GtOrEq{"t.created_at": filter.Since})
 	}
-	return query
+	return query, nil
 }
 
 // ListTasks retrieves tasks matching the given filter criteria.
@@ -91,7 +95,10 @@ func ListTasks(ctx context.Context, pool *pgxpool.Pool, filter ListFilter) ([]Ta
 		LeftJoin("workers w ON t.worker_id = w.id").
 		OrderBy("t.created_at DESC")
 
-	query = applyTaskFilters(query, filter, statusExpr)
+	query, err := applyTaskFilters(query, filter, statusExpr)
+	if err != nil {
+		return nil, err
+	}
 
 	if filter.Limit > 0 {
 		query = query.Limit(filter.Limit)
@@ -135,7 +142,10 @@ func CountTasks(ctx context.Context, pool *pgxpool.Pool, filter ListFilter) (int
 		From("tasks t").
 		LeftJoin("workers w ON t.worker_id = w.id")
 
-	query = applyTaskFilters(query, filter, statusExpr)
+	query, err := applyTaskFilters(query, filter, statusExpr)
+	if err != nil {
+		return 0, err
+	}
 
 	sql, args, err := query.ToSql()
 	if err != nil {
