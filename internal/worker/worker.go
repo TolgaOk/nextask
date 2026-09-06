@@ -29,7 +29,8 @@ type Worker struct {
 	workdir           string
 	heartbeatInterval time.Duration
 	tagFilter         map[string]string
-	backoff           *backoff.ExponentialBackOff
+	backoffInitial    time.Duration
+	backoffMax        time.Duration
 }
 
 // Config contains worker configuration options.
@@ -90,8 +91,15 @@ func New(ctx context.Context, cfg Config) (*Worker, error) {
 		workdir:           cfg.Workdir,
 		heartbeatInterval: cfg.HeartbeatInterval,
 		tagFilter:         cfg.TagFilter,
-		backoff:           db.NewBackOff(backoffInitial, backoffMax),
+		backoffInitial:    backoffInitial,
+		backoffMax:        backoffMax,
 	}, nil
+}
+
+// Each retry loop owns its mutable backoff state. Heartbeats, notifications,
+// claims, and completion can run concurrently.
+func (w *Worker) newBackoff() *backoff.ExponentialBackOff {
+	return db.NewBackOff(w.backoffInitial, w.backoffMax)
 }
 
 // Close releases database connections.
@@ -113,7 +121,7 @@ func (w *Worker) Run(parentCtx context.Context) error {
 
 	// Single notifier for all channels (wake, stop, cancel)
 	toWorkerCh := db.ToWorkerChannel(w.ID)
-	notifier, err := db.NewNotifier(ctx, w.dbURL, w.backoff, []string{
+	notifier, err := db.NewNotifier(ctx, w.dbURL, w.newBackoff(), []string{
 		db.ToWorkersChannel,
 		toWorkerCh,
 	})
@@ -149,7 +157,7 @@ func (w *Worker) Run(parentCtx context.Context) error {
 
 	fmt.Printf("Worker %s started\n", w.ID)
 
-	claimBackoff := db.NewBackOff(1*time.Second, 30*time.Second)
+	claimBackoff := w.newBackoff()
 
 	var idleTimer *time.Timer
 	var idleCh <-chan time.Time
@@ -176,7 +184,6 @@ func (w *Worker) Run(parentCtx context.Context) error {
 			continue
 		}
 		claimBackoff.Reset()
-		w.backoff.Reset()
 
 		if task != nil {
 			w.processTask(ctx, cancel, notifier, toWorkerCh, task)
@@ -242,7 +249,7 @@ func (w *Worker) runHeartbeat(ctx context.Context) {
 			hbCtx, hbCancel := context.WithTimeout(ctx, 30*time.Second)
 			err := db.Retry(hbCtx, func() error {
 				return db.UpdateHeartbeat(hbCtx, w.Pool, w.ID)
-			}, backoff.WithBackOff(w.backoff), backoff.WithMaxTries(3))
+			}, backoff.WithBackOff(w.newBackoff()), backoff.WithMaxTries(3))
 			if err != nil && ctx.Err() == nil {
 				fmt.Fprintf(os.Stderr, "heartbeat failed: %v\n", err)
 			}
@@ -346,7 +353,7 @@ func (w *Worker) finishTask(task *db.Task, result *ExitResult, wasCancelled bool
 
 	err := db.Retry(completeCtx, func() error {
 		return db.CompleteTask(completeCtx, w.Pool, task.ID, status, exitCode)
-	}, backoff.WithBackOff(w.backoff))
+	}, backoff.WithBackOff(w.newBackoff()))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to complete task: %v\n", err)
 	}
