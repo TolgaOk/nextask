@@ -3,18 +3,28 @@ package db
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
 	sq "github.com/Masterminds/squirrel"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/TolgaOk/nextask/internal/db/migrations"
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 var psql = sq.StatementBuilder.PlaceholderFormat(sq.Dollar)
 
+// Execer is implemented by PostgreSQL pools and transactions.
+type Execer interface {
+	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
+}
+
 // CreateTask inserts a new task into the queue.
-func CreateTask(ctx context.Context, pool *pgxpool.Pool, task *Task) error {
+func CreateTask(ctx context.Context, pool Execer, task *Task) error {
+	if err := ValidateTaskID(task.ID); err != nil {
+		return err
+	}
 	tagsJSON, err := json.Marshal(task.Tags)
 	if err != nil {
 		return err
@@ -26,6 +36,10 @@ func CreateTask(ctx context.Context, pool *pgxpool.Pool, task *Task) error {
 	`, task.ID, task.Command, task.Status, tagsJSON,
 		task.SourceType, task.SourceConfig)
 
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == "tasks_pkey" {
+		return fmt.Errorf("%w: %q", ErrTaskExists, task.ID)
+	}
 	return wrapPgError(err)
 }
 

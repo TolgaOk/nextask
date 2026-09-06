@@ -20,6 +20,10 @@ The example below shows the local CLI in the left pane and a worker running on a
 
 See `nextask <command> --help` for all options and `nextask --help` for all commands.
 
+Supply an ID with `nextask enqueue --id export-42 'echo ready'`, or omit `--id`
+to generate one. IDs contain 1–53 ASCII letters, digits, underscores or hyphens,
+starting with a letter or digit. Duplicate IDs are rejected before snapshot work.
+
 Task commands receive `NEXTASK_TASK_ID` and `NEXTASK_DB_URL` from their worker,
 overriding inherited values. Use these to pass task identity and the worker's database
 connection to independently usable tools. Other environment variables are inherited.

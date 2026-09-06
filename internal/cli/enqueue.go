@@ -9,13 +9,13 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
-	gonanoid "github.com/matoous/go-nanoid/v2"
-	"github.com/spf13/cobra"
 	"github.com/TolgaOk/nextask/internal/config"
 	"github.com/TolgaOk/nextask/internal/db"
 	"github.com/TolgaOk/nextask/internal/source"
 	"github.com/TolgaOk/nextask/internal/worker"
+	"github.com/jackc/pgx/v5/pgxpool"
+	gonanoid "github.com/matoous/go-nanoid/v2"
+	"github.com/spf13/cobra"
 )
 
 var tags []string
@@ -42,6 +42,10 @@ var enqueueCmd = &cobra.Command{
 				"Example: "+codeStyle.Render("nextask enqueue \"python train.py\""),
 			)
 		}
+		if cmd.Flags().Changed("id") {
+			id, _ := cmd.Flags().GetString("id")
+			return db.ValidateTaskID(id)
+		}
 		return nil
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -61,9 +65,12 @@ var enqueueCmd = &cobra.Command{
 			return err
 		}
 
-		id, err := gonanoid.Generate("0123456789abcdefghijklmnopqrstuvwxyz", 8)
-		if err != nil {
-			return fmt.Errorf("failed to generate ID: %w", err)
+		id, _ := cmd.Flags().GetString("id")
+		if !cmd.Flags().Changed("id") {
+			id, err = gonanoid.Generate("0123456789abcdefghijklmnopqrstuvwxyz", 8)
+			if err != nil {
+				return fmt.Errorf("failed to generate ID: %w", err)
+			}
 		}
 
 		if snapshot && cfg.Source.Remote == "" {
@@ -80,6 +87,24 @@ var enqueueCmd = &cobra.Command{
 			Status:     db.StatusPending,
 			Tags:       parsedTags,
 			SourceType: "noop",
+		}
+
+		ctx := cmd.Context()
+		pool, err := db.Connect(ctx, cfg.DB.URL)
+		if err != nil {
+			return err
+		}
+		defer pool.Close()
+
+		tx, err := pool.Begin(ctx)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback(context.Background())
+		// Reserve the ID before snapshot side effects. Workers only see the task
+		// once its source is ready and this transaction commits.
+		if err := db.CreateTask(ctx, tx, task); err != nil {
+			return err
 		}
 
 		if snapshot {
@@ -110,15 +135,12 @@ var enqueueCmd = &cobra.Command{
 			})
 		}
 
-		ctx := context.Background()
-
-		pool, err := db.Connect(ctx, cfg.DB.URL)
-		if err != nil {
-			return err
+		if snapshot {
+			if _, err := tx.Exec(ctx, "UPDATE tasks SET source_type = $2, source_config = $3 WHERE id = $1", task.ID, task.SourceType, task.SourceConfig); err != nil {
+				return err
+			}
 		}
-		defer pool.Close()
-
-		if err := db.CreateTask(ctx, pool, task); err != nil {
+		if err := tx.Commit(ctx); err != nil {
 			return err
 		}
 
@@ -136,6 +158,7 @@ var enqueueCmd = &cobra.Command{
 }
 
 func init() {
+	enqueueCmd.Flags().String("id", "", "Task ID (1–53 letters, digits, underscores or hyphens; starts with a letter or digit)")
 	enqueueCmd.Flags().StringSliceVar(&tags, "tag", nil, "Tags (key=value, can specify multiple)")
 	enqueueCmd.Flags().BoolVar(&snapshot, "snapshot", false, "Create and push source snapshot")
 	enqueueCmd.Flags().StringVar(&remote, "remote", "", "Git remote name or path for snapshot (required if --snapshot)")
