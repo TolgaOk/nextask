@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -203,6 +204,7 @@ func TestRunFinalizationAndExit(t *testing.T) {
 	}{
 		{"success", "mkdir -p outputs; echo done > outputs/file", "fail", false, 0},
 		{"command-failure", "mkdir -p outputs; echo done > outputs/file; exit 17", "fail", false, 17},
+		{"killed-command", "mkdir -p outputs; echo done > outputs/file; kill -KILL $$", "fail", false, -int(syscall.SIGKILL)},
 		{"upload-failure", "mkdir -p outputs; echo done > outputs/file", "fail", true, 1},
 		{"warning", "mkdir -p outputs; echo done > outputs/file", "warn", true, 0},
 		{"both-fail", "mkdir -p outputs; echo done > outputs/file; exit 17", "fail", true, 17},
