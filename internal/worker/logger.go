@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -50,6 +51,9 @@ type TaskLogger struct {
 	notifyWg  sync.WaitGroup
 	flushCtx  context.Context
 	stopFlush context.CancelFunc
+	errMu     sync.Mutex
+	fileErr   error
+	closeErr  error
 }
 
 // NewTaskLogger creates a batching logger that writes to DB and files.
@@ -89,14 +93,30 @@ func NewTaskLogger(pool *pgxpool.Pool, taskID, taskDir string, cfg LogConfig) (*
 // Log writes local output even during cancellation cleanup.
 // A full DB queue applies backpressure until cancellation, then keeps only the local copy.
 func (l *TaskLogger) Log(ctx context.Context, stream, data string) {
-	// Local files retain the original bytes even when the DB cannot accept them.
+	var err error
 	switch stream {
 	case "stdout":
-		fmt.Fprintln(l.stdout, data)
+		_, err = fmt.Fprintln(l.stdout, data)
 	case "stderr":
-		fmt.Fprintln(l.stderr, data)
+		_, err = fmt.Fprintln(l.stderr, data)
 	}
+	if err != nil {
+		l.errMu.Lock()
+		first := l.fileErr == nil
+		if first {
+			l.fileErr = fmt.Errorf("write %s log: %w", stream, err)
+		}
+		diagnostic := l.fileErr
+		l.errMu.Unlock()
+		if first {
+			fmt.Fprintf(os.Stderr, "[error] %v\n", diagnostic)
+			l.enqueue(ctx, "nextask", fmt.Sprintf("[error] %v", diagnostic))
+		}
+	}
+	l.enqueue(ctx, stream, data)
+}
 
+func (l *TaskLogger) enqueue(ctx context.Context, stream, data string) {
 	// PostgreSQL TEXT requires valid UTF-8 and cannot store NUL bytes.
 	data = strings.ToValidUTF8(strings.ReplaceAll(data, "\x00", ""), "\uFFFD")
 	seq := int(l.seq.Add(1))
@@ -118,18 +138,14 @@ func (l *TaskLogger) Close() error {
 	l.once.Do(func() {
 		close(l.lines)
 		l.stopFlush()
-	})
-	<-l.done
-	l.notifyWg.Wait()
+		<-l.done
+		l.notifyWg.Wait()
 
-	var firstErr error
-	if err := l.stdout.Close(); err != nil {
-		firstErr = err
-	}
-	if err := l.stderr.Close(); err != nil && firstErr == nil {
-		firstErr = err
-	}
-	return firstErr
+		l.errMu.Lock()
+		defer l.errMu.Unlock()
+		l.closeErr = errors.Join(l.fileErr, l.stdout.Close(), l.stderr.Close())
+	})
+	return l.closeErr
 }
 
 // run keeps at most one batch outside the bounded queue. If the database is

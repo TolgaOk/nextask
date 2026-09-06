@@ -32,7 +32,7 @@ type Executor struct {
 type ExitResult = taskexec.Result
 
 // Execute runs a task and returns the exit result.
-func (e *Executor) Execute(ctx context.Context, task *db.Task) *ExitResult {
+func (e *Executor) Execute(ctx context.Context, task *db.Task) (result *ExitResult) {
 	taskDir := filepath.Join(e.Workdir, task.ID)
 	dbLog := NewDBLogger(e.Pool, task.ID)
 
@@ -74,7 +74,14 @@ func (e *Executor) Execute(ctx context.Context, task *db.Task) *ExitResult {
 		dbLog.Log(ctx, "nextask", fmt.Sprintf("[error] create task logger: %v", err))
 		return &ExitResult{Code: 1, Err: err}
 	}
-	defer log.Close()
+	defer func() {
+		if err := log.Close(); err != nil {
+			result.Err = errors.Join(result.Err, fmt.Errorf("capture task logs: %w", err))
+			if result.Code == 0 {
+				result.Code = 1
+			}
+		}
+	}()
 
 	log.Log(ctx, "nextask", fmt.Sprintf("[info] running: %s", task.Command))
 	executable := *task
