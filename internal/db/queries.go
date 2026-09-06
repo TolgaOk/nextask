@@ -411,35 +411,49 @@ type WorkerListFilter struct {
 	Since  time.Time
 	Limit  uint64
 	Offset uint64
+	// StaleThreshold enables heartbeat-based status when positive.
+	// Zero leaves the stored status intact for registry operations.
+	StaleThreshold time.Duration
 }
 
-func (f WorkerListFilter) args() (*string, *time.Time, uint64, uint64) {
-	var statusArg *string
-	if f.Status != nil {
-		s := string(*f.Status)
-		statusArg = &s
+// workerListQuery shares status classification and filters between rows and counts.
+func workerListQuery(filter WorkerListFilter) sq.SelectBuilder {
+	workers := sq.Select("id", "pid", "hostname", "workdir", "started_at", "last_heartbeat", "stopped_at").
+		From("workers")
+	if filter.StaleThreshold > 0 {
+		workers = workers.Column(`CASE
+			WHEN status = 'running' AND last_heartbeat < NOW() - (? * INTERVAL '1 second')
+			THEN 'stale' ELSE status END AS status`, filter.StaleThreshold.Seconds())
+	} else {
+		workers = workers.Column("status")
 	}
-	var sinceArg *time.Time
-	if !f.Since.IsZero() {
-		sinceArg = &f.Since
+
+	query := psql.Select().FromSelect(workers, "w")
+	if filter.Status != nil {
+		query = query.Where(sq.Eq{"status": *filter.Status})
 	}
-	limit := f.Limit
-	if limit == 0 {
-		limit = 1000
+	if !filter.Since.IsZero() {
+		query = query.Where(sq.GtOrEq{"started_at": filter.Since})
 	}
-	return statusArg, sinceArg, limit, f.Offset
+	return query
 }
 
 // ListWorkers retrieves workers matching the given filter.
 func ListWorkers(ctx context.Context, pool *pgxpool.Pool, filter WorkerListFilter) ([]WorkerRecord, error) {
-	sql, err := migrations.FS.ReadFile("list_workers.sql")
+	limit := filter.Limit
+	if limit == 0 {
+		limit = 1000
+	}
+	query := workerListQuery(filter).
+		Columns("id", "pid", "hostname", "workdir", "status", "started_at", "last_heartbeat", "stopped_at").
+		OrderBy("started_at DESC", "id").
+		Limit(limit).Offset(filter.Offset)
+	sql, args, err := query.ToSql()
 	if err != nil {
-		return nil, fmt.Errorf("failed to read list_workers.sql: %w", err)
+		return nil, err
 	}
 
-	statusArg, sinceArg, limit, offset := filter.args()
-
-	rows, err := pool.Query(ctx, string(sql), statusArg, sinceArg, limit, offset)
+	rows, err := pool.Query(ctx, sql, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -456,14 +470,13 @@ func ListWorkers(ctx context.Context, pool *pgxpool.Pool, filter WorkerListFilte
 	return workers, rows.Err()
 }
 
-// CountWorkers returns the total count of workers matching the filter.
+// CountWorkers returns the total count of workers matching the filter, ignoring Limit/Offset.
 func CountWorkers(ctx context.Context, pool *pgxpool.Pool, filter WorkerListFilter) (int, error) {
-	statusArg, sinceArg, _, _ := filter.args()
-
+	sql, args, err := workerListQuery(filter).Column("COUNT(*)").ToSql()
+	if err != nil {
+		return 0, err
+	}
 	var count int
-	err := pool.QueryRow(ctx,
-		"SELECT COUNT(*) FROM workers WHERE ($1::text IS NULL OR status = $1) AND ($2::timestamptz IS NULL OR started_at >= $2)",
-		statusArg, sinceArg,
-	).Scan(&count)
+	err = pool.QueryRow(ctx, sql, args...).Scan(&count)
 	return count, err
 }

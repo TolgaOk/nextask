@@ -59,6 +59,7 @@ type WorkerStatus string
 const (
 	WorkerStatusRunning WorkerStatus = "running"
 	WorkerStatusStopped WorkerStatus = "stopped"
+	WorkerStatusStale   WorkerStatus = "stale" // Derived from heartbeat age, never stored.
 )
 
 // WorkerRecord represents a registered worker in the database.
