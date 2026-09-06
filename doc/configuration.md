@@ -98,8 +98,9 @@ a confirmed database write.
 Use a separate workdir for each database. On startup, a worker replays pending
 records from the same workdir before claiming new tasks, then removes acknowledged
 records. Replay restores status, exit code, and finish time without rerunning
-commands or integrations. Records identify the original claim, so deleted tasks and reused task IDs cannot be overwritten. Already-saved
-results are safe to replay. No new flag or schema migration is needed.
+commands or integrations. Records identify the original claim, so deleted tasks and
+reused task IDs cannot be overwritten. Already-saved results are safe to replay.
+No new flag or schema migration is needed.
 
 `--rm` preserves the journal. A journal write failure preserves task files and stops
 the worker; a corrupt record blocks startup recovery and reports its path. Replay
@@ -109,7 +110,14 @@ files behind. Logs and artifacts are not part of the completion journal.
 Workers check stored cancellation requests before execution and once per second
 while a task runs. Notifications speed up cancellation, and status checks recover
 missed requests and confirmations. Worker retries use the configured
-`retry.initial_interval` and `retry.max_interval`.
+`retry.initial_interval` and `retry.max_interval`. Claim attempts retry temporary
+errors; permanent errors stop the worker. Delivered worker-stop notifications cancel
+active claims and retry delays as well as running tasks.
+
+Once registered, a worker attempts to mark itself stopped even if later startup
+fails. Registration cleanup has an independent five-second deadline. Cleanup errors
+are reported alongside the original error; shutdown confirmation follows the status
+update.
 
 Recovery requires a published journal record and surviving storage. Use a persistent
 `--workdir` if results must survive reboot or instance replacement; the default
