@@ -196,6 +196,9 @@ func resolveRemote(ctx context.Context, repo, remote string) (fetch, push string
 		fetch, push = remote, remote
 	}
 	normalize := func(value string) (string, error) {
+		if err := checkGitRemote(value); err != nil {
+			return "", err
+		}
 		if strings.Contains(value, ":") {
 			return value, nil
 		}

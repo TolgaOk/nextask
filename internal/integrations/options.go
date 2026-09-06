@@ -19,6 +19,7 @@ const (
 type Option struct {
 	Kind    Kind
 	Default any
+	Check   func(any) error // Optional constraints, also checked for inactive integrations.
 }
 type Schema map[string]Option
 type Options map[string]any
@@ -47,6 +48,14 @@ func (s Schema) Resolve(values map[string]any) (Options, error) {
 }
 
 func (s Option) parse(raw string) (any, error) {
+	value, err := s.parseValue(raw)
+	if err != nil {
+		return nil, err
+	}
+	return s.normalize(value)
+}
+
+func (s Option) parseValue(raw string) (any, error) {
 	switch s.Kind {
 	case String:
 		return raw, nil
@@ -76,6 +85,19 @@ func (s Option) parse(raw string) (any, error) {
 }
 
 func (s Option) normalize(value any) (any, error) {
+	value, err := s.normalizeType(value)
+	if err != nil {
+		return nil, err
+	}
+	if s.Check != nil {
+		if err := s.Check(value); err != nil {
+			return nil, err
+		}
+	}
+	return value, nil
+}
+
+func (s Option) normalizeType(value any) (any, error) {
 	switch s.Kind {
 	case String:
 		if v, ok := value.(string); ok {

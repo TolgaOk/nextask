@@ -11,8 +11,13 @@ import (
 // Git captures source at enqueue and wraps execution with an exact checkout.
 type Git struct{ Repo string }
 
-func (Git) Options() Schema { return Schema{"remote": {Kind: String, Default: ""}} }
+func (Git) Options() Schema {
+	return Schema{"remote": {Kind: String, Default: "", Check: checkGitRemote}}
+}
 func (Git) Validate(options Options) error {
+	if _, err := (Git{}).Options().Resolve(options); err != nil {
+		return err
+	}
 	if strings.TrimSpace(options.String("remote")) == "" {
 		return fmt.Errorf("remote is required: set integrations.git.remote or --set git.remote=REMOTE")
 	}
@@ -41,6 +46,9 @@ type GitSnapshot struct {
 var commitPattern = regexp.MustCompile(`^(?:[0-9a-f]{40}|[0-9a-f]{64})$`)
 
 func (s GitSnapshot) Wrap(command string) (string, error) {
+	if err := checkGitRemote(s.Remote); err != nil {
+		return "", err
+	}
 	if s.Remote == "" || s.Ref == "" {
 		return "", fmt.Errorf("git snapshot requires a remote and ref")
 	}
