@@ -150,7 +150,11 @@ nextask config                     # show configuration
 
 Priority: CLI flags > environment > project config > user config. Within each scope, Nextask config overrides the optional shared tasktools config. Run `nextask config show --sources` to inspect effective values.
 
-Set `db.url` via `--db-url`, `NEXTASK_DB_URL`, or in config files.
+Set the database connection through `NEXTASK_DB_URL` on the CLI host and workers.
+DB URL config settings and `--db-url` are rejected. Use SSH or Git credential
+helpers; never put tokens or passwords in Git remote URLs. S3 tasks require
+`S3_ACCESS_KEY` and `S3_SECRET_KEY` on the worker, with missing variables named in
+the error. Keep Nextask TOML files limited to non-secret options.
 Set `integrations.git.remote` for snapshot storage.
 
 ## Key concepts
@@ -166,6 +170,6 @@ Set `integrations.git.remote` for snapshot storage.
 |---------|-----|
 | Tasks stuck `pending` | Check `nextask worker list`, ensure `--filter` tags match `--tag` |
 | Tasks go `stale` | Worker crashed, check logs and restart |
-| Worker can't reach DB | Verify URL, check firewall, test with `nextask list --db-url "..."` from worker host |
+| Worker can't reach DB | Verify URL, check firewall, set `NEXTASK_DB_URL` and test with `nextask list` from the worker host |
 | `git clone` fails in worker | Wrong source remote or token expired, verify with `git ls-remote` |
-| `nextask list` shows nothing | Check `--db-url` or config, try `nextask config` to see loaded values |
+| `nextask list` shows nothing | Check `NEXTASK_DB_URL`; use `nextask config show --sources` for redacted diagnostics |
