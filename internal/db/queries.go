@@ -330,6 +330,15 @@ func RequestCancel(ctx context.Context, pool *pgxpool.Pool, taskID string) (*Tas
 	return originalStatus, nil
 }
 
+// CancelRequested reads the durable request independently of notification delivery.
+func CancelRequested(ctx context.Context, pool *pgxpool.Pool, taskID string) (bool, error) {
+	var requested bool
+	err := pool.QueryRow(ctx, `SELECT EXISTS (
+		SELECT FROM tasks WHERE id = $1 AND cancel_requested_at IS NOT NULL
+	)`, taskID).Scan(&requested)
+	return requested, err
+}
+
 // DeleteTask removes a task and its logs from the database.
 // Returns true if the task was deleted, false if it didn't exist.
 func DeleteTask(ctx context.Context, pool *pgxpool.Pool, taskID string) (bool, error) {

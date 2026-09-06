@@ -276,16 +276,7 @@ func TestCancel_EndToEnd(t *testing.T) {
 		t.Fatalf("task should be running, got %s", status)
 	}
 
-	// 3. Request cancel (like CLI cancel command)
-	originalStatus, err := db.RequestCancel(ctx, pool, task.ID)
-	if err != nil {
-		t.Fatalf("RequestCancel failed: %v", err)
-	}
-	if originalStatus == nil || *originalStatus != db.StatusRunning {
-		t.Fatalf("expected running status, got %v", originalStatus)
-	}
-
-	// 4. Listen for confirmation (like CLI does)
+	// 3. Subscribe first to test notification delivery; polling may cancel immediately
 	confirmConn, err := pgx.Connect(ctx, getTestDBURL(t))
 	if err != nil {
 		t.Fatalf("failed to connect for confirm: %v", err)
@@ -294,6 +285,15 @@ func TestCancel_EndToEnd(t *testing.T) {
 
 	fromChannel := db.FromTaskChannel(task.ID)
 	_, _ = confirmConn.Exec(ctx, "LISTEN "+fromChannel)
+
+	// 4. Request cancellation after subscribing to its confirmation
+	originalStatus, err := db.RequestCancel(ctx, pool, task.ID)
+	if err != nil {
+		t.Fatalf("RequestCancel failed: %v", err)
+	}
+	if originalStatus == nil || *originalStatus != db.StatusRunning {
+		t.Fatalf("expected running status, got %v", originalStatus)
+	}
 
 	// 5. Send cancel notification to worker (like CLI does)
 	toChannel := db.ToTaskChannel(task.ID)

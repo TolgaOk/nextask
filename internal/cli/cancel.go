@@ -2,7 +2,6 @@ package cli
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/signal"
@@ -102,7 +101,26 @@ func waitForCancel(ctx context.Context, pool *pgxpool.Pool, taskID string, timeo
 	defer waitCancel()
 
 	for {
-		notif, err := conn.WaitForNotification(waitCtx)
+		// A worker may act on the durable request before this CLI starts
+		// listening, or its confirmation notification may be lost.
+		task, err := db.GetTask(waitCtx, pool, taskID, cfg.Worker.StaleDuration())
+		if err != nil {
+			return err
+		}
+		if task == nil {
+			return fmt.Errorf("task not found: %s", taskID)
+		}
+		switch task.Status {
+		case db.StatusCancelled:
+			fmt.Fprintln(os.Stderr, "Task cancelled")
+			return nil
+		case db.StatusCompleted, db.StatusFailed:
+			return fmt.Errorf("task %s finished as %s before cancellation was confirmed", taskID, task.Status)
+		}
+
+		pollCtx, pollCancel := context.WithTimeout(waitCtx, time.Second)
+		_, err = conn.WaitForNotification(pollCtx)
+		pollCancel()
 		if err != nil {
 			if sigCtx.Err() == context.Canceled {
 				fmt.Fprintln(os.Stderr, "\nInterrupted - cancel request already sent")
@@ -115,22 +133,10 @@ func waitForCancel(ctx context.Context, pool *pgxpool.Pool, taskID string, timeo
 					"Check task status with "+codeStyle.Render("nextask show "+taskID),
 				)
 			}
+			if pollCtx.Err() == context.DeadlineExceeded {
+				continue
+			}
 			return err
-		}
-
-		eventType, data, err := db.ParseEvent(notif.Payload)
-		if err != nil {
-			return fmt.Errorf("failed to parse event: %w", err)
-		}
-		if eventType == db.EventTypeStatus {
-			var status db.TaskStatusEvent
-			if err := json.Unmarshal(data, &status); err != nil {
-				return fmt.Errorf("failed to parse status event: %w", err)
-			}
-			if status.Status == string(db.StatusCancelled) {
-				fmt.Fprintln(os.Stderr, "Task cancelled")
-				return nil
-			}
 		}
 	}
 }

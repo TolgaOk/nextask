@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/TolgaOk/nextask/internal/db"
+	"github.com/cenkalti/backoff/v5"
 )
 
 func (w *Worker) processTask(ctx context.Context, runCancel context.CancelFunc, notifier *db.Notifier, toWorkerCh string, task *db.Task) error {
@@ -41,6 +43,18 @@ func (w *Worker) processTask(ctx context.Context, runCancel context.CancelFunc, 
 	}
 	defer notifier.Remove(toTaskCh)
 
+	// Check durable cancellation before starting the payload. A request can arrive
+	// between the claim and the LISTEN subscription.
+	requested, err := db.RetryValue(ctx, func() (bool, error) {
+		return db.CancelRequested(ctx, w.Pool, task.ID)
+	}, backoff.WithBackOff(w.newBackoff()), backoff.WithMaxElapsedTime(0))
+	if err != nil {
+		return finish(&ExitResult{Code: -1, Err: err}, false)
+	}
+	if requested {
+		return finish(&ExitResult{Code: -1}, true)
+	}
+
 	// Run executor in background
 	resultCh := make(chan *ExitResult, 1)
 	go func() {
@@ -50,6 +64,8 @@ func (w *Worker) processTask(ctx context.Context, runCancel context.CancelFunc, 
 	// Dispatch notifications during execution
 	var result *ExitResult
 	wasCancelled := false
+	poll := time.NewTicker(time.Second)
+	defer poll.Stop()
 
 	for {
 		select {
@@ -74,6 +90,23 @@ func (w *Worker) processTask(ctx context.Context, runCancel context.CancelFunc, 
 			case toWorkerCh:
 				fmt.Println("Received stop signal, shutting down...")
 				runCancel()
+				taskCancel()
+				result = <-resultCh
+				goto finish
+			}
+
+		case <-poll.C:
+			checkCtx, checkCancel := context.WithTimeout(ctx, time.Second)
+			requested, err := db.CancelRequested(checkCtx, w.Pool, task.ID)
+			checkCancel()
+			if err != nil {
+				if ctx.Err() == nil {
+					fmt.Fprintf(os.Stderr, "check task cancellation: %s\n", db.HumanError(err))
+				}
+				continue
+			}
+			if requested {
+				wasCancelled = true
 				taskCancel()
 				result = <-resultCh
 				goto finish
