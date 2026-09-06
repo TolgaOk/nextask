@@ -58,7 +58,17 @@ var cancelCmd = &cobra.Command{
 			return nil
 
 		case db.StatusRunning:
-			return waitForCancel(ctx, pool, taskID)
+			timeout := cancelTimeout
+			if !cmd.Flags().Changed("timeout") {
+				task, err := db.GetTask(ctx, pool, taskID, cfg.Worker.StaleDuration())
+				if err != nil {
+					return err
+				}
+				if task != nil {
+					timeout += time.Duration(task.CleanupTimeoutMS) * time.Millisecond
+				}
+			}
+			return waitForCancel(ctx, pool, taskID, timeout)
 
 		default:
 			return errWithHints(
@@ -69,7 +79,7 @@ var cancelCmd = &cobra.Command{
 	},
 }
 
-func waitForCancel(ctx context.Context, pool *pgxpool.Pool, taskID string) error {
+func waitForCancel(ctx context.Context, pool *pgxpool.Pool, taskID string, timeout time.Duration) error {
 	conn, err := pgx.Connect(ctx, cfg.DB.URL)
 	if err != nil {
 		return err
@@ -77,7 +87,7 @@ func waitForCancel(ctx context.Context, pool *pgxpool.Pool, taskID string) error
 	defer conn.Close(ctx)
 
 	fromChannel := db.FromTaskChannel(taskID)
-	if _, err := conn.Exec(ctx, "LISTEN "+fromChannel); err != nil {
+	if _, err := conn.Exec(ctx, "LISTEN "+pgx.Identifier{fromChannel}.Sanitize()); err != nil {
 		return err
 	}
 
@@ -86,44 +96,22 @@ func waitForCancel(ctx context.Context, pool *pgxpool.Pool, taskID string) error
 		return err
 	}
 
-	// Create contexts: sigCtx for signal, waitCtx with timeout
-	sigCtx, sigCancel := context.WithCancelCause(ctx)
-	waitCtx, waitCancel := context.WithTimeout(sigCtx, cancelTimeout)
-	defer sigCancel(nil)
-
-	// Signal handler for graceful interrupt
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		defer signal.Stop(sigCh)
-		select {
-		case <-sigCh:
-			sigCancel(context.Canceled)
-		case <-waitCtx.Done():
-		}
-	}()
-
-	// Ensure goroutine exits before function returns
-	defer func() {
-		waitCancel() // Unblock goroutine if waiting on waitCtx.Done()
-		<-done       // Wait for goroutine to cleanup
-	}()
+	sigCtx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	waitCtx, waitCancel := context.WithTimeout(sigCtx, timeout)
+	defer waitCancel()
 
 	for {
 		notif, err := conn.WaitForNotification(waitCtx)
 		if err != nil {
-			cause := context.Cause(sigCtx)
-			if cause == context.Canceled {
+			if sigCtx.Err() == context.Canceled {
 				fmt.Fprintln(os.Stderr, "\nInterrupted - cancel request already sent")
 				fmt.Fprintf(os.Stderr, "Check task status with %s\n", codeStyle.Render("nextask show "+taskID))
 				return nil
 			}
 			if waitCtx.Err() == context.DeadlineExceeded {
 				return errWithHints("cancel requested but worker did not confirm",
-					"Worker may be unresponsive or disconnected",
+					"The task may still be stopping, finalizing, or disconnected",
 					"Check task status with "+codeStyle.Render("nextask show "+taskID),
 				)
 			}
@@ -148,6 +136,6 @@ func waitForCancel(ctx context.Context, pool *pgxpool.Pool, taskID string) error
 }
 
 func init() {
-	cancelCmd.Flags().DurationVar(&cancelTimeout, "timeout", 10*time.Second, "Timeout waiting for cancel confirmation")
+	cancelCmd.Flags().DurationVar(&cancelTimeout, "timeout", 10*time.Second, "Timeout waiting for cancel confirmation (default adds task cleanup time)")
 	RootCmd.AddCommand(cancelCmd)
 }

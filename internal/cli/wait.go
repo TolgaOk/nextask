@@ -107,7 +107,7 @@ func newWaiter(pool *pgxpool.Pool, conn *pgx.Conn) *waiter {
 
 // listen subscribes to a task's completion channel.
 func (w *waiter) listen(ctx context.Context, taskID string) error {
-	_, err := w.conn.Exec(ctx, "LISTEN "+db.FromTaskChannel(taskID))
+	_, err := w.conn.Exec(ctx, "LISTEN "+pgx.Identifier{db.FromTaskChannel(taskID)}.Sanitize())
 	return err
 }
 
