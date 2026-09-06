@@ -402,7 +402,7 @@ func daemonize() error {
 		return fmt.Errorf("failed to get executable: %w", err)
 	}
 
-	args := []string{"worker", "--_id", id, "--workdir", cfg.Worker.Workdir, "--db-url", cfg.DB.URL}
+	args := []string{"worker", "--_id", id, "--workdir", cfg.Worker.Workdir}
 	if once {
 		args = append(args, "--once")
 	}
@@ -414,6 +414,7 @@ func daemonize() error {
 	}
 
 	cmd := exec.Command(exe, args...)
+	cmd.Env = append(os.Environ(), "NEXTASK_DB_URL="+cfg.DB.URL)
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}

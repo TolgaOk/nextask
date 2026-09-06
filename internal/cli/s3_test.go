@@ -18,11 +18,7 @@ import (
 func TestS3CLI(t *testing.T) {
 	pool := setupTestDB(t)
 	t.Cleanup(pool.Close)
-	binary := filepath.Join(t.TempDir(), "nextask")
-	build := exec.Command("go", "build", "-race", "-o", binary, "../../cmd/nextask")
-	if output, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("build: %v\n%s", err, output)
-	}
+	binary := buildTestCLI(t)
 	server := storagetest.New()
 	t.Cleanup(server.Close)
 	root := filepath.Join(t.TempDir(), "project")

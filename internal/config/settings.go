@@ -75,12 +75,6 @@ func (c *Config) setSource(key, source string) {
 	c.sources[key] = source
 }
 
-// SetDBURL applies a database override and records its origin.
-func (c *Config) SetDBURL(value, source string) {
-	c.DB.URL = value
-	c.setSource("db.url", source)
-}
-
 func (c *Config) recordSources(meta toml.MetaData, path string, prefix []string) {
 	for _, setting := range c.Settings() {
 		key := append(append([]string{}, prefix...), strings.Split(setting.Key, ".")...)

@@ -14,7 +14,13 @@ func TestConfigShow(t *testing.T) {
 	oldCfg := cfg
 	t.Cleanup(func() { cfg = oldCfg })
 	cfg = &config.Config{Worker: config.WorkerConfig{Workdir: "/tmp/with spaces"}}
-	cfg.SetDBURL("postgres://alice:secret-value@localhost/db", "flag:--db-url")
+	t.Setenv("NEXTASK_DB_URL", "postgres://alice:secret-value@localhost/db")
+	var err error
+	cfg, err = config.LoadFrom("/nonexistent/nextask-test-config.toml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Worker.Workdir = "/tmp/with spaces"
 	for _, sources := range []bool{false, true} {
 		cmd := &cobra.Command{}
 		cmd.Flags().Bool("sources", sources, "")
@@ -26,14 +32,14 @@ func TestConfigShow(t *testing.T) {
 		if strings.Contains(output.String(), "secret-value") || strings.Contains(output.String(), "alice") {
 			t.Fatal("config output leaked credentials")
 		}
-		if strings.Contains(output.String(), "flag:--db-url") != sources {
+		if strings.Contains(output.String(), "env:NEXTASK_DB_URL") != sources {
 			t.Fatalf("unexpected source display: %s", output.String())
 		}
 		var displayed config.Config
 		if _, err := toml.Decode(output.String(), &displayed); err != nil {
 			t.Fatalf("output is not TOML: %v", err)
 		}
-		if displayed.Worker.Workdir != "/tmp/with spaces" || !strings.Contains(displayed.DB.URL, "localhost/db") {
+		if displayed.Worker.Workdir != "/tmp/with spaces" || !strings.Contains(output.String(), "localhost/db") {
 			t.Fatal("effective values were lost")
 		}
 	}

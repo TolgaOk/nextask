@@ -7,6 +7,7 @@ import (
 )
 
 func TestLoadFrom_FileNotExist(t *testing.T) {
+	clearConfigEnv(t)
 	cfg, err := LoadFrom("/nonexistent/path/config.toml")
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
@@ -17,13 +18,11 @@ func TestLoadFrom_FileNotExist(t *testing.T) {
 }
 
 func TestLoadFrom_ValidConfig(t *testing.T) {
+	clearConfigEnv(t)
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.toml")
 
 	content := `
-[db]
-url = "postgres://user@localhost/testdb"
-
 [source]
 remote = "/path/to/remote.git"
 
@@ -39,9 +38,6 @@ workdir = "/custom/workdir"
 		t.Fatalf("expected no error, got %v", err)
 	}
 
-	if cfg.DB.URL != "postgres://user@localhost/testdb" {
-		t.Errorf("expected DB.URL = %q, got %q", "postgres://user@localhost/testdb", cfg.DB.URL)
-	}
 	if cfg.Source.Remote != "/path/to/remote.git" {
 		t.Errorf("expected Source.Remote = %q, got %q", "/path/to/remote.git", cfg.Source.Remote)
 	}
@@ -51,13 +47,11 @@ workdir = "/custom/workdir"
 }
 
 func TestLoadFrom_EnvOverrides(t *testing.T) {
+	clearConfigEnv(t)
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.toml")
 
 	content := `
-[db]
-url = "postgres://file@localhost/filedb"
-
 [source]
 remote = "/file/remote.git"
 
@@ -91,6 +85,7 @@ workdir = "/file/workdir"
 }
 
 func TestLoadFrom_EnvWithNoFile(t *testing.T) {
+	clearConfigEnv(t)
 	t.Setenv("NEXTASK_DB_URL", "postgres://env@localhost/envdb")
 
 	cfg, err := LoadFrom("/nonexistent/config.toml")
@@ -104,12 +99,12 @@ func TestLoadFrom_EnvWithNoFile(t *testing.T) {
 }
 
 func TestLoadFrom_PartialConfig(t *testing.T) {
+	clearConfigEnv(t)
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.toml")
 
-	content := `
-[db]
-url = "postgres://user@localhost/testdb"
+	content := `[worker]
+log_flush_lines = 12
 `
 	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
 		t.Fatal(err)
@@ -120,8 +115,8 @@ url = "postgres://user@localhost/testdb"
 		t.Fatalf("expected no error, got %v", err)
 	}
 
-	if cfg.DB.URL != "postgres://user@localhost/testdb" {
-		t.Errorf("expected DB.URL = %q, got %q", "postgres://user@localhost/testdb", cfg.DB.URL)
+	if cfg.Worker.LogFlushLines != 12 {
+		t.Fatal("partial config setting was lost")
 	}
 	if cfg.Source.Remote != "" {
 		t.Errorf("expected empty Source.Remote, got %q", cfg.Source.Remote)
@@ -132,6 +127,7 @@ url = "postgres://user@localhost/testdb"
 }
 
 func TestLoadFrom_InvalidTOML(t *testing.T) {
+	clearConfigEnv(t)
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.toml")
 
@@ -147,6 +143,7 @@ func TestLoadFrom_InvalidTOML(t *testing.T) {
 }
 
 func TestGlobalPath(t *testing.T) {
+	clearConfigEnv(t)
 	path, err := GlobalPath()
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
@@ -160,6 +157,7 @@ func TestGlobalPath(t *testing.T) {
 }
 
 func TestToAbsPath(t *testing.T) {
+	clearConfigEnv(t)
 	home, _ := os.UserHomeDir()
 
 	tests := []struct {
@@ -183,18 +181,17 @@ func TestToAbsPath(t *testing.T) {
 	}
 }
 
-func TestDecodeIfExists_TracksLoadedFiles(t *testing.T) {
+func TestDecodeFile_TracksLoadedFiles(t *testing.T) {
+	clearConfigEnv(t)
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.toml")
 
-	if err := os.WriteFile(path, []byte(`[db]
-url = "postgres://test@localhost/db"
-`), 0644); err != nil {
+	if err := os.WriteFile(path, []byte("[worker]\nlog_flush_lines = 12\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
 
 	cfg := &Config{}
-	if err := decodeIfExists(path, cfg); err != nil {
+	if err := decodeTestFile(path, cfg); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if len(cfg.LoadedFiles) != 1 || cfg.LoadedFiles[0] != path {
@@ -202,9 +199,10 @@ url = "postgres://test@localhost/db"
 	}
 }
 
-func TestDecodeIfExists_SkipsMissing(t *testing.T) {
+func TestDecodeFile_SkipsMissing(t *testing.T) {
+	clearConfigEnv(t)
 	cfg := &Config{}
-	if err := decodeIfExists("/nonexistent/file.toml", cfg); err != nil {
+	if err := decodeTestFile("/nonexistent/file.toml", cfg); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if len(cfg.LoadedFiles) != 0 {
@@ -213,13 +211,11 @@ func TestDecodeIfExists_SkipsMissing(t *testing.T) {
 }
 
 func TestLocalOverridesGlobal(t *testing.T) {
+	clearConfigEnv(t)
 	dir := t.TempDir()
 
 	globalPath := filepath.Join(dir, "global.toml")
 	globalContent := `
-[db]
-url = "postgres://global@localhost/globaldb"
-
 [source]
 remote = "/global/remote.git"
 
@@ -232,8 +228,8 @@ workdir = "/global/workdir"
 
 	localPath := filepath.Join(dir, ".nextask.toml")
 	localContent := `
-[db]
-url = "postgres://local@localhost/localdb"
+[worker]
+log_flush_lines = 12
 `
 	if err := os.WriteFile(localPath, []byte(localContent), 0644); err != nil {
 		t.Fatal(err)
@@ -241,17 +237,17 @@ url = "postgres://local@localhost/localdb"
 
 	// Simulate layered loading: global then local
 	cfg := &Config{}
-	if err := decodeIfExists(globalPath, cfg); err != nil {
+	if err := decodeTestFile(globalPath, cfg); err != nil {
 		t.Fatal(err)
 	}
-	if err := decodeIfExists(localPath, cfg); err != nil {
+	if err := decodeTestFile(localPath, cfg); err != nil {
 		t.Fatal(err)
 	}
 	applyEnv(cfg)
 
-	// Local overrides db.url
-	if cfg.DB.URL != "postgres://local@localhost/localdb" {
-		t.Errorf("expected local DB.URL, got %q", cfg.DB.URL)
+	// Local overrides a non-secret setting.
+	if cfg.Worker.LogFlushLines != 12 {
+		t.Fatal("local log setting did not win")
 	}
 	// Global values preserved where local doesn't override
 	if cfg.Source.Remote != "/global/remote.git" {
@@ -267,12 +263,13 @@ url = "postgres://local@localhost/localdb"
 }
 
 func TestLocalOnly_NoGlobal(t *testing.T) {
+	clearConfigEnv(t)
 	dir := t.TempDir()
 
 	localPath := filepath.Join(dir, ".nextask.toml")
 	localContent := `
-[db]
-url = "postgres://local@localhost/localdb"
+[worker]
+log_flush_lines = 12
 `
 	if err := os.WriteFile(localPath, []byte(localContent), 0644); err != nil {
 		t.Fatal(err)
@@ -280,16 +277,16 @@ url = "postgres://local@localhost/localdb"
 
 	cfg := &Config{}
 	// Global doesn't exist — no error
-	if err := decodeIfExists(filepath.Join(dir, "global.toml"), cfg); err != nil {
+	if err := decodeTestFile(filepath.Join(dir, "global.toml"), cfg); err != nil {
 		t.Fatal(err)
 	}
-	if err := decodeIfExists(localPath, cfg); err != nil {
+	if err := decodeTestFile(localPath, cfg); err != nil {
 		t.Fatal(err)
 	}
 	applyEnv(cfg)
 
-	if cfg.DB.URL != "postgres://local@localhost/localdb" {
-		t.Errorf("expected local DB.URL, got %q", cfg.DB.URL)
+	if cfg.Worker.LogFlushLines != 12 {
+		t.Fatal("local setting was lost")
 	}
 	if len(cfg.LoadedFiles) != 1 {
 		t.Errorf("expected 1 LoadedFile, got %d", len(cfg.LoadedFiles))
@@ -297,20 +294,18 @@ url = "postgres://local@localhost/localdb"
 }
 
 func TestEnvOverridesLocal(t *testing.T) {
+	clearConfigEnv(t)
 	dir := t.TempDir()
 
 	localPath := filepath.Join(dir, ".nextask.toml")
-	if err := os.WriteFile(localPath, []byte(`
-[db]
-url = "postgres://local@localhost/localdb"
-`), 0644); err != nil {
+	if err := os.WriteFile(localPath, []byte("[worker]\nlog_flush_lines = 12\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
 
 	t.Setenv("NEXTASK_DB_URL", "postgres://env@localhost/envdb")
 
 	cfg := &Config{}
-	if err := decodeIfExists(localPath, cfg); err != nil {
+	if err := decodeTestFile(localPath, cfg); err != nil {
 		t.Fatal(err)
 	}
 	applyEnv(cfg)
@@ -321,6 +316,7 @@ url = "postgres://local@localhost/localdb"
 }
 
 func TestInvalidLocalTOML(t *testing.T) {
+	clearConfigEnv(t)
 	dir := t.TempDir()
 	path := filepath.Join(dir, ".nextask.toml")
 
@@ -329,13 +325,14 @@ func TestInvalidLocalTOML(t *testing.T) {
 	}
 
 	cfg := &Config{}
-	err := decodeIfExists(path, cfg)
+	err := decodeTestFile(path, cfg)
 	if err == nil {
 		t.Fatal("expected error for invalid TOML")
 	}
 }
 
 func TestLoadFrom_TildeExpansion(t *testing.T) {
+	clearConfigEnv(t)
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.toml")
 
@@ -366,4 +363,8 @@ workdir = "~/nextask-work"
 	if cfg.Worker.Workdir != expectedWorkdir {
 		t.Errorf("Worker.Workdir = %q, want %q", cfg.Worker.Workdir, expectedWorkdir)
 	}
+}
+
+func decodeTestFile(path string, cfg *Config) error {
+	return decodeFile(configFile{path: path}, cfg)
 }

@@ -5,12 +5,10 @@
 //	CLI flags > env vars > project files > user files > defaults
 //
 // Within each scope, the Nextask file overrides [nextask] in the shared tasktools
-// file, which overrides its [defaults]. Other tools' sections are ignored.
+// file. Other tools' sections are ignored. Database connections come only from
+// NEXTASK_DB_URL.
 //
 // Config file format (same for both global and local):
-//
-//	[db]
-//	url = "postgres://user@localhost:5432/nextask"
 //
 //	[integrations.git]
 //	remote = "~/.nextask/source.git"
@@ -25,20 +23,17 @@
 package config
 
 import (
-	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/BurntSushi/toml"
-	"github.com/TolgaOk/nextask/internal/integrations"
 )
 
-// DBConfig holds database configuration.
+// DBConfig holds the database connection supplied by the environment.
 type DBConfig struct {
-	URL string `toml:"url"`
+	URL string `toml:"-"`
 }
 
 // SourceConfig holds source snapshotting configuration.
@@ -80,7 +75,7 @@ func (w WorkerConfig) StaleDuration() time.Duration {
 
 // Config holds the complete nextask configuration.
 type Config struct {
-	DB           DBConfig                  `toml:"db"`
+	DB           DBConfig                  `toml:"-"`
 	Source       SourceConfig              `toml:"source"`
 	Worker       WorkerConfig              `toml:"worker"`
 	Retry        RetryConfig               `toml:"retry"`
@@ -141,19 +136,13 @@ func loadFiles(files []configFile) (*Config, error) {
 		if file.path == "" {
 			continue
 		}
-		var err error
-		if file.shared {
-			err = decodeShared(file.path, cfg)
-		} else {
-			err = decodeIfExists(file.path, cfg)
-		}
-		if err != nil {
+		if err := decodeFile(file, cfg); err != nil {
 			return nil, err
 		}
 	}
 	applyEnv(cfg)
 	var err error
-	cfg.Integrations, err = integrations.Builtins().Configure(cfg.Integrations)
+	cfg.Integrations, err = cfg.resolveIntegrations()
 	if err != nil {
 		return nil, err
 	}
@@ -163,71 +152,16 @@ func loadFiles(files []configFile) (*Config, error) {
 	return cfg, nil
 }
 
-func decodeShared(path string, cfg *Config) error {
-	var shared struct {
-		Defaults struct {
-			DBURL string `toml:"db_url"`
-		} `toml:"defaults"`
-		Nextask toml.Primitive `toml:"nextask"`
-	}
-	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
-		return nil
-	}
-	meta, err := toml.DecodeFile(path, &shared)
-	if err != nil {
-		return fmt.Errorf("%s: %w", path, err)
-	}
-	if meta.IsDefined("defaults", "db_url") {
-		cfg.SetDBURL(shared.Defaults.DBURL, path+" [defaults.db_url]")
-	}
-	if meta.IsDefined("nextask") {
-		previous := cfg.Integrations
-		cfg.Integrations = nil
-		if err := meta.PrimitiveDecode(shared.Nextask, cfg); err != nil {
-			return fmt.Errorf("%s: %w", path, err)
-		}
-		cfg.Integrations = mergeIntegrationOptions(previous, cfg.Integrations)
-		if meta.IsDefined("nextask", "enqueue", "with") {
-			return fmt.Errorf("%s: select integrations explicitly with --with; enqueue.with is unsupported", path)
-		}
-		cfg.recordSources(meta, path, []string{"nextask"})
-		cfg.applySourceAlias(meta, path, []string{"nextask"})
-	}
-	cfg.LoadedFiles = append(cfg.LoadedFiles, path)
-	return nil
-}
-
 // LoadFrom reads one standalone Nextask file, then applies environment and defaults.
 func LoadFrom(path string) (*Config, error) {
 	return loadFiles([]configFile{{path, false}})
 }
 
-// decodeIfExists decodes a TOML file into cfg if the file exists.
-// It appends to cfg.LoadedFiles on success.
-func decodeIfExists(path string, cfg *Config) error {
-	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
-		return nil
-	}
-	previous := cfg.Integrations
-	cfg.Integrations = nil
-	meta, err := toml.DecodeFile(path, cfg)
-	if err != nil {
-		return fmt.Errorf("%s: %w", path, err)
-	}
-	cfg.Integrations = mergeIntegrationOptions(previous, cfg.Integrations)
-	if meta.IsDefined("enqueue", "with") {
-		return fmt.Errorf("%s: select integrations explicitly with --with; enqueue.with is unsupported", path)
-	}
-	cfg.LoadedFiles = append(cfg.LoadedFiles, path)
-	cfg.recordSources(meta, path, nil)
-	cfg.applySourceAlias(meta, path, nil)
-	return nil
-}
-
 // applyEnv overrides config values with environment variables if set.
 func applyEnv(cfg *Config) {
-	if v := os.Getenv("NEXTASK_DB_URL"); v != "" {
-		cfg.SetDBURL(v, "env:NEXTASK_DB_URL")
+	if v := os.Getenv("NEXTASK_DB_URL"); strings.TrimSpace(v) != "" {
+		cfg.DB.URL = v
+		cfg.setSource("db.url", "env:NEXTASK_DB_URL")
 	}
 	if v := os.Getenv("NEXTASK_SOURCE_REMOTE"); v != "" {
 		cfg.Source.Remote = v

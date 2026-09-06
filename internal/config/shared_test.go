@@ -11,7 +11,7 @@ import (
 
 func clearConfigEnv(t *testing.T) {
 	t.Helper()
-	for _, name := range []string{"NEXTASK_DB_URL", "NEXTASK_SOURCE_REMOTE", "NEXTASK_WORKER_WORKDIR"} {
+	for _, name := range []string{"NEXTASK_DB_URL", "NEXTASK_SOURCE_REMOTE", "NEXTASK_GIT_REMOTE", "NEXTASK_WORKER_WORKDIR"} {
 		t.Setenv(name, "")
 	}
 }
@@ -29,72 +29,46 @@ func TestSharedPrecedence(t *testing.T) {
 	clearConfigEnv(t)
 	dir := t.TempDir()
 	files := []configFile{
-		{configFixture(t, dir, "user-shared.toml", `[defaults]
-db_url = "postgres://shared-user/db"
-[nextask.db]
-url = "postgres://nextask-user/db"
-[nextask.worker]
+		{configFixture(t, dir, "user-shared.toml", `[nextask.worker]
+workdir = "/shared-user"
 heartbeat_interval = "2m"
 [nextask.source]
 remote = "origin"
 [gsnap]
 db_url = 17
 `), true},
-		{configFixture(t, dir, "user-nextask.toml", `[db]
-url = "postgres://standalone-user/db"
-[worker]
+		{configFixture(t, dir, "user-nextask.toml", `[worker]
+workdir = "/standalone-user"
 log_flush_lines = 12
 `), false},
-		{configFixture(t, dir, "project-shared.toml", `[defaults]
-db_url = "postgres://shared-project/db"
-[nextask.worker]
+		{configFixture(t, dir, "project-shared.toml", `[nextask.worker]
+workdir = "/shared-project"
 log_buffer_size = 20
 `), true},
-		{configFixture(t, dir, "project-nextask.toml", `[db]
-url = "postgres://standalone-project/db"
+		{configFixture(t, dir, "project-nextask.toml", `[worker]
+workdir = "/standalone-project"
 `), false},
 	}
-	for i, want := range []string{"postgres://nextask-user/db", "postgres://standalone-user/db", "postgres://shared-project/db", "postgres://standalone-project/db"} {
+	for i, want := range []string{"/shared-user", "/standalone-user", "/shared-project", "/standalone-project"} {
 		c, err := loadFiles(files[:i+1])
 		if err != nil {
 			t.Fatal(err)
 		}
-		if c.DB.URL != want {
-			t.Errorf("layer %d: DB URL = %q, want %q", i, c.DB.URL, want)
-		}
-		if !strings.HasPrefix(c.SourceFor("db.url"), files[i].path+" [") {
-			t.Errorf("layer %d source = %q", i, c.SourceFor("db.url"))
+		if c.Worker.Workdir != want || !strings.HasPrefix(c.SourceFor("worker.workdir"), files[i].path+" [") {
+			t.Fatalf("layer %d: incorrect precedence or origin", i)
 		}
 		if c.Worker.HeartbeatInterval != 2*time.Minute || c.Source.Remote != "origin" {
-			t.Fatalf("partial layer lost inherited settings: %+v", c)
+			t.Fatal("partial layer lost inherited settings")
 		}
 	}
-	// A tool-specific shared value overrides defaults at the same scope.
-	if err := os.WriteFile(files[2].path, []byte(`[defaults]
-db_url = "postgres://shared-project/db"
-[nextask.db]
-url = "postgres://nextask-project/db"
-`), 0600); err != nil {
-		t.Fatal(err)
-	}
-	c, err := loadFiles(files[:3])
-	if err != nil {
-		t.Fatal(err)
-	}
-	if c.DB.URL != "postgres://nextask-project/db" || c.SourceFor("db.url") != files[2].path+" [nextask.db.url]" {
-		t.Fatalf("shared Nextask override missing: %+v", c)
-	}
 	t.Setenv("NEXTASK_DB_URL", "postgres://environment/db")
-	c, err = loadFiles(files)
+	t.Setenv("NEXTASK_WORKER_WORKDIR", "/environment")
+	c, err := loadFiles(files)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.DB.URL != "postgres://environment/db" || c.SourceFor("db.url") != "env:NEXTASK_DB_URL" {
-		t.Fatal("environment did not win")
-	}
-	c.SetDBURL("postgres://flag/db", "flag:--db-url")
-	if c.DB.URL != "postgres://flag/db" || c.SourceFor("db.url") != "flag:--db-url" {
-		t.Fatal("flag did not win")
+	if c.DB.URL != "postgres://environment/db" || c.SourceFor("db.url") != "env:NEXTASK_DB_URL" || c.Worker.Workdir != "/environment" {
+		t.Fatal("environment value or origin lost")
 	}
 	if c.Worker.LogFlushLines != 12 || c.SourceFor("worker.log_flush_lines") != files[1].path+" [worker.log_flush_lines]" {
 		t.Fatal("standalone setting lost")
@@ -137,8 +111,8 @@ func TestSharedOptionalAndInvalid(t *testing.T) {
 func TestSharedDefaultsAndExplicitEmpty(t *testing.T) {
 	clearConfigEnv(t)
 	dir := t.TempDir()
-	global := configFixture(t, dir, "global.toml", "[db]\nurl = 'postgres://user/db'\n[source]\nremote = 'origin'")
-	shared := configFixture(t, dir, "shared.toml", "[defaults]\ndb_url = ''\n[nextask.source]\nremote = ''\n[nextask.worker]\nlog_flush_lines = 0")
+	global := configFixture(t, dir, "global.toml", "[source]\nremote = 'origin'")
+	shared := configFixture(t, dir, "shared.toml", "[nextask.source]\nremote = ''\n[nextask.worker]\nlog_flush_lines = 0")
 	c, err := loadFiles([]configFile{{global, false}, {shared, true}})
 	if err != nil {
 		t.Fatal(err)

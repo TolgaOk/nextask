@@ -12,7 +12,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var dbURL string
 var cfg *config.Config
 
 var (
@@ -51,10 +50,8 @@ func errWithHints(msg string, hints ...string) error {
 }
 
 func errDBRequired() error {
-	return errWithHints("database URL is required",
-		"Provide "+codeStyle.Render("--db-url \"postgres://user@localhost:5432/dbname\""),
-		"Or set "+codeStyle.Render("NEXTASK_DB_URL")+" environment variable",
-		"Or set "+codeStyle.Render("db.url")+" in "+codeStyle.Render(".nextask.toml")+" (project) or global config",
+	return errWithHints("NEXTASK_DB_URL is required",
+		"Set it in the environment on the CLI host and each worker",
 	)
 }
 
@@ -80,10 +77,6 @@ var RootCmd = &cobra.Command{
 				"Local:  "+codeStyle.Render(".nextask.toml"),
 			)
 		}
-		// Apply persistent flag
-		if dbURL != "" {
-			cfg.SetDBURL(dbURL, "flag:--db-url")
-		}
 		return nil
 	},
 }
@@ -101,7 +94,6 @@ func Execute() {
 }
 
 func init() {
-	RootCmd.PersistentFlags().StringVar(&dbURL, "db-url", "", "PostgreSQL connection URL")
 	RootCmd.CompletionOptions.HiddenDefaultCmd = true
 }
 
@@ -124,8 +116,7 @@ func getErrorHints(err error) []string {
 	case errors.Is(err, db.ErrDBNotExist):
 		return []string{
 			"Create database: " + codeStyle.Render("createdb <dbname>"),
-			"Then: " + codeStyle.Render("nextask init db --db-url ..."),
-			"Or:   " + codeStyle.Render("nextask init db") + " (with config file)",
+			"Set NEXTASK_DB_URL, then run " + codeStyle.Render("nextask init db"),
 		}
 	case errors.Is(err, db.ErrConnRefused):
 		return []string{
@@ -137,8 +128,7 @@ func getErrorHints(err error) []string {
 		return []string{"Check your database credentials"}
 	case errors.Is(err, db.ErrNotInitialized):
 		return []string{
-			"Run: " + codeStyle.Render("nextask init db --db-url ..."),
-			"Or:  " + codeStyle.Render("nextask init db") + " (with config file)",
+			"Set NEXTASK_DB_URL, then run " + codeStyle.Render("nextask init db"),
 		}
 	}
 
