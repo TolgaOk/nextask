@@ -45,6 +45,9 @@ func TestWorkerStopsOnPermanentCompletionFailure(t *testing.T) {
 	if err := w.Run(ctx); err == nil || !strings.Contains(err.Error(), "result could not be saved") {
 		t.Fatalf("completion failure was swallowed: %v", err)
 	}
+	if names, err := w.journal.pending(); err != nil || len(names) != 1 {
+		t.Fatalf("unsaved result missing from journal: %v %v", names, err)
+	}
 	var status db.TaskStatus
 	if err := pool.QueryRow(ctx, "SELECT status FROM tasks WHERE id='still-pending'").Scan(&status); err != nil || status != db.StatusPending {
 		t.Fatalf("worker continued after permanent failure: %s %v", status, err)
@@ -89,7 +92,7 @@ func TestWorkerStopDuringCompletion(t *testing.T) {
 	if _, err := gate.Exec(ctx, "SELECT pg_advisory_xact_lock(7654321)"); err != nil {
 		t.Fatal(err)
 	}
-	task := &db.Task{ID: "stop-completion", Command: "true", Status: db.StatusRunning, SourceType: "noop"}
+	task := &db.Task{ID: "stop-completion", Command: "true", Status: db.StatusPending, SourceType: "noop"}
 	if err := db.CreateTask(ctx, pool, task); err != nil {
 		t.Fatal(err)
 	}
@@ -98,6 +101,10 @@ func TestWorkerStopDuringCompletion(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer w.Close()
+	task, err = db.ClaimTask(ctx, pool, w.ID, w.Info, nil)
+	if err != nil || task == nil {
+		t.Fatalf("claim: %v", err)
+	}
 	channel := db.ToWorkerChannel(w.ID)
 	notifier, err := db.NewNotifier(ctx, getTestDBURL(t), db.NewBackOff(time.Millisecond, time.Second), []string{channel})
 	if err != nil {
@@ -110,7 +117,7 @@ func TestWorkerStopDuringCompletion(t *testing.T) {
 	deadline := time.Now().Add(5 * time.Second)
 	for {
 		var blocked bool
-		if err := pool.QueryRow(ctx, "SELECT EXISTS (SELECT FROM pg_stat_activity WHERE wait_event = 'advisory' AND query LIKE 'UPDATE tasks%')").Scan(&blocked); err != nil {
+		if err := pool.QueryRow(ctx, "SELECT EXISTS (SELECT FROM pg_stat_activity WHERE wait_event = 'advisory' AND query LIKE '%UPDATE tasks%')").Scan(&blocked); err != nil {
 			t.Fatal(err)
 		}
 		if blocked {
@@ -152,14 +159,17 @@ func TestCompletionShutdownDeadline(t *testing.T) {
 	defer pool.Close()
 	ctx := context.Background()
 	_, err := pool.Exec(ctx, `CREATE FUNCTION test_completion_unavailable() RETURNS trigger LANGUAGE plpgsql AS $$
-		BEGIN RAISE EXCEPTION 'completion unavailable' USING ERRCODE = '08006'; END $$;
+		BEGIN
+			IF NEW.status = 'completed' THEN RAISE EXCEPTION 'completion unavailable' USING ERRCODE = '08006'; END IF;
+			RETURN NEW;
+		END $$;
 		CREATE TRIGGER test_unavailable BEFORE UPDATE ON tasks
 		FOR EACH ROW EXECUTE FUNCTION test_completion_unavailable()`)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer pool.Exec(ctx, "DROP TRIGGER test_unavailable ON tasks; DROP FUNCTION test_completion_unavailable()")
-	task := &db.Task{ID: "shutdown-deadline", Command: "true", Status: db.StatusRunning, SourceType: "noop"}
+	task := &db.Task{ID: "shutdown-deadline", Command: "true", Status: db.StatusPending, SourceType: "noop"}
 	if err := db.CreateTask(ctx, pool, task); err != nil {
 		t.Fatal(err)
 	}
@@ -168,10 +178,14 @@ func TestCompletionShutdownDeadline(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer w.Close()
+	task, err = db.ClaimTask(ctx, pool, w.ID, w.Info, nil)
+	if err != nil || task == nil {
+		t.Fatalf("claim: %v", err)
+	}
 	stopping, stop := context.WithCancel(ctx)
 	stop()
 	started := time.Now()
-	err = w.finishTask(stopping, task, &ExitResult{Code: 0}, false)
+	err = w.finishTask(stopping, task, taskExecution{result: &ExitResult{Code: 0}}, false)
 	if err == nil || !strings.Contains(err.Error(), "result could not be saved") {
 		t.Fatalf("shutdown silently discarded the result: %v", err)
 	}
@@ -181,5 +195,13 @@ func TestCompletionShutdownDeadline(t *testing.T) {
 	var status db.TaskStatus
 	if err := pool.QueryRow(ctx, "SELECT status FROM tasks WHERE id=$1", task.ID).Scan(&status); err != nil || status != db.StatusRunning {
 		t.Fatalf("failed write changed task state: %s %v", status, err)
+	}
+	names, err := w.journal.pending()
+	if err != nil || len(names) != 1 {
+		t.Fatalf("shutdown lost its journal: %v %v", names, err)
+	}
+	recorded, err := w.journal.read(names[0])
+	if err != nil || recorded.TaskID != task.ID || recorded.Status != db.StatusCompleted || recorded.ExitCode != 0 {
+		t.Fatalf("shutdown journal lost the outcome: %+v %v", recorded, err)
 	}
 }

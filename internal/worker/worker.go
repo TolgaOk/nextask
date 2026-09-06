@@ -29,6 +29,7 @@ type Worker struct {
 	tagFilter         map[string]string
 	backoffInitial    time.Duration
 	backoffMax        time.Duration
+	journal           completionJournal
 }
 
 // Config contains worker configuration options.
@@ -94,6 +95,7 @@ func New(ctx context.Context, cfg Config) (*Worker, error) {
 		tagFilter:         cfg.TagFilter,
 		backoffInitial:    backoffInitial,
 		backoffMax:        backoffMax,
+		journal:           newCompletionJournal(cfg.Workdir),
 	}, nil
 }
 
@@ -111,6 +113,10 @@ func (w *Worker) Close() {
 // Run starts the worker loop, processing tasks until context is cancelled.
 func (w *Worker) Run(parentCtx context.Context) error {
 	ctx, cancel := context.WithCancel(parentCtx)
+	defer cancel()
+	if err := w.journal.init(); err != nil {
+		return fmt.Errorf("initialize completion journal: %w", err)
+	}
 
 	hostname, _ := os.Hostname()
 
@@ -157,6 +163,12 @@ func (w *Worker) Run(parentCtx context.Context) error {
 	}()
 
 	fmt.Printf("Worker %s started\n", w.ID)
+
+	if err := awaitCompletion(ctx, cancel, notifier, toWorkerCh, func() error {
+		return w.recoverCompletions(ctx)
+	}); err != nil {
+		return err
+	}
 
 	claimBackoff := w.newBackoff()
 

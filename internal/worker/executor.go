@@ -31,13 +31,34 @@ type Executor struct {
 // ExitResult is shared with integration runtimes.
 type ExitResult = taskexec.Result
 
-// Execute runs a task and returns the exit result.
-func (e *Executor) Execute(ctx context.Context, task *db.Task) (result *ExitResult) {
+type taskExecution struct {
+	result    *ExitResult
+	directory string // Set only when this execution created the directory.
+}
+
+// Execute runs a task and applies standalone executor cleanup.
+// Workers use execute so they can journal the result before removing any files.
+func (e *Executor) Execute(ctx context.Context, task *db.Task) *ExitResult {
+	result, directory := e.execute(ctx, task)
+	e.cleanup(directory)
+	return result
+}
+
+func (e *Executor) cleanup(directory string) {
+	if e.RemoveWorkdir && directory != "" {
+		if err := os.RemoveAll(directory); err != nil {
+			fmt.Fprintf(os.Stderr, "cleanup failed: %v\n", err)
+		}
+	}
+}
+
+// execute returns the outcome and the directory owned by this execution.
+func (e *Executor) execute(ctx context.Context, task *db.Task) (result *ExitResult, directory string) {
 	taskDir := filepath.Join(e.Workdir, task.ID)
 	dbLog := NewDBLogger(e.Pool, task.ID)
 
 	if err := db.ValidateTaskID(task.ID); err != nil {
-		return &ExitResult{Code: 1, Err: err}
+		return &ExitResult{Code: 1, Err: err}, directory
 	}
 	command := task.Command
 	if task.ExecutionCommand != nil {
@@ -47,22 +68,14 @@ func (e *Executor) Execute(ctx context.Context, task *db.Task) (result *ExitResu
 		command, err = integrations.LegacyCommand(task.SourceType, task.SourceConfig, task.Command)
 		if err != nil {
 			dbLog.Log(ctx, "nextask", fmt.Sprintf("[error] prepare legacy task: %v", err))
-			return &ExitResult{Code: 1, Err: err}
+			return &ExitResult{Code: 1, Err: err}, directory
 		}
 	}
 	if err := e.createTaskDir(taskDir); err != nil {
 		dbLog.Log(ctx, "nextask", fmt.Sprintf("[error] %v", err))
-		return &ExitResult{Code: 1, Err: err}
+		return &ExitResult{Code: 1, Err: err}, directory
 	}
-	// Only remove directories created by this execution. A rejected existing
-	// directory may hold artifacts from a deleted or interrupted task.
-	if e.RemoveWorkdir {
-		defer func() {
-			if err := os.RemoveAll(taskDir); err != nil {
-				fmt.Fprintf(os.Stderr, "cleanup failed: %v\n", err)
-			}
-		}()
-	}
+	directory = taskDir
 
 	// Create task logger with file output now that taskDir exists
 	log, err := NewTaskLogger(e.Pool, task.ID, taskDir, LogConfig{
@@ -72,7 +85,7 @@ func (e *Executor) Execute(ctx context.Context, task *db.Task) (result *ExitResu
 	})
 	if err != nil {
 		dbLog.Log(ctx, "nextask", fmt.Sprintf("[error] create task logger: %v", err))
-		return &ExitResult{Code: 1, Err: err}
+		return &ExitResult{Code: 1, Err: err}, directory
 	}
 	defer func() {
 		if err := log.Close(); err != nil {
@@ -86,7 +99,7 @@ func (e *Executor) Execute(ctx context.Context, task *db.Task) (result *ExitResu
 	log.Log(ctx, "nextask", fmt.Sprintf("[info] running: %s", task.Command))
 	executable := *task
 	executable.Command = command
-	return e.runCommand(ctx, &executable, taskDir, log)
+	return e.runCommand(ctx, &executable, taskDir, log), directory
 }
 
 func (e *Executor) createTaskDir(taskDir string) error {

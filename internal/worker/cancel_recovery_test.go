@@ -52,11 +52,8 @@ func TestWorkerChecksCancellationBeforeExecution(t *testing.T) {
 	defer pool.Close()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	task := &db.Task{ID: "cancel-before-exec", Command: "touch payload-started", Status: db.StatusRunning, SourceType: "noop"}
+	task := &db.Task{ID: "cancel-before-exec", Command: "touch payload-started", Status: db.StatusPending, SourceType: "noop"}
 	if err := db.CreateTask(ctx, pool, task); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.RequestCancel(ctx, pool, task.ID); err != nil {
 		t.Fatal(err)
 	}
 	root := t.TempDir()
@@ -65,6 +62,13 @@ func TestWorkerChecksCancellationBeforeExecution(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer w.Close()
+	task, err = db.ClaimTask(ctx, pool, w.ID, w.Info, nil)
+	if err != nil || task == nil {
+		t.Fatalf("claim: %v", err)
+	}
+	if _, err := db.RequestCancel(ctx, pool, task.ID); err != nil {
+		t.Fatal(err)
+	}
 	channel := db.ToWorkerChannel(w.ID)
 	notifier, err := db.NewNotifier(ctx, getTestDBURL(t), db.NewBackOff(time.Millisecond, time.Second), []string{channel})
 	if err != nil {
