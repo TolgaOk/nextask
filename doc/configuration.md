@@ -79,7 +79,8 @@ See [integrations](integrations.md) for Git and S3 usage and [upgrading](upgradi
 Each execution creates a fresh `<worker.workdir>/<TASK_ID>` directory. If that path
 already exists, the task fails with a clear error and preserves the existing files.
 Move that directory aside or use a new task ID. `worker --rm` removes only the
-directory created by that execution, after its integrations and log flushing finish.
+directory created by that execution, after its integrations, log flushing, and
+completion journal write finish.
 
 Log batches retry temporary database failures. Shutdown allows up to five seconds
 to flush pending batches; longer outages can leave output only in local task logs.
@@ -87,18 +88,31 @@ Those files are also removed when `--rm` is selected. Local log write or close
 failures are reported and fail an otherwise successful task; an existing payload
 failure code is preserved.
 
-A worker retains a finished result and retries temporary database failures before
-claiming another task. Worker shutdown allows another 30 seconds to save that
-result. Permanent errors or an exhausted shutdown deadline stop the worker with
-an error. A terminal status notification is sent only after the database write
-succeeds. Results awaiting that write are held in memory; hard kills or an outage
-that outlasts shutdown can still leave a task stale.
+A worker saves each finished result to `<worker.workdir>/.nextask/completions/`
+before removing task files or writing the result to the database. Temporary database
+failures retry before the worker claims another task. Shutdown allows another 30
+seconds to save the result. Permanent errors or an exhausted shutdown deadline stop
+the worker with an error and retain the journal. Terminal status notifications follow
+a confirmed database write.
+
+Use a separate workdir for each database. On startup, a worker replays pending
+records from the same workdir before claiming new tasks, then removes acknowledged
+records. Replay restores status, exit code, and finish time without rerunning
+commands or integrations. Records identify the original claim, so deleted tasks and reused task IDs cannot be overwritten. Already-saved
+results are safe to replay. No new flag or schema migration is needed.
+
+`--rm` preserves the journal. A journal write failure preserves task files and stops
+the worker; a corrupt record blocks startup recovery and reports its path. Replay
+never removes task directories, so a crash between journaling and cleanup can leave
+files behind. Logs and artifacts are not part of the completion journal.
 
 Workers check stored cancellation requests before execution and once per second
 while a task runs. Notifications speed up cancellation, and status checks recover
 missed requests and confirmations. Worker retries use the configured
 `retry.initial_interval` and `retry.max_interval`.
 
-Abrupt instance loss preserves completed uploads. A hard-killed worker cannot
-finalize its task; the task becomes stale and is not automatically retried. Killing
-only the worker process can leave its child commands running on the same host.
+Recovery requires a published journal record and surviving storage. Use a persistent
+`--workdir` if results must survive reboot or instance replacement; the default
+`/tmp/nextask` may be cleared. A crash before journaling can still leave a task stale.
+Commands are never automatically retried, and killing only the worker process can
+leave its child commands running. Abrupt instance loss preserves completed uploads.
