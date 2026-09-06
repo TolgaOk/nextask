@@ -1,4 +1,4 @@
-SELECT t.id, t.command, t.execution_command,
+SELECT t.id, t.command, t.execution_command, t.cleanup_timeout_ms,
     CASE
         WHEN t.status = 'running' AND w.last_heartbeat < NOW() - $2::interval THEN 'stale'
         ELSE t.status

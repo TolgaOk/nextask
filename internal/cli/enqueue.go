@@ -103,8 +103,8 @@ var enqueueCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		if prepared.Command != task.Command {
-			if _, err := tx.Exec(ctx, "UPDATE tasks SET execution_command = $2, source_type = 'command' WHERE id = $1", task.ID, prepared.Command); err != nil {
+		if prepared.Command != task.Command || prepared.CleanupTimeout != 0 {
+			if _, err := tx.Exec(ctx, "UPDATE tasks SET execution_command = $2, cleanup_timeout_ms = $3, source_type = 'command' WHERE id = $1", task.ID, prepared.Command, prepared.CleanupTimeout.Milliseconds()); err != nil {
 				return err
 			}
 		}

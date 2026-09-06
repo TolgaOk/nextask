@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 )
 
 // Task is the execution information an integration may prepare.
 type Task struct {
-	ID, Command string
+	ID, Command    string
+	CleanupTimeout time.Duration
 }
 
 // Integration validates options and prepares a command. Runtime setup and
@@ -97,6 +99,9 @@ func (p *Plan) Prepare(ctx context.Context, task Task) (Task, error) {
 		task, err = s.module.Prepare(ctx, task, s.options)
 		if err != nil {
 			return Task{}, fmt.Errorf("%s: %w", s.name, err)
+		}
+		if task.CleanupTimeout < 0 || task.CleanupTimeout > 24*time.Hour {
+			return Task{}, fmt.Errorf("%s: combined cleanup must be between 0 and 24h", s.name)
 		}
 		if task.ID != id {
 			return Task{}, fmt.Errorf("%s changed task identity", s.name)

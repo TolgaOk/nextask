@@ -7,14 +7,13 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/TolgaOk/nextask/internal/db"
 	"github.com/TolgaOk/nextask/internal/integrations"
+	"github.com/TolgaOk/nextask/internal/taskexec"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -28,19 +27,8 @@ type Executor struct {
 	LogBufferSize    int
 }
 
-// ExitResult contains information about how a command exited.
-type ExitResult struct {
-	Code   int
-	Signal os.Signal
-	Err    error
-}
-
-func (r *ExitResult) String() string {
-	if r.Signal != nil {
-		return fmt.Sprintf("signal: %s", r.Signal)
-	}
-	return fmt.Sprintf("exit code: %d", r.Code)
-}
+// ExitResult is shared with integration runtimes.
+type ExitResult = taskexec.Result
 
 // Execute runs a task and returns the exit result.
 func (e *Executor) Execute(ctx context.Context, task *db.Task) *ExitResult {
@@ -84,101 +72,26 @@ func (e *Executor) Execute(ctx context.Context, task *db.Task) *ExitResult {
 }
 
 func (e *Executor) runCommand(ctx context.Context, task *db.Task, taskDir string, log Logger) *ExitResult {
-	cmd := exec.CommandContext(ctx, "sh", "-c", task.Command)
-	cmd.Dir = taskDir
-	cmd.Env = append(cmd.Environ(), "NEXTASK_TASK_ID="+task.ID, "NEXTASK_DB_URL="+e.DBURL)
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-
-	processDone := make(chan struct{})
-
-	cmd.Cancel = func() error {
-		if cmd.Process == nil {
-			return os.ErrProcessDone
-		}
-
-		pgid, err := syscall.Getpgid(cmd.Process.Pid)
-		if err != nil {
-			if errors.Is(err, syscall.ESRCH) {
-				return os.ErrProcessDone
-			}
-			return err
-		}
-
-		if err := syscall.Kill(-pgid, syscall.SIGINT); err != nil {
-			if errors.Is(err, syscall.ESRCH) {
-				return os.ErrProcessDone
-			}
-			return err
-		}
-
-		go func() {
-			timer := time.NewTimer(5 * time.Second)
-			defer timer.Stop()
-			select {
-			case <-timer.C:
-				_ = syscall.Kill(-pgid, syscall.SIGKILL)
-			case <-processDone:
-			}
-		}()
-
-		return nil
-	}
-	cmd.WaitDelay = 10 * time.Second
-
-	stdout, err := cmd.StdoutPipe()
+	executable, err := os.Executable()
 	if err != nil {
 		return &ExitResult{Code: 1, Err: err}
 	}
-	stderr, err := cmd.StderrPipe()
-	if err != nil {
-		return &ExitResult{Code: 1, Err: err}
-	}
-
-	if err := cmd.Start(); err != nil {
-		return &ExitResult{Code: 1, Err: err}
-	}
-
+	stdout, outWriter := io.Pipe()
+	stderr, errWriter := io.Pipe()
 	var wg sync.WaitGroup
 	wg.Add(2)
-
-	go func() {
-		defer wg.Done()
-		scanLines(ctx, stdout, "stdout", log)
-	}()
-
-	go func() {
-		defer wg.Done()
-		scanLines(ctx, stderr, "stderr", log)
-	}()
-
+	go func() { defer wg.Done(); defer stdout.Close(); scanLines(ctx, stdout, "stdout", log) }()
+	go func() { defer wg.Done(); defer stderr.Close(); scanLines(ctx, stderr, "stderr", log) }()
+	result := taskexec.Run(ctx, taskexec.Command{
+		Text: task.Command, Dir: taskDir,
+		Env:    append(os.Environ(), "NEXTASK_TASK_ID="+task.ID, "NEXTASK_DB_URL="+e.DBURL, "NEXTASK_EXECUTABLE="+executable),
+		Stdout: outWriter, Stderr: errWriter,
+		CleanupTimeout: time.Duration(task.CleanupTimeoutMS) * time.Millisecond,
+	})
+	outWriter.Close()
+	errWriter.Close()
 	wg.Wait()
-
-	err = cmd.Wait()
-	close(processDone)
-
-	if errors.Is(err, exec.ErrWaitDelay) {
-		log.Log(ctx, "nextask", "[warn] pipes forced closed after WaitDelay (orphaned child?)")
-		if cmd.ProcessState != nil && cmd.ProcessState.ExitCode() == 0 {
-			return &ExitResult{Code: 0, Err: err}
-		}
-		if cmd.ProcessState != nil {
-			return &ExitResult{Code: cmd.ProcessState.ExitCode(), Err: err}
-		}
-		return &ExitResult{Code: 1, Err: err}
-	}
-
-	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			if status, ok := exitErr.Sys().(syscall.WaitStatus); ok && status.Signaled() {
-				sig := status.Signal()
-				return &ExitResult{Code: -int(sig), Signal: sig}
-			}
-			return &ExitResult{Code: exitErr.ExitCode()}
-		}
-		return &ExitResult{Code: 1, Err: err}
-	}
-
-	return &ExitResult{Code: 0}
+	return result
 }
 
 const maxLineSize = 1024 * 1024 // 1MB

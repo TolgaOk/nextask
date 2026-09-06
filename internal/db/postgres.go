@@ -67,7 +67,7 @@ func wrapPgError(err error) error {
 
 // Migrate runs database migrations to create required tables.
 func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
-	migrationFiles := []string{"001_init.sql", "002_workers.sql", "003_log_seq.sql", "004_execution_command.sql"}
+	migrationFiles := []string{"001_init.sql", "002_workers.sql", "003_log_seq.sql", "004_execution_command.sql", "005_cleanup_timeout.sql"}
 	for _, file := range migrationFiles {
 		sql, err := migrations.FS.ReadFile(file)
 		if err != nil {

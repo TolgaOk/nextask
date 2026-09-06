@@ -30,6 +30,7 @@ type Task struct {
 	ID               string
 	Command          string
 	ExecutionCommand *string
+	CleanupTimeoutMS int64
 	Status           TaskStatus
 	SourceType       string
 	SourceConfig     json.RawMessage
