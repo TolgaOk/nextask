@@ -117,8 +117,9 @@ func TestCreateSnapshot_CleanRepo(t *testing.T) {
 	if result.Commit != expectedHead {
 		t.Errorf("Commit = %v, want %v", result.Commit, expectedHead)
 	}
-	if result.Ref != "refs/nextask/test1234" {
-		t.Errorf("Ref = %v, want refs/nextask/test1234", result.Ref)
+	expectedRef := "refs/heads/" + filepath.Base(repoPath) + "/test1234"
+	if result.Ref != expectedRef {
+		t.Errorf("Ref = %v, want %v", result.Ref, expectedRef)
 	}
 }
 
