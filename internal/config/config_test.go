@@ -126,8 +126,8 @@ url = "postgres://user@localhost/testdb"
 	if cfg.Source.Remote != "" {
 		t.Errorf("expected empty Source.Remote, got %q", cfg.Source.Remote)
 	}
-	if cfg.Worker.Workdir != "" {
-		t.Errorf("expected empty Worker.Workdir, got %q", cfg.Worker.Workdir)
+	if cfg.Worker.Workdir != DefaultWorkdir {
+		t.Errorf("expected default Worker.Workdir, got %q", cfg.Worker.Workdir)
 	}
 }
 

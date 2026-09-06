@@ -65,8 +65,8 @@ func SetVersion(v string) {
 
 // RootCmd is the base command for the nextask CLI.
 var RootCmd = &cobra.Command{
-	Use:   "nextask",
-	Short: "Distributed task queue with source snapshotting and full log capture",
+	Use:           "nextask",
+	Short:         "Distributed task queue with source snapshotting and full log capture",
 	SilenceErrors: true,
 	SilenceUsage:  true,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
@@ -74,14 +74,15 @@ var RootCmd = &cobra.Command{
 		cfg, err = config.Load()
 		if err != nil {
 			return withHints(err,
-				"Check TOML syntax in your config files",
+				"Check TOML syntax and values in your config files",
+				"Shared: "+codeStyle.Render("~/.config/tasktools/config.toml or .tasktools.toml"),
 				"Global: "+codeStyle.Render("~/.config/nextask/global.toml"),
 				"Local:  "+codeStyle.Render(".nextask.toml"),
 			)
 		}
 		// Apply persistent flag
 		if dbURL != "" {
-			cfg.DB.URL = dbURL
+			cfg.SetDBURL(dbURL, "flag:--db-url")
 		}
 		return nil
 	},

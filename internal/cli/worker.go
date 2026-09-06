@@ -10,23 +10,23 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/moby/moby/pkg/namesgenerator"
 	"github.com/TolgaOk/nextask/internal/db"
 	"github.com/TolgaOk/nextask/internal/worker"
+	"github.com/jackc/pgx/v5"
+	"github.com/moby/moby/pkg/namesgenerator"
 	"github.com/spf13/cobra"
 	str2duration "github.com/xhit/go-str2duration/v2"
 )
 
 var (
-	workdir        string
-	once           bool
-	daemon         bool
-	rm             bool
-	exitIfIdle     string
-	workerID       string // hidden, used by daemon mode
-	workerTimeout  string
-	workerFilters  []string
+	workdir       string
+	once          bool
+	daemon        bool
+	rm            bool
+	exitIfIdle    string
+	workerID      string // hidden, used by daemon mode
+	workerTimeout string
+	workerFilters []string
 )
 
 var workerCmd = &cobra.Command{
@@ -41,10 +41,6 @@ var workerCmd = &cobra.Command{
 		// Apply command-specific flag
 		if workdir != "" {
 			cfg.Worker.Workdir = workdir
-		}
-		// Use default if still empty
-		if cfg.Worker.Workdir == "" {
-			cfg.Worker.Workdir = "/tmp/nextask"
 		}
 
 		// Daemon mode: spawn child process without --daemon and exit

@@ -2,7 +2,10 @@
 //
 // Configuration is loaded with the following precedence (highest wins):
 //
-//	CLI flags > env vars > .nextask.toml (project-local) > ~/.config/nextask/global.toml > defaults
+//	CLI flags > env vars > project files > user files > defaults
+//
+// Within each scope, the Nextask file overrides [nextask] in the shared tasktools
+// file, which overrides its [defaults]. Other tools' sections are ignored.
 //
 // Config file format (same for both global and local):
 //
@@ -64,6 +67,7 @@ const DefaultHeartbeatInterval = 1 * time.Minute
 // DefaultStaleThreshold is the number of missed heartbeats before a task is marked stale.
 const DefaultStaleThreshold = 3
 
+const DefaultWorkdir = "/tmp/nextask"
 const DefaultLogFlushLines = 100
 const DefaultLogFlushInterval = 500 * time.Millisecond
 const DefaultLogBufferSize = 10000
@@ -82,6 +86,7 @@ type Config struct {
 
 	// LoadedFiles tracks which config files were loaded (not serialized to TOML).
 	LoadedFiles []string `toml:"-"`
+	sources     map[string]string
 }
 
 // LocalFileName is the name of the per-project config file.
@@ -101,41 +106,86 @@ func LocalPath() string {
 	return LocalFileName
 }
 
-// Load reads configuration from the global and local config files, then applies
-// env var overrides. Local config values override global values.
-// Returns an empty Config if neither file exists.
-func Load() (*Config, error) {
-	cfg := &Config{}
+// SharedLocalFileName is the optional shared project config file.
+const SharedLocalFileName = ".tasktools.toml"
 
-	// Layer 1: global config
-	globalPath, err := GlobalPath()
-	if err == nil {
-		if err := decodeIfExists(globalPath, cfg); err != nil {
+// SharedGlobalPath returns the optional shared user config path.
+func SharedGlobalPath() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".config", "tasktools", "config.toml"), nil
+}
+
+type configFile struct {
+	path   string
+	shared bool
+}
+
+// Load layers shared and standalone user/project files, then environment values.
+func Load() (*Config, error) {
+	global, _ := GlobalPath()
+	shared, _ := SharedGlobalPath()
+	return loadFiles([]configFile{
+		{shared, true}, {global, false},
+		{SharedLocalFileName, true}, {LocalPath(), false},
+	})
+}
+
+func loadFiles(files []configFile) (*Config, error) {
+	cfg := &Config{}
+	for _, file := range files {
+		if file.path == "" {
+			continue
+		}
+		var err error
+		if file.shared {
+			err = decodeShared(file.path, cfg)
+		} else {
+			err = decodeIfExists(file.path, cfg)
+		}
+		if err != nil {
 			return nil, err
 		}
 	}
-
-	// Layer 2: local config (overrides global)
-	if err := decodeIfExists(LocalPath(), cfg); err != nil {
+	applyEnv(cfg)
+	if err := cfg.validate(); err != nil {
 		return nil, err
 	}
-
-	// Layer 3: env vars (override both)
-	applyEnv(cfg)
 	return cfg, nil
 }
 
-// LoadFrom reads configuration from a specific file path and applies env var overrides.
-// Returns an empty Config if the file doesn't exist.
-func LoadFrom(path string) (*Config, error) {
-	cfg := &Config{}
-
-	if err := decodeIfExists(path, cfg); err != nil {
-		return nil, err
+func decodeShared(path string, cfg *Config) error {
+	var shared struct {
+		Defaults struct {
+			DBURL string `toml:"db_url"`
+		} `toml:"defaults"`
+		Nextask toml.Primitive `toml:"nextask"`
 	}
+	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	meta, err := toml.DecodeFile(path, &shared)
+	if err != nil {
+		return fmt.Errorf("%s: %w", path, err)
+	}
+	if meta.IsDefined("defaults", "db_url") {
+		cfg.SetDBURL(shared.Defaults.DBURL, path+" [defaults.db_url]")
+	}
+	if meta.IsDefined("nextask") {
+		if err := meta.PrimitiveDecode(shared.Nextask, cfg); err != nil {
+			return fmt.Errorf("%s: %w", path, err)
+		}
+		cfg.recordSources(meta, path, []string{"nextask"})
+	}
+	cfg.LoadedFiles = append(cfg.LoadedFiles, path)
+	return nil
+}
 
-	applyEnv(cfg)
-	return cfg, nil
+// LoadFrom reads one standalone Nextask file, then applies environment and defaults.
+func LoadFrom(path string) (*Config, error) {
+	return loadFiles([]configFile{{path, false}})
 }
 
 // decodeIfExists decodes a TOML file into cfg if the file exists.
@@ -144,45 +194,60 @@ func decodeIfExists(path string, cfg *Config) error {
 	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
-	if _, err := toml.DecodeFile(path, cfg); err != nil {
+	meta, err := toml.DecodeFile(path, cfg)
+	if err != nil {
 		return fmt.Errorf("%s: %w", path, err)
 	}
 	cfg.LoadedFiles = append(cfg.LoadedFiles, path)
+	cfg.recordSources(meta, path, nil)
 	return nil
 }
 
 // applyEnv overrides config values with environment variables if set.
 func applyEnv(cfg *Config) {
 	if v := os.Getenv("NEXTASK_DB_URL"); v != "" {
-		cfg.DB.URL = v
+		cfg.SetDBURL(v, "env:NEXTASK_DB_URL")
 	}
 	if v := os.Getenv("NEXTASK_SOURCE_REMOTE"); v != "" {
 		cfg.Source.Remote = v
+		cfg.setSource("source.remote", "env:NEXTASK_SOURCE_REMOTE")
 	}
 	if v := os.Getenv("NEXTASK_WORKER_WORKDIR"); v != "" {
 		cfg.Worker.Workdir = v
+		cfg.setSource("worker.workdir", "env:NEXTASK_WORKER_WORKDIR")
 	}
-	// Apply defaults
+	// Preserve the existing convention that zero values select defaults.
+	if cfg.Worker.Workdir == "" {
+		cfg.Worker.Workdir = DefaultWorkdir
+		cfg.setSource("worker.workdir", "default")
+	}
 	if cfg.Worker.HeartbeatInterval == 0 {
 		cfg.Worker.HeartbeatInterval = DefaultHeartbeatInterval
+		cfg.setSource("worker.heartbeat_interval", "default")
 	}
 	if cfg.Worker.StaleThreshold == 0 {
 		cfg.Worker.StaleThreshold = DefaultStaleThreshold
+		cfg.setSource("worker.stale_threshold", "default")
 	}
 	if cfg.Worker.LogFlushLines == 0 {
 		cfg.Worker.LogFlushLines = DefaultLogFlushLines
+		cfg.setSource("worker.log_flush_lines", "default")
 	}
 	if cfg.Worker.LogFlushInterval == 0 {
 		cfg.Worker.LogFlushInterval = DefaultLogFlushInterval
+		cfg.setSource("worker.log_flush_interval", "default")
 	}
 	if cfg.Worker.LogBufferSize == 0 {
 		cfg.Worker.LogBufferSize = DefaultLogBufferSize
+		cfg.setSource("worker.log_buffer_size", "default")
 	}
 	if cfg.Retry.InitialInterval == 0 {
 		cfg.Retry.InitialInterval = 500 * time.Millisecond
+		cfg.setSource("retry.initial_interval", "default")
 	}
 	if cfg.Retry.MaxInterval == 0 {
 		cfg.Retry.MaxInterval = 30 * time.Second
+		cfg.setSource("retry.max_interval", "default")
 	}
 	normalizePaths(cfg)
 }

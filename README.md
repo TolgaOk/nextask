@@ -51,11 +51,16 @@ npx skills add https://github.com/TolgaOk/nextask/skills
 Config files:
 
 ```
-~/.config/nextask/global.toml            # global defaults
-.nextask.toml                            # per-project
+~/.config/tasktools/config.toml          # optional shared user config
+~/.config/nextask/global.toml             # Nextask user config
+.tasktools.toml                          # optional shared project config
+.nextask.toml                            # Nextask project config
 ```
 
-> **Priority:** CLI flags > environment variables > `.nextask.toml` > `global.toml`.
+Priority is CLI flags, environment variables, project files, user files, then
+built-in defaults. Within each scope, the Nextask file overrides the shared
+`[nextask]` section, which overrides shared `[defaults]`. Project files are read
+from the current directory. Missing files are optional.
 
 Example config:
 
@@ -74,3 +79,37 @@ log_flush_lines = 100                            # flush after this many lines
 log_flush_interval = "500ms"                     # maximum time between flushes
 log_buffer_size = 10000                          # log-line channel capacity
 ```
+
+Shared config uses the same Nextask sections under `[nextask]`:
+
+```toml
+[defaults]
+db_url = "postgres://user@localhost:5432/tasktools"
+
+[nextask.worker]
+workdir = "~/tasks"
+
+# Optional Nextask-specific override of defaults.db_url:
+# [nextask.db]
+# url = "postgres://user@localhost:5432/nextask"
+```
+
+Nextask reads only shared defaults and its own section. Standalone Nextask config
+continues to work without a shared file or companion tools. Relative paths resolve
+from the current directory; `~/` expands to the current user's home. Empty
+environment variables are ignored. Zero numeric or duration settings select the
+built-in defaults; negative values and malformed settings produce errors.
+
+```sh
+nextask config show --sources
+```
+
+This prints effective values and their origins. `nextask config` also shows
+effective values. Credentials, URL query values, and fragments are redacted;
+keyword-style database connection strings are hidden entirely.
+
+Tools may use the worker's `NEXTASK_TASK_ID` as their own caller-supplied ID and
+`NEXTASK_DB_URL` as their database connection. They own their tables and migrations.
+The join key in Nextask is `tasks.id`; task metadata includes `command`, `status`,
+`tags`, `exit_code`, `created_at`, `started_at`, and `finished_at`. No Nextask foreign
+key is required in another tool's tables.
