@@ -27,18 +27,19 @@ type WorkerInfo struct {
 
 // Task represents a queued command with its execution state and metadata.
 type Task struct {
-	ID           string
-	Command      string
-	Status       TaskStatus
-	SourceType   string
-	SourceConfig json.RawMessage
-	Tags         map[string]string
-	WorkerID     *string
-	WorkerInfo   *WorkerInfo
-	ExitCode     *int
-	CreatedAt    time.Time
-	StartedAt    *time.Time
-	FinishedAt   *time.Time
+	ID               string
+	Command          string
+	ExecutionCommand *string
+	Status           TaskStatus
+	SourceType       string
+	SourceConfig     json.RawMessage
+	Tags             map[string]string
+	WorkerID         *string
+	WorkerInfo       *WorkerInfo
+	ExitCode         *int
+	CreatedAt        time.Time
+	StartedAt        *time.Time
+	FinishedAt       *time.Time
 }
 
 // TaskLog represents a captured stdout/stderr line from task execution.

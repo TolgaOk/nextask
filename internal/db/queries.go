@@ -31,10 +31,10 @@ func CreateTask(ctx context.Context, pool Execer, task *Task) error {
 	}
 
 	_, err = pool.Exec(ctx, `
-		INSERT INTO tasks (id, command, status, tags, source_type, source_config)
-		VALUES ($1, $2, $3, $4, $5, $6)
+		INSERT INTO tasks (id, command, status, tags, source_type, source_config, execution_command)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
 	`, task.ID, task.Command, task.Status, tagsJSON,
-		task.SourceType, task.SourceConfig)
+		task.SourceType, task.SourceConfig, task.ExecutionCommand)
 
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == "tasks_pkey" {
@@ -154,7 +154,7 @@ func scanTask(row scannable) (*Task, error) {
 	var t Task
 	var tagsJSON, wiJSON []byte
 	err := row.Scan(
-		&t.ID, &t.Command, &t.Status,
+		&t.ID, &t.Command, &t.ExecutionCommand, &t.Status,
 		&t.SourceType, &t.SourceConfig,
 		&tagsJSON, &t.WorkerID, &wiJSON, &t.ExitCode,
 		&t.CreatedAt, &t.StartedAt, &t.FinishedAt,

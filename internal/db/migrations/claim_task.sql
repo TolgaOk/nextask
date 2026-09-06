@@ -8,4 +8,4 @@ WHERE id = (
     LIMIT 1
     FOR UPDATE SKIP LOCKED
 )
-RETURNING id, command, status, source_type, source_config, tags, worker_id, worker_info, exit_code, created_at, started_at, finished_at
+RETURNING id, command, execution_command, status, source_type, source_config, tags, worker_id, worker_info, exit_code, created_at, started_at, finished_at

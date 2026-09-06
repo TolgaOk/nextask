@@ -51,7 +51,7 @@ func wrapPgError(err error) error {
 			return ErrDBNotExist
 		case "28P01", "28000": // invalid_password, invalid_authorization_specification
 			return ErrAuthFailed
-		case "42P01": // undefined_table
+		case "42P01", "42703": // missing table or column after a schema upgrade
 			return ErrNotInitialized
 		}
 	}
@@ -67,7 +67,7 @@ func wrapPgError(err error) error {
 
 // Migrate runs database migrations to create required tables.
 func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
-	migrationFiles := []string{"001_init.sql", "002_workers.sql", "003_log_seq.sql"}
+	migrationFiles := []string{"001_init.sql", "002_workers.sql", "003_log_seq.sql", "004_execution_command.sql"}
 	for _, file := range migrationFiles {
 		sql, err := migrations.FS.ReadFile(file)
 		if err != nil {
