@@ -12,7 +12,7 @@
 //	[db]
 //	url = "postgres://user@localhost:5432/nextask"
 //
-//	[source]
+//	[integrations.git]
 //	remote = "~/.nextask/source.git"
 //
 //	[worker]
@@ -20,7 +20,7 @@
 //
 // Environment variables:
 //   - NEXTASK_DB_URL
-//   - NEXTASK_SOURCE_REMOTE
+//   - NEXTASK_GIT_REMOTE (NEXTASK_SOURCE_REMOTE remains an alias)
 //   - NEXTASK_WORKER_WORKDIR
 package config
 
@@ -77,18 +77,12 @@ func (w WorkerConfig) StaleDuration() time.Duration {
 	return w.HeartbeatInterval * time.Duration(w.StaleThreshold)
 }
 
-// EnqueueConfig selects default integrations. Higher-priority lists replace lower ones.
-type EnqueueConfig struct {
-	With []string `toml:"with"`
-}
-
 // Config holds the complete nextask configuration.
 type Config struct {
 	DB           DBConfig                     `toml:"db"`
 	Source       SourceConfig                 `toml:"source"`
 	Worker       WorkerConfig                 `toml:"worker"`
 	Retry        RetryConfig                  `toml:"retry"`
-	Enqueue      EnqueueConfig                `toml:"enqueue"`
 	Integrations map[string]map[string]string `toml:"integrations"`
 
 	// LoadedFiles tracks which config files were loaded (not serialized to TOML).
@@ -187,6 +181,9 @@ func decodeShared(path string, cfg *Config) error {
 			return fmt.Errorf("%s: %w", path, err)
 		}
 		cfg.Integrations = mergeIntegrationOptions(previous, cfg.Integrations)
+		if meta.IsDefined("nextask", "enqueue", "with") {
+			return fmt.Errorf("%s: select integrations explicitly with --with; enqueue.with is unsupported", path)
+		}
 		cfg.recordSources(meta, path, []string{"nextask"})
 		cfg.applySourceAlias(meta, path, []string{"nextask"})
 	}
@@ -212,6 +209,9 @@ func decodeIfExists(path string, cfg *Config) error {
 		return fmt.Errorf("%s: %w", path, err)
 	}
 	cfg.Integrations = mergeIntegrationOptions(previous, cfg.Integrations)
+	if meta.IsDefined("enqueue", "with") {
+		return fmt.Errorf("%s: select integrations explicitly with --with; enqueue.with is unsupported", path)
+	}
 	cfg.LoadedFiles = append(cfg.LoadedFiles, path)
 	cfg.recordSources(meta, path, nil)
 	cfg.applySourceAlias(meta, path, nil)

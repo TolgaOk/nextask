@@ -33,26 +33,17 @@ type step struct {
 }
 type Plan struct{ steps []step }
 
-// Resolve selects integrations and validates every option before preparation.
-// Defaults come first. Additions preserve order; explicit exclusions remove them.
-func (r Registry) Resolve(defaults, with, without []string, configured map[string]map[string]string, overrides []string) (*Plan, error) {
+// Resolve validates explicitly selected integrations and their options.
+// Configuration supplies options; it never enables an integration.
+func (r Registry) Resolve(with []string, configured map[string]map[string]string, overrides []string) (*Plan, error) {
 	names := []string{}
-	for _, name := range append(slices.Clone(defaults), with...) {
+	for _, name := range with {
 		if _, ok := r[name]; !ok {
 			return nil, fmt.Errorf("unknown integration %q", name)
 		}
 		if !slices.Contains(names, name) {
 			names = append(names, name)
 		}
-	}
-	for _, name := range without {
-		if _, ok := r[name]; !ok {
-			return nil, fmt.Errorf("unknown integration %q", name)
-		}
-		if slices.Contains(with, name) {
-			return nil, fmt.Errorf("integration %q selected with both --with and --without", name)
-		}
-		names = slices.DeleteFunc(names, func(n string) bool { return n == name })
 	}
 	options := map[string]Options{}
 	for name, values := range configured {

@@ -66,7 +66,7 @@ func SetVersion(v string) {
 // RootCmd is the base command for the nextask CLI.
 var RootCmd = &cobra.Command{
 	Use:           "nextask",
-	Short:         "Distributed task queue with source snapshotting and full log capture",
+	Short:         "Distributed task queue with optional integrations and full log capture",
 	SilenceErrors: true,
 	SilenceUsage:  true,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {

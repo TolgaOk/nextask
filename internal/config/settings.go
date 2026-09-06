@@ -21,7 +21,6 @@ type Setting struct {
 func (c *Config) Settings() []Setting {
 	settings := []Setting{
 		{Key: "db.url", Value: redactURL(c.DB.URL, true)},
-		{Key: "enqueue.with", Value: c.Enqueue.With},
 		{Key: "source.remote", Value: redactURL(c.Source.Remote, false)},
 		{Key: "worker.workdir", Value: c.Worker.Workdir},
 		{Key: "worker.heartbeat_interval", Value: c.Worker.HeartbeatInterval.String()},

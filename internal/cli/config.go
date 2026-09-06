@@ -2,7 +2,6 @@ package cli
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/spf13/cobra"
 )
@@ -25,17 +24,10 @@ func showConfig(cmd *cobra.Command, args []string) error {
 	sources, _ := cmd.Flags().GetBool("sources")
 	for _, setting := range cfg.Settings() {
 		var value string
-		switch v := setting.Value.(type) {
-		case string:
+		if v, ok := setting.Value.(string); ok {
 			value = fmt.Sprintf("%q", v)
-		case []string:
-			quoted := make([]string, len(v))
-			for i, s := range v {
-				quoted[i] = fmt.Sprintf("%q", s)
-			}
-			value = "[" + strings.Join(quoted, ", ") + "]"
-		default:
-			value = fmt.Sprint(v)
+		} else {
+			value = fmt.Sprint(setting.Value)
 		}
 		line := setting.Key + " = " + value
 		if sources {

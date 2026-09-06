@@ -18,7 +18,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// Executor handles task execution including source fetching and command running.
+// Executor runs task commands and captures their output.
 type Executor struct {
 	Pool             *pgxpool.Pool
 	DBURL            string

@@ -33,7 +33,7 @@ func TestSelectionAndComposition(t *testing.T) {
 	calls := []string{}
 	registry := Registry{"first": fakeIntegration{"first", &calls, false}, "second": fakeIntegration{"second", &calls, false}}
 	settings := map[string]map[string]string{"first": {"value": "configured"}}
-	plan, err := registry.Resolve([]string{"first"}, []string{"first", "second"}, nil, settings, []string{"first.value=override=with=equals"})
+	plan, err := registry.Resolve([]string{"first", "first", "second"}, settings, []string{"first.value=override=with=equals"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,13 +50,13 @@ func TestSelectionAndComposition(t *testing.T) {
 	if settings["first"]["value"] != "configured" {
 		t.Fatal("selection mutated config")
 	}
-	plan, err = registry.Resolve([]string{"first"}, nil, []string{"first"}, settings, nil)
+	plan, err = registry.Resolve(nil, settings, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	task, err = plan.Prepare(context.Background(), Task{ID: "plain", Command: "job"})
 	if err != nil || task.Command != "job" {
-		t.Fatalf("excluded integration still ran: %+v %v", task, err)
+		t.Fatalf("config enabled an integration: %+v %v", task, err)
 	}
 }
 
@@ -64,19 +64,17 @@ func TestValidateBeforePreparation(t *testing.T) {
 	calls := []string{}
 	registry := Registry{"git": fakeIntegration{"git", &calls, false}}
 	for _, tc := range []struct {
-		defaults, with, without, overrides []string
-		config                             map[string]map[string]string
+		with, overrides []string
+		config          map[string]map[string]string
 	}{
 		{with: []string{"unknown"}},
-		{without: []string{"unknown"}},
-		{with: []string{"git"}, without: []string{"git"}},
 		{with: []string{"git"}, overrides: []string{"broken"}},
 		{overrides: []string{"git.value=x"}},
 		{with: []string{"git"}, overrides: []string{"git.unknown=x"}},
 		{with: []string{"git"}, overrides: []string{"git.value=invalid"}},
 		{config: map[string]map[string]string{"git": {"unknown": "x"}}},
 	} {
-		if _, err := registry.Resolve(tc.defaults, tc.with, tc.without, tc.config, tc.overrides); err == nil {
+		if _, err := registry.Resolve(tc.with, tc.config, tc.overrides); err == nil {
 			t.Errorf("invalid selection accepted: %+v", tc)
 		}
 	}
@@ -88,7 +86,7 @@ func TestValidateBeforePreparation(t *testing.T) {
 func TestPreparationFailureStopsComposition(t *testing.T) {
 	calls := []string{}
 	registry := Registry{"outer": fakeIntegration{"outer", &calls, false}, "inner": fakeIntegration{"inner", &calls, true}}
-	plan, err := registry.Resolve([]string{"outer", "inner"}, nil, nil, nil, nil)
+	plan, err := registry.Resolve([]string{"outer", "inner"}, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

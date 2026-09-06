@@ -93,8 +93,8 @@ var enqueueCmd = &cobra.Command{
 			return err
 		}
 		defer tx.Rollback(context.Background())
-		// Reserve the ID before snapshot side effects. Workers only see the task
-		// once its source is ready and this transaction commits.
+		// Reserve the ID before preparation side effects. Workers only see the task
+		// once its execution command is ready and this transaction commits.
 		if err := db.CreateTask(ctx, tx, task); err != nil {
 			return err
 		}
@@ -130,7 +130,6 @@ var enqueueCmd = &cobra.Command{
 
 func init() {
 	enqueueCmd.Flags().StringArray("with", nil, "Enable integration (repeatable)")
-	enqueueCmd.Flags().StringArray("without", nil, "Disable default integration (repeatable)")
 	enqueueCmd.Flags().StringArray("set", nil, "Override TOOL.KEY=VALUE (repeatable)")
 	enqueueCmd.Flags().String("id", "", "Task ID (1–53 letters, digits, underscores or hyphens; starts with a letter or digit)")
 	enqueueCmd.Flags().StringSliceVar(&tags, "tag", nil, "Tags (key=value, can specify multiple)")
@@ -289,12 +288,9 @@ func printLogLine(log db.TaskLog) {
 
 func enqueueIntegrations(cmd *cobra.Command) (*integrations.Plan, error) {
 	with, _ := cmd.Flags().GetStringArray("with")
-	without, _ := cmd.Flags().GetStringArray("without")
 	overrides, _ := cmd.Flags().GetStringArray("set")
 	if snapshot {
 		with = append(with, "git")
-	} else if cmd.Flags().Changed("snapshot") {
-		without = append(without, "git")
 	}
 	values := make(map[string]map[string]string)
 	for name, options := range cfg.Integrations {
@@ -309,5 +305,5 @@ func enqueueIntegrations(cmd *cobra.Command) (*integrations.Plan, error) {
 	if remote != "" {
 		overrides = append([]string{"git.remote=" + config.NormalizeRemote(remote)}, overrides...)
 	}
-	return integrations.Builtins().Resolve(cfg.Enqueue.With, with, without, values, overrides)
+	return integrations.Builtins().Resolve(with, values, overrides)
 }

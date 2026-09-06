@@ -46,11 +46,11 @@ func TestEnqueueGitIntegration(t *testing.T) {
 	git("remote", "add", "snapshots", destination)
 	cfg = &config.Config{
 		DB:           config.DBConfig{URL: getTestDBURL(t)},
-		Enqueue:      config.EnqueueConfig{With: []string{"git"}},
 		Integrations: map[string]map[string]string{"git": {"remote": "snapshots"}},
 	}
 	id := "integrated-task"
 	cmd := enqueueTestCommand(&id)
+	cmd.Flags().StringArray("with", []string{"git"}, "")
 	command := `cat payload.txt; printf '%s\n' "$NEXTASK_TASK_ID"; exit 7`
 	if err := enqueueCmd.RunE(cmd, []string{command}); err != nil {
 		t.Fatal(err)
@@ -82,10 +82,9 @@ func TestEnqueueGitIntegration(t *testing.T) {
 	if output != "queued content\nintegrated-task\n" {
 		t.Fatalf("output: %q", output)
 	}
-	// Plain tasks can disable project defaults without touching Git.
+	// Configured options do not enable integrations for plain tasks.
 	plainID := "plain-task"
 	plain := enqueueTestCommand(&plainID)
-	plain.Flags().StringArray("without", []string{"git"}, "")
 	if err := enqueueCmd.RunE(plain, []string{"echo plain"}); err != nil {
 		t.Fatal(err)
 	}
@@ -96,6 +95,7 @@ func TestEnqueueGitIntegration(t *testing.T) {
 	// Validation errors never publish a task.
 	invalidID := "invalid-task"
 	invalid := enqueueTestCommand(&invalidID)
+	invalid.Flags().StringArray("with", []string{"git"}, "")
 	invalid.Flags().StringArray("set", []string{"git.unknown=value"}, "")
 	if err := enqueueCmd.RunE(invalid, []string{"true"}); err == nil {
 		t.Fatal("invalid option accepted")
