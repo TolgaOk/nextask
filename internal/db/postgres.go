@@ -34,6 +34,7 @@ func Connect(ctx context.Context, dbURL string) (*pgxpool.Pool, error) {
 		return nil, wrapPgError(err)
 	}
 	if err := pool.Ping(ctx); err != nil {
+		pool.Close()
 		return nil, wrapPgError(err)
 	}
 	return pool, nil
