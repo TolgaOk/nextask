@@ -78,3 +78,29 @@ func TestSharedConfigCannotEnableIntegrations(t *testing.T) {
 		t.Fatal("shared config enabled an integration")
 	}
 }
+
+func TestTypedIntegrationLayers(t *testing.T) {
+	clearConfigEnv(t)
+	user := configFixture(t, t.TempDir(), "user.toml", `[integrations.s3]
+endpoint = "https://fsn1.your-objectstorage.com"
+remote = "s3://bucket/project"
+include = ["old/**"]
+concurrency = 2
+final_sync = false
+`)
+	shared := configFixture(t, t.TempDir(), "shared.toml", `[nextask.integrations.s3]
+include = ["new/**", "report.json"]
+interval = "30s"
+`)
+	cfg, err := loadFiles([]configFile{{user, false}, {shared, true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	o := cfg.Integrations["s3"]
+	if o["concurrency"] != int64(2) || o["final_sync"] != false || o["interval"] != "30s" || len(o["include"].([]string)) != 2 || o["include"].([]string)[0] != "new/**" {
+		t.Fatalf("wrong merge: %v", o)
+	}
+	if cfg.SourceFor("integrations.s3.include") != shared+" [nextask.integrations.s3.include]" {
+		t.Fatal("lost override source")
+	}
+}

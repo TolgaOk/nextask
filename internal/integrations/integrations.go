@@ -25,7 +25,7 @@ type Integration interface {
 
 type Registry map[string]Integration
 
-func Builtins() Registry { return Registry{"git": Git{Repo: "."}} }
+func Builtins() Registry { return Registry{"git": Git{Repo: "."}, "s3": S3{}} }
 
 type step struct {
 	name    string
