@@ -5,7 +5,7 @@ description: Set up a nextask worker to execute tasks. Covers local workers, con
 
 Related skills: `nextask` (enqueue, monitor, manage tasks), `nextask-setup-services` (deploy PostgreSQL, git server).
 
-Set up workers that claim and execute nextask tasks. Services (PostgreSQL, git remote) must already be running. If not, use the `nextask-setup-services` skill first.
+Set up workers that claim and execute nextask tasks. PostgreSQL must already be running. Git tasks also need a reachable Git remote. If not, use the `nextask-setup-services` skill first.
 
 **Installing nextask:** `curl -fsSL https://raw.githubusercontent.com/TolgaOk/nextask/main/install | bash`
 
@@ -32,7 +32,7 @@ cat .nextask.toml 2>/dev/null
 echo "NEXTASK_DB_URL=$NEXTASK_DB_URL"
 echo "NEXTASK_SOURCE_REMOTE=$NEXTASK_SOURCE_REMOTE"
 ```
-Use existing values if found.
+Use existing values if found. For tasks using `--with git`, verify `git --version` on the worker and include Git in container images. Plain tasks do not require Git.
 
 ### 0. Check nextask
 
@@ -165,7 +165,7 @@ Create a pod/template with:
 
 Enqueue side:
 ```bash
-nextask enqueue "python train.py" --snapshot --tag gpu=a100
+nextask enqueue "python train.py" --with git --tag gpu=a100
 ```
 
 For Vast.ai and Lambda, same pattern: provider base image + deps + nextask + env vars.
@@ -179,8 +179,8 @@ From the local machine:
 nextask enqueue "echo hello from nextask" --attach
 # Expected: "hello from nextask", task completes
 
-# Snapshot task (if using --snapshot)
-nextask enqueue "ls -la" --snapshot --attach
+# Snapshot task (if using --with git)
+nextask enqueue "ls -la" --with git --attach
 # Expected: file listing, task completes
 
 # Cleanup
@@ -188,7 +188,7 @@ nextask list --since 1h
 nextask remove <id>
 ```
 
-If the simple task works but snapshot fails, the git remote is misconfigured.
+If the simple task works but snapshot restoration fails, check the task logs, Git installation, and remote access from the worker.
 
 ## Troubleshooting
 

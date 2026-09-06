@@ -12,12 +12,14 @@ Use it to run commands on remote worker machines.
 
 ### Enqueue a task
 ```bash
-nextask enqueue "python train.py --lr 0.001" --snapshot --tag model=resnet,lr=0.001
+nextask enqueue "python train.py --lr 0.001" --with git --tag model=resnet,lr=0.001
 ```
-- `--snapshot` captures the current working tree (including uncommitted changes) and pushes to a git remote
-- `--remote <url|path>` override source remote for this snapshot
+- `--with git` captures the current working tree (including uncommitted changes) and pushes to a git remote
+- `--set git.remote=<name|url|path>` overrides the remote for `--with git`
 - `--tag key=value` adds metadata for filtering (repeatable, both key and value required)
 - `--attach` / `-a` streams live output after enqueuing
+
+Integrations are disabled by default. Config supplies options; select each integration explicitly with `--with TOOL`. Git tasks require Git on both the submitter and worker.
 
 ### Monitor tasks
 ```bash
@@ -43,7 +45,7 @@ nextask wait <id1> <id2> --any            # wait for first to finish
 ### Cancel / remove
 ```bash
 nextask cancel <id>
-nextask remove <id>                # deletes task, logs, and snapshot
+nextask remove <id>                # deletes the task and logs; keeps the snapshot
 ```
 
 ### Workers
@@ -66,7 +68,7 @@ nextask worker stop <id>           # stop a worker
 ### Hyperparameter sweep
 ```bash
 for lr in 0.1 0.01 0.001; do
-  nextask enqueue "python train.py --lr $lr" --snapshot --tag sweep=lr,lr=$lr
+  nextask enqueue "python train.py --lr $lr" --with git --tag sweep=lr,lr=$lr
 done
 nextask wait --tag sweep=lr        # block until all finish
 nextask list --tag sweep=lr        # compare results
@@ -74,7 +76,7 @@ nextask list --tag sweep=lr        # compare results
 
 ### Run and watch
 ```bash
-nextask enqueue "python train.py" --snapshot --attach
+nextask enqueue "python train.py" --with git --attach
 # Ctrl+C cancels the task
 ```
 
@@ -95,7 +97,7 @@ nextask enqueue "nvidia-smi" --attach
 ### Route to specific workers
 ```bash
 # Enqueue with tags
-nextask enqueue "python train.py" --snapshot --tag gpu=a100
+nextask enqueue "python train.py" --with git --tag gpu=a100
 
 # Worker only claims matching tasks
 nextask worker --filter gpu=a100
@@ -103,10 +105,10 @@ nextask worker --filter gpu=a100
 
 ### Saving results from tasks
 
-Tasks run in a cloned workdir on the worker. To persist results (CSVs, models, logs), have the task commit and push them back:
+Git tasks run from their recorded snapshot in a detached checkout on the worker. Configure a Git commit identity on the worker before committing results. To persist results (CSVs, models, logs), have the task commit and push them back:
 
 ```bash
-nextask enqueue 'python train.py --output results.csv && git add results.csv && git commit -m "results" && git push origin HEAD' --snapshot
+nextask enqueue 'python train.py --output results.csv && git add results.csv && git commit -m "results" && git push origin HEAD:refs/heads/results/$NEXTASK_TASK_ID' --with git
 ```
 
 Or write results to a shared filesystem / object store that both the enqueue machine and worker can access.
@@ -141,10 +143,10 @@ nextask config                     # show configuration
 
 ## Configuration
 
-Priority: CLI flags > ENV vars > `.nextask.toml` > `~/.config/nextask/global.toml`.
+Priority: CLI flags > environment > project config > user config. Within each scope, Nextask config overrides the optional shared tasktools config. Run `nextask config show --sources` to inspect effective values.
 
 Set `db.url` via `--db-url`, `NEXTASK_DB_URL`, or in config files.
-Set `source.remote` for snapshot storage.
+Set `integrations.git.remote` for snapshot storage.
 
 ## Key concepts
 - Tasks go through: `pending` → `running` → `completed` | `failed` | `cancelled` | `stale`

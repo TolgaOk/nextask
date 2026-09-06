@@ -51,7 +51,7 @@ echo "NEXTASK_SOURCE_REMOTE=$NEXTASK_SOURCE_REMOTE"
 
 If a config exists, tell the user what was found and ask: "You already have a nextask config. Do you want to use it, or start fresh?"
 
-- **Use existing** → test the connection: `nextask list` and (if source.remote is set) `git ls-remote <remote>`.
+- **Use existing** → test the connection: `nextask list` and (if integrations.git.remote is set) `git ls-remote <remote>`.
   - Both work → setup is done, skip all remaining steps.
   - DB works but no source remote → ask if they want snapshots (jump to step 4).
   - DB fails → ask if they want to fix it or start fresh (jump to step 2).
@@ -75,7 +75,7 @@ Check `docker compose version` (locally, or via SSH if remote). If not installed
 
 Continue once `docker compose version` succeeds.
 
-### 4. "Do you want source snapshots (`--snapshot`)?"
+### 4. "Do you want source snapshots (`--with git`)?"
 
 Explain: snapshots capture your exact working tree (including uncommitted changes) so every task is reproducible. Requires a git remote to store them.
 
@@ -105,7 +105,7 @@ Explain: snapshots capture your exact working tree (including uncommitted change
 2. Copy compose file, write `.env`, run `docker compose up -d`.
 3. If full stack: wait for `gitea-init` to complete, extract token from `docker compose logs gitea-init`.
 4. Run `nextask init db`.
-5. Write `db.url` and `source.remote` to `~/.config/nextask/global.toml` (create directory if missing). Set `chmod 600 ~/.config/nextask/global.toml` so only the owner can read it. Do NOT write a project `.env` unless the user explicitly asks (risk of committing secrets).
+5. Write `db.url` and `integrations.git.remote` to `~/.config/nextask/global.toml` (create directory if missing). Set `chmod 600 ~/.config/nextask/global.toml` so only the owner can read it. Do NOT write a project `.env` unless the user explicitly asks (risk of committing secrets).
 6. Verify: `nextask list` (expect "No tasks found"), `git ls-remote <remote>` (expect refs listed).
 7. Tell the user where their secrets are stored. Include all that apply:
    - Any auto-generated passwords — repeat them here so the user can save them.
@@ -213,7 +213,7 @@ git ls-remote "http://nextask:<token>@<host>:3000/nextask/source.git"
 
 ## PostgreSQL only (no Gitea)
 
-Use this if you won't use `--snapshot` or already have a git remote.
+Use this if you won't use `--with git` or already have a git remote.
 
 Copy `scripts/postgres-only.docker-compose.yml` as `docker-compose.yml`. Create `.env`:
 ```
@@ -241,7 +241,7 @@ nextask init db --db-url "postgres://nextask:<password>@<host>:5432/nextask"
 
 ## Git remote (standalone, without full stack)
 
-Skip if using the full-stack compose (Gitea is included) or if user won't use `--snapshot`.
+Skip if using the full-stack compose (Gitea is included) or if user won't use `--with git`.
 
 Options:
 - **Standalone Gitea** (SQLite, no shared Postgres): use `${CLAUDE_SKILL_DIR}/scripts/gitea-only.docker-compose.yml`. Admin user must be created manually via the web UI at `http://<host>:3000`.

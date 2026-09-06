@@ -2,7 +2,7 @@
 
 [![Go 1.25](https://img.shields.io/badge/go-1.25-00ADD8?logo=go&logoColor=white)](https://go.dev) [![v0.1.1](https://img.shields.io/badge/v0.1.1-green)](https://github.com/TolgaOk/nextask) [![macOS | Linux](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-lightgrey)](https://github.com/TolgaOk/nextask)
 
-Manage your runs from your local machine. `nextask` is a **distributed** task queue with live log streaming and Git-based source snapshotting for full **reproducibility**.
+Run commands on distributed workers with live logs, task status, and optional integrations. The built-in Git integration captures source during enqueue and restores it before execution.
 
 ## Install
 
@@ -42,7 +42,7 @@ npx skills add https://github.com/TolgaOk/nextask/skills
 
 ## How it works
 
-`nextask` has three main components: the **CLI**, the persistent **database and Git remote**, and the potentially distributed **workers**.
+`nextask` connects a CLI and distributed workers through PostgreSQL. Optional integrations prepare executable task commands. The built-in Git integration uses a separately configured Git remote.
 
 <img src="doc/nextask_architecture.svg" alt="nextask architecture" width="80%">
 
@@ -68,8 +68,8 @@ Example config:
 [db]
 url = "postgres://user@localhost:5432/nextask"   # or NEXTASK_DB_URL
 
-[source]
-remote = "~/.nextask/source.git"                 # bare repository used as the Git remote
+[integrations.git]
+remote = "snapshots"                            # existing Git remote name, URL, or path; or NEXTASK_GIT_REMOTE
 
 [worker]
 workdir = "/tmp/nextask"                         # or NEXTASK_WORKER_WORKDIR
@@ -88,6 +88,9 @@ db_url = "postgres://user@localhost:5432/tasktools"
 
 [nextask.worker]
 workdir = "~/tasks"
+
+[nextask.integrations.git]
+remote = "ssh://git@server/snapshots.git"
 
 # Optional Nextask-specific override of defaults.db_url:
 # [nextask.db]
@@ -113,3 +116,64 @@ Tools may use the worker's `NEXTASK_TASK_ID` as their own caller-supplied ID and
 The join key in Nextask is `tasks.id`; task metadata includes `command`, `status`,
 `tags`, `exit_code`, `created_at`, `started_at`, and `finished_at`. No Nextask foreign
 key is required in another tool's tables.
+
+## Integrations
+
+All integrations are disabled by default. Git ships with Nextask and runs when
+selected with `--with git`. Config only supplies integration options.
+Plain tasks work without Git. Install Git on the submitter and workers for Git tasks,
+and configure a remote both machines can reach using their own Git credentials.
+
+```sh
+nextask enqueue --with git --set git.remote=snapshots './job.sh'
+nextask enqueue --with git './job.sh'        # use the configured remote
+nextask enqueue 'echo hello'                 # plain task
+nextask enqueue --with git --set git.remote=archive './job.sh'
+nextask worker
+```
+
+`--with TOOL` is repeatable, preserves order, and removes duplicates. `--set`
+accepts repeatable `TOOL.KEY=VALUE` overrides and requires that tool to be selected.
+Names and options are validated before preparation. Config cannot enable an
+integration.
+
+Enqueue reserves the task ID, prepares integrations, then publishes the task.
+Preparation failure rolls back the task; resources already published before a later
+failure remain at their remote. Integrations wrap commands in reverse order so the
+first selected integration runs outermost. The original command remains visible in
+task listings; the separate execution command contains setup and any finalization.
+
+Git snapshots the repository root, including current tracked file contents,
+deletions, and non-ignored untracked files. Staged files are captured as they exist
+on disk. Symlinks and executable modes are preserved. File bytes are stored without
+running Git clean filters. Submodules and special files are currently rejected.
+The repository needs an initial commit and a directory name valid in a Git ref.
+
+All snapshot objects, index entries, and refs are written to temporary storage.
+The local working tree and `.git` remain unchanged. Publication creates
+`refs/heads/<project>/<TASK_ID>` and refuses an existing snapshot ref. The worker
+fetches that ref, checks out the recorded commit in detached HEAD state, and runs
+the payload from the task directory. A missing commit fails the task before the
+payload starts. The worker checkout has an `origin` remote for explicit Git use.
+
+Cancellation reaches the wrapper and its children through the worker's process
+group. Git has no finalization step. Other integrations must wait for their children
+and finalization, and report finalization errors through the command's exit status.
+Snapshot capture reads files over time; avoid concurrent file edits during enqueue
+when a consistent snapshot is required.
+
+## Upgrading to 0.2.0
+
+Run `nextask init db` to add the execution-command column, and upgrade workers before
+enqueueing integrated tasks. Older workers reject the new command source type.
+Existing queued Git tasks with a recorded commit are translated into the same
+restoration command by the new worker. Tasks without a recorded commit fail with a
+re-enqueue instruction rather than running a moving branch tip.
+
+`--snapshot` and `--remote` remain deprecated aliases for `--with git` and
+`--set git.remote=...`. Existing `source.remote` and `NEXTASK_SOURCE_REMOTE` settings
+are accepted. The canonical setting wins over its alias in the same file;
+`NEXTASK_GIT_REMOTE` wins over the old environment variable.
+
+`nextask remove` deletes the task and its logs. Snapshot retention is explicit;
+remove a remote snapshot with `git push snapshots --delete <project>/<TASK_ID>`.
