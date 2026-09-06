@@ -2,7 +2,7 @@
 
 [![Go 1.25](https://img.shields.io/badge/go-1.25-00ADD8?logo=go&logoColor=white)](https://go.dev) [![v0.1.1](https://img.shields.io/badge/v0.1.1-green)](https://github.com/TolgaOk/nextask) [![macOS | Linux](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-lightgrey)](https://github.com/TolgaOk/nextask)
 
-Run commands on distributed workers with live logs, task status, and optional integrations. The built-in Git integration captures source during enqueue and restores it before execution.
+Run commands on distributed workers with live logs, task status, and optional integrations. Git captures and restores source snapshots; S3 uploads selected task files to object storage.
 
 ## Install
 
@@ -100,8 +100,8 @@ remote = "ssh://git@server/snapshots.git"
 Nextask reads only shared defaults and its own section. Standalone Nextask config
 continues to work without a shared file or companion tools. Relative paths resolve
 from the current directory; `~/` expands to the current user's home. Empty
-environment variables are ignored. Zero numeric or duration settings select the
-built-in defaults; negative values and malformed settings produce errors.
+environment variables are ignored. For core settings, zero numeric or duration values select the built-in defaults.
+Integration options have their own validation and zero-value behavior.
 
 ```sh
 nextask config show --sources
@@ -119,8 +119,8 @@ key is required in another tool's tables.
 
 ## Integrations
 
-All integrations are disabled by default. Git ships with Nextask and runs when
-selected with `--with git`. Config only supplies integration options.
+All integrations are disabled by default. Git and S3 ship with Nextask; select
+each with `--with TOOL`. Config only supplies integration options.
 Plain tasks work without Git. Install Git on the submitter and workers for Git tasks,
 and configure a remote both machines can reach using their own Git credentials.
 
@@ -134,8 +134,9 @@ nextask worker
 
 `--with TOOL` is repeatable, preserves order, and removes duplicates. `--set`
 accepts repeatable `TOOL.KEY=VALUE` overrides and requires that tool to be selected.
-Names and options are validated before preparation. Config cannot enable an
-integration.
+Names and options are validated before preparation. TOML options use native types;
+`--set` lists use JSON arrays and replace the configured list. Repeated assignments
+use the last value. Config cannot enable an integration.
 
 Enqueue reserves the task ID, prepares integrations, then publishes the task.
 Preparation failure rolls back the task; resources already published before a later
@@ -157,14 +158,48 @@ the payload from the task directory. A missing commit fails the task before the
 payload starts. The worker checkout has an `origin` remote for explicit Git use.
 
 Cancellation reaches the wrapper and its children through the worker's process
-group. Git has no finalization step. Other integrations must wait for their children
+group. Wrappers declare cleanup time, which the worker adds to its stop deadline.
+Git has no finalization step. Other integrations must wait for their children
 and finalization, and report finalization errors through the command's exit status.
 Snapshot capture reads files over time; avoid concurrent file edits during enqueue
 when a consistent snapshot is required.
 
+### S3 storage
+
+Configure a destination and explicit file selection in `.nextask.toml`:
+
+```toml
+[integrations.s3]
+endpoint = "https://fsn1.your-objectstorage.com"
+region = "fsn1"
+remote = "s3://my-bucket/my-project"
+include = ["outputs/**"]
+exclude = ["**/*.tmp"]
+final_include = ["reports/**"]
+interval = "60s"
+```
+
+Set `S3_ACCESS_KEY` and `S3_SECRET_KEY` on the worker. These are object-storage
+credentials, not a provider's general API token. No separate storage CLI is needed.
+The bucket must already exist. Shared config uses `[nextask.integrations.s3]`.
+
+```sh
+nextask enqueue --with s3 './job.sh'
+nextask enqueue --with git --with s3 './job.sh'
+nextask enqueue --with s3 --set s3.interval=0s './job.sh' # final upload only
+nextask enqueue --with s3 --set 's3.include=["exports/**","summary.json"]' './job.sh'
+```
+
+Files upload to `<remote>/<TASK_ID>/<relative-path>`. Changed content replaces the
+same object key; unchanged content is skipped. Final sync runs on success, failure,
+and graceful cancellation with a bounded deadline. Abrupt instance loss preserves
+only uploads already completed. Removing a task keeps its stored objects.
+
+See the [S3 guide](doc/s3.md) for all options, defaults, limits, and error handling.
+
 ## Upgrading to 0.2.0
 
-Run `nextask init db` to add the execution-command column, and upgrade workers before
+Run `nextask init db` to add execution-command and cleanup-timeout columns, and upgrade workers before
 enqueueing integrated tasks. Older workers reject the new command source type.
 Existing queued Git tasks with a recorded commit are translated into the same
 restoration command by the new worker. Tasks without a recorded commit fail with a

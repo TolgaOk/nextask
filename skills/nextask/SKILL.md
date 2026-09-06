@@ -45,7 +45,7 @@ nextask wait <id1> <id2> --any            # wait for first to finish
 ### Cancel / remove
 ```bash
 nextask cancel <id>
-nextask remove <id>                # deletes the task and logs; keeps the snapshot
+nextask remove <id>                # deletes the task and logs; keeps snapshots and stored artifacts
 ```
 
 ### Workers
@@ -105,13 +105,18 @@ nextask worker --filter gpu=a100
 
 ### Saving results from tasks
 
-Git tasks run from their recorded snapshot in a detached checkout on the worker. Configure a Git commit identity on the worker before committing results. To persist results (CSVs, models, logs), have the task commit and push them back:
+Configure `[integrations.s3]` with an endpoint, remote bucket/prefix, and explicit
+`include` patterns. Set `S3_ACCESS_KEY` and `S3_SECRET_KEY` on the worker.
 
 ```bash
-nextask enqueue 'python train.py --output results.csv && git add results.csv && git commit -m "results" && git push origin HEAD:refs/heads/results/$NEXTASK_TASK_ID' --with git
+nextask enqueue --with git --with s3 './export.sh'
+nextask enqueue --with s3 --set s3.interval=0s --set 's3.include=["results/**"]' './export.sh'
 ```
 
-Or write results to a shared filesystem / object store that both the enqueue machine and worker can access.
+S3 uploads selected files periodically and after command completion, including
+failure and graceful cancellation. Objects use `<remote>/<TASK_ID>/<relative-path>`;
+removing a task preserves them. See the [S3 guide](../../doc/s3.md) for all options.
+Integrations are opt-in; configuration alone never enables uploads.
 
 ### Tagging and querying
 
