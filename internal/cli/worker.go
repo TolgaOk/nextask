@@ -123,6 +123,8 @@ var workerCmd = &cobra.Command{
 			Rm:                rm,
 			ExitIfIdle:        exitIfIdleDuration,
 			HeartbeatInterval: cfg.Worker.HeartbeatInterval,
+			BackoffInitial:    cfg.Retry.InitialInterval,
+			BackoffMax:        cfg.Retry.MaxInterval,
 			TagFilter:         tagFilter,
 			LogFlushLines:     cfg.Worker.LogFlushLines,
 			LogFlushInterval:  cfg.Worker.LogFlushInterval,
