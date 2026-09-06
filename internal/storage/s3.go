@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/url"
 	"os"
+	"strings"
 
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
@@ -32,8 +33,16 @@ type s3Store struct {
 
 func NewS3(c Config) (Store, error) {
 	access, secret := os.Getenv("S3_ACCESS_KEY"), os.Getenv("S3_SECRET_KEY")
-	if access == "" || secret == "" {
-		return nil, fmt.Errorf("s3 requires S3_ACCESS_KEY and S3_SECRET_KEY in the worker environment")
+	var missing []string
+	for _, entry := range []struct{ name, value string }{
+		{"S3_ACCESS_KEY", access}, {"S3_SECRET_KEY", secret},
+	} {
+		if strings.TrimSpace(entry.value) == "" {
+			missing = append(missing, entry.name)
+		}
+	}
+	if len(missing) != 0 {
+		return nil, fmt.Errorf("s3: missing required worker environment variables: %s", strings.Join(missing, ", "))
 	}
 	endpoint, err := url.Parse(c.Endpoint)
 	if err != nil {

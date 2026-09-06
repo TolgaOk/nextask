@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -57,9 +58,32 @@ func TestS3Transport(t *testing.T) {
 	}
 }
 func TestS3RequiresWorkerCredentials(t *testing.T) {
-	t.Setenv("S3_ACCESS_KEY", "")
-	t.Setenv("S3_SECRET_KEY", "")
-	if _, err := NewS3(testConfig()); err == nil {
-		t.Fatal("anonymous storage accepted")
+	for _, tc := range []struct {
+		access, secret string
+		missing        []string
+	}{
+		{"", "", []string{"S3_ACCESS_KEY", "S3_SECRET_KEY"}},
+		{"test-access", "", []string{"S3_SECRET_KEY"}},
+		{"", "test-secret", []string{"S3_ACCESS_KEY"}},
+		{" ", "test-secret", []string{"S3_ACCESS_KEY"}},
+	} {
+		t.Setenv("S3_ACCESS_KEY", tc.access)
+		t.Setenv("S3_SECRET_KEY", tc.secret)
+		_, err := NewS3(testConfig())
+		if err == nil {
+			t.Fatal("missing credentials accepted")
+		}
+		for _, name := range []string{"S3_ACCESS_KEY", "S3_SECRET_KEY"} {
+			want := false
+			for _, missing := range tc.missing {
+				want = want || name == missing
+			}
+			if strings.Contains(err.Error(), name) != want {
+				t.Fatalf("incorrect missing variable diagnostic: %v", err)
+			}
+		}
+		if strings.Contains(err.Error(), "test-secret") || strings.Contains(err.Error(), "test-access") {
+			t.Fatal("credential value exposed in error")
+		}
 	}
 }
