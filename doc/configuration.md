@@ -83,7 +83,21 @@ directory created by that execution, after its integrations and log flushing fin
 
 Log batches retry temporary database failures. Shutdown allows up to five seconds
 to flush pending batches; longer outages can leave output only in local task logs.
-Those files are also removed when `--rm` is selected.
+Those files are also removed when `--rm` is selected. Local log write or close
+failures are reported and fail an otherwise successful task; an existing payload
+failure code is preserved.
+
+A worker retains a finished result and retries temporary database failures before
+claiming another task. Worker shutdown allows another 30 seconds to save that
+result. Permanent errors or an exhausted shutdown deadline stop the worker with
+an error. A terminal status notification is sent only after the database write
+succeeds. Results awaiting that write are held in memory; hard kills or an outage
+that outlasts shutdown can still leave a task stale.
+
+Workers check stored cancellation requests before execution and once per second
+while a task runs. Notifications speed up cancellation, and status checks recover
+missed requests and confirmations. Worker retries use the configured
+`retry.initial_interval` and `retry.max_interval`.
 
 Abrupt instance loss preserves completed uploads. A hard-killed worker cannot
 finalize its task; the task becomes stale and is not automatically retried. Killing
