@@ -2,7 +2,6 @@ package worker
 
 import (
 	"context"
-	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -124,7 +123,7 @@ func TestLoggerCloseRecoversDatabaseConnection(t *testing.T) {
 			case attempted <- struct{}{}:
 			default:
 			}
-			return errors.New("connection refused")
+			return db.ErrConnRefused
 		}
 		return nil
 	}

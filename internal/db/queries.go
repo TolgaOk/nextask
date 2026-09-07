@@ -9,6 +9,7 @@ import (
 
 	sq "github.com/Masterminds/squirrel"
 	"github.com/TolgaOk/nextask/internal/db/migrations"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -170,7 +171,7 @@ func scanTask(row scannable) (*Task, error) {
 		&t.CreatedAt, &t.StartedAt, &t.FinishedAt,
 	)
 	if err != nil {
-		if err.Error() == "no rows in result set" {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
 		}
 		return nil, err
@@ -331,7 +332,7 @@ func RequestCancel(ctx context.Context, pool *pgxpool.Pool, taskID string) (*Tas
 	var originalStatus *TaskStatus
 	err = pool.QueryRow(ctx, string(sql), taskID).Scan(&originalStatus)
 	if err != nil {
-		if err.Error() == "no rows in result set" {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
 		}
 		return nil, err
@@ -360,7 +361,7 @@ func DeleteTask(ctx context.Context, pool *pgxpool.Pool, taskID string) (bool, e
 	var deletedID *string
 	err = pool.QueryRow(ctx, string(sql), taskID).Scan(&deletedID)
 	if err != nil {
-		if err.Error() == "no rows in result set" {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return false, nil
 		}
 		return false, err
