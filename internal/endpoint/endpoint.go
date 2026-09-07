@@ -211,6 +211,9 @@ func validateURL(u *url.URL, kind Kind, refs []envReference, resolved bool) erro
 	}
 	if u.User != nil {
 		password, hasPassword := u.User.Password()
+		if strings.ContainsAny(u.User.Username()+password, "\x00\r\n") {
+			return fmt.Errorf("URL credentials contain a forbidden control character")
+		}
 		if kind == Git && hasPassword && u.Scheme != "http" && u.Scheme != "https" {
 			return fmt.Errorf("Git URL passwords are supported only with HTTP(S); use an SSH key for SSH")
 		}
@@ -243,7 +246,8 @@ func validateURL(u *url.URL, kind Kind, refs []envReference, resolved bool) erro
 				return fmt.Errorf("URL query parameter names must be literal")
 			}
 		}
-		if !resolved && secretParameter(key) {
+		// These are PostgreSQL credential parameters, not inferred secret names.
+		if !resolved && (key == "password" || key == "sslpassword") {
 			for _, value := range values {
 				if !isReference(value, refs) {
 					return fmt.Errorf("URL credential parameters must reference environment variables")
@@ -261,10 +265,4 @@ func isReference(value string, refs []envReference) bool {
 		}
 	}
 	return false
-}
-
-func secretParameter(key string) bool {
-	key = strings.ToLower(key)
-	return strings.Contains(key, "password") || strings.Contains(key, "token") ||
-		strings.Contains(key, "secret") || key == "access_key" || key == "access_key_id"
 }
