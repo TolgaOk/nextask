@@ -12,8 +12,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var cfg *config.Config
-
 var (
 	errStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Bold(true)
 	hintStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("243"))
@@ -55,35 +53,44 @@ func errDBRequired() error {
 	)
 }
 
-// SetVersion configures the version string displayed by --version.
-func SetVersion(v string) {
-	RootCmd.Version = v
+// NewRootCommand constructs an independent command tree. Create a fresh tree
+// for each execution; Cobra command instances themselves are not concurrent.
+func NewRootCommand(version string) *cobra.Command {
+	return newRootCommand(version, config.Load)
 }
 
-// RootCmd is the base command for the nextask CLI.
-var RootCmd = &cobra.Command{
-	Use:           "nextask",
-	Short:         "Distributed task queue with optional integrations and full log capture",
-	SilenceErrors: true,
-	SilenceUsage:  true,
-	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-		var err error
-		cfg, err = config.Load()
-		if err != nil {
-			return withHints(err,
-				"Check TOML syntax and values in your config files",
-				"Shared: "+codeStyle.Render("~/.config/tasktools/config.toml or .tasktools.toml"),
-				"Global: "+codeStyle.Render("~/.config/nextask/global.toml"),
-				"Local:  "+codeStyle.Render(".nextask.toml"),
-			)
-		}
-		return nil
-	},
+func newRootCommand(version string, loadConfig func() (*config.Config, error)) *cobra.Command {
+	// Commands read this tree's configuration. Per-command overrides use copies.
+	cfg := new(config.Config)
+	root := &cobra.Command{
+		Use:           "nextask",
+		Short:         "Distributed task queue with optional integrations and full log capture",
+		Version:       version,
+		SilenceErrors: true,
+		SilenceUsage:  true,
+		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			loaded, err := loadConfig()
+			if err != nil {
+				return withHints(err,
+					"Check TOML syntax and values in your config files",
+					"Shared: "+codeStyle.Render("~/.config/tasktools/config.toml or .tasktools.toml"),
+					"Global: "+codeStyle.Render("~/.config/nextask/global.toml"),
+					"Local:  "+codeStyle.Render(".nextask.toml"))
+			}
+			*cfg = *loaded
+			return nil
+		},
+	}
+	root.CompletionOptions.HiddenDefaultCmd = true
+	root.AddCommand(newEnqueueCommand(cfg), newWaitCommand(cfg), newLogsCommand(cfg),
+		newCancelCommand(cfg), newListCommand(cfg), newShowCommand(cfg), newRemoveCommand(cfg),
+		newWorkerCommand(cfg), newConfigCommand(cfg), newInitCommand(cfg), newRuntimeCommand())
+	return root
 }
 
-// Execute runs the root command.
-func Execute() {
-	if err := RootCmd.Execute(); err != nil {
+// Execute constructs and runs the CLI with the supplied build version.
+func Execute(version string) {
+	if err := NewRootCommand(version).Execute(); err != nil {
 		var ec *exitCodeError
 		if errors.As(err, &ec) {
 			os.Exit(ec.code)
@@ -91,10 +98,6 @@ func Execute() {
 		printError(err)
 		os.Exit(1)
 	}
-}
-
-func init() {
-	RootCmd.CompletionOptions.HiddenDefaultCmd = true
 }
 
 func printError(err error) {

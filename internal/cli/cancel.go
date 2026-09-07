@@ -7,81 +7,90 @@ import (
 	"os"
 	"time"
 
+	"github.com/TolgaOk/nextask/internal/config"
 	"github.com/TolgaOk/nextask/internal/db"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/spf13/cobra"
 )
 
-var cancelTimeout time.Duration
-
-var cancelCmd = &cobra.Command{
-	Use:   "cancel TASK_ID",
-	Short: "Cancel a pending or running task",
-	Args:  cobra.ExactArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		if cfg.DB.URL == "" {
-			return errDBRequired()
-		}
-
-		if cancelTimeout <= 0 {
-			return errWithHints("timeout must be positive",
-				"Example: "+codeStyle.Render("--timeout 10s"),
-			)
-		}
-
-		ctx := cmd.Context()
-		taskID := args[0]
-
-		pool, err := db.Connect(ctx, cfg.DB.URL)
-		if err != nil {
-			return err
-		}
-		defer pool.Close()
-
-		originalStatus, err := db.RequestCancel(ctx, pool, taskID)
-		if err != nil {
-			return err
-		}
-
-		if originalStatus == nil {
-			return errWithHints(fmt.Sprintf("task not found: %s", taskID),
-				"Run "+codeStyle.Render("nextask list")+" to see available tasks",
-			)
-		}
-
-		switch *originalStatus {
-		case db.StatusPending:
-			fmt.Fprintln(os.Stderr, "Task cancelled")
-			return nil
-
-		case db.StatusRunning:
-			timeout := cancelTimeout
-			if !cmd.Flags().Changed("timeout") {
-				task, err := db.GetTask(ctx, pool, taskID, cfg.Worker.StaleDuration())
-				if err != nil {
-					return err
-				}
-				if task != nil {
-					timeout += time.Duration(task.CleanupTimeoutMS) * time.Millisecond
-				}
-			}
-			return waitForCancel(ctx, pool, taskID, timeout)
-
-		default:
-			return errWithHints(
-				fmt.Sprintf("task already %s", *originalStatus),
-				"Task has already finished and cannot be cancelled",
-			)
-		}
-	},
+type cancelOptions struct {
+	timeout time.Duration
 }
 
-func waitForCancel(ctx context.Context, pool *pgxpool.Pool, taskID string, timeout time.Duration) error {
+func newCancelCommand(cfg *config.Config) *cobra.Command {
+	var opts cancelOptions
+	cmd := &cobra.Command{
+		Use:   "cancel TASK_ID",
+		Short: "Cancel a pending or running task",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if cfg.DB.URL == "" {
+				return errDBRequired()
+			}
+
+			if opts.timeout <= 0 {
+				return errWithHints("timeout must be positive",
+					"Example: "+codeStyle.Render("--timeout 10s"),
+				)
+			}
+
+			ctx := cmd.Context()
+			taskID := args[0]
+
+			pool, err := db.Connect(ctx, cfg.DB.URL)
+			if err != nil {
+				return err
+			}
+			defer pool.Close()
+
+			originalStatus, err := db.RequestCancel(ctx, pool, taskID)
+			if err != nil {
+				return err
+			}
+
+			if originalStatus == nil {
+				return errWithHints(fmt.Sprintf("task not found: %s", taskID),
+					"Run "+codeStyle.Render("nextask list")+" to see available tasks",
+				)
+			}
+
+			switch *originalStatus {
+			case db.StatusPending:
+				fmt.Fprintln(os.Stderr, "Task cancelled")
+				return nil
+
+			case db.StatusRunning:
+				timeout := opts.timeout
+				if !cmd.Flags().Changed("timeout") {
+					task, err := db.GetTask(ctx, pool, taskID, cfg.Worker.StaleDuration())
+					if err != nil {
+						return err
+					}
+					if task != nil {
+						timeout += time.Duration(task.CleanupTimeoutMS) * time.Millisecond
+					}
+				}
+				return waitForCancel(ctx, *cfg, pool, taskID, timeout)
+
+			default:
+				return errWithHints(
+					fmt.Sprintf("task already %s", *originalStatus),
+					"Task has already finished and cannot be cancelled",
+				)
+			}
+		},
+	}
+
+	cmd.Flags().DurationVar(&opts.timeout, "timeout", 10*time.Second, "Timeout waiting for cancel confirmation (default adds task cleanup time)")
+	return cmd
+}
+
+func waitForCancel(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, taskID string, timeout time.Duration) error {
 	sigCtx, stop := interruptContext(ctx)
 	defer stop()
 	waitCtx, cancel := context.WithTimeout(sigCtx, timeout)
 	defer cancel()
-	err := confirmCancellation(waitCtx, pool, taskID)
+	err := confirmCancellation(waitCtx, cfg, pool, taskID)
 	if errors.Is(err, context.Canceled) && sigCtx.Err() != nil {
 		fmt.Fprintln(os.Stderr, "\nInterrupted - cancel request already sent")
 		fmt.Fprintf(os.Stderr, "Check task status with %s\n", codeStyle.Render("nextask show "+taskID))
@@ -95,8 +104,8 @@ func waitForCancel(ctx context.Context, pool *pgxpool.Pool, taskID string, timeo
 	return err
 }
 
-func confirmCancellation(ctx context.Context, pool *pgxpool.Pool, taskID string) error {
-	watch, err := newStateWatcher(ctx, db.FromTaskChannel(taskID))
+func confirmCancellation(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, taskID string) error {
+	watch, err := newStateWatcher(ctx, cfg, db.FromTaskChannel(taskID))
 	if err != nil {
 		return err
 	}
@@ -121,9 +130,4 @@ func confirmCancellation(ctx context.Context, pool *pgxpool.Pool, taskID string)
 		}
 		return false, nil
 	})
-}
-
-func init() {
-	cancelCmd.Flags().DurationVar(&cancelTimeout, "timeout", 10*time.Second, "Timeout waiting for cancel confirmation (default adds task cleanup time)")
-	RootCmd.AddCommand(cancelCmd)
 }

@@ -5,14 +5,15 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/TolgaOk/nextask/internal/config"
 	"github.com/TolgaOk/nextask/internal/db"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // streamTask drains stored logs and returns the stored terminal task. The caller
 // chooses how interrupts and the task's exit code affect its command.
-func streamTask(ctx context.Context, pool *pgxpool.Pool, taskID string, lastLogID *int, print func(db.TaskLog)) (*db.Task, error) {
-	watch, err := newStateWatcher(ctx, db.FromTaskChannel(taskID))
+func streamTask(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, taskID string, lastLogID *int, print func(db.TaskLog)) (*db.Task, error) {
+	watch, err := newStateWatcher(ctx, cfg, db.FromTaskChannel(taskID))
 	if err != nil {
 		return nil, err
 	}

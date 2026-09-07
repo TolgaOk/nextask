@@ -1,12 +1,12 @@
 package cli
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
 
+	"github.com/TolgaOk/nextask/internal/config"
 	"github.com/TolgaOk/nextask/internal/db"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
@@ -38,36 +38,40 @@ func statusStyle(status db.TaskStatus) lipgloss.Style {
 	}
 }
 
-var showCmd = &cobra.Command{
-	Use:   "show TASK_ID",
-	Short: "Show task details",
-	Args:  cobra.ExactArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		if cfg.DB.URL == "" {
-			return errDBRequired()
-		}
+func newShowCommand(cfg *config.Config) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "show TASK_ID",
+		Short: "Show task details",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if cfg.DB.URL == "" {
+				return errDBRequired()
+			}
 
-		ctx := context.Background()
+			ctx := cmd.Context()
 
-		pool, err := db.Connect(ctx, cfg.DB.URL)
-		if err != nil {
-			return err
-		}
-		defer pool.Close()
+			pool, err := db.Connect(ctx, cfg.DB.URL)
+			if err != nil {
+				return err
+			}
+			defer pool.Close()
 
-		task, err := db.GetTask(ctx, pool, args[0], cfg.Worker.StaleDuration())
-		if err != nil {
-			return err
-		}
-		if task == nil {
-			return errWithHints(fmt.Sprintf("task not found: %s", args[0]),
-				"Run "+codeStyle.Render("nextask list")+" to see available tasks",
-			)
-		}
+			task, err := db.GetTask(ctx, pool, args[0], cfg.Worker.StaleDuration())
+			if err != nil {
+				return err
+			}
+			if task == nil {
+				return errWithHints(fmt.Sprintf("task not found: %s", args[0]),
+					"Run "+codeStyle.Render("nextask list")+" to see available tasks",
+				)
+			}
 
-		printTask(task)
-		return nil
-	},
+			printTask(task)
+			return nil
+		},
+	}
+
+	return cmd
 }
 
 func printTask(task *db.Task) {
@@ -180,8 +184,4 @@ func formatDuration(d time.Duration) string {
 	hours := int(d.Hours())
 	mins := int(d.Minutes()) % 60
 	return fmt.Sprintf("%dh %dm", hours, mins)
-}
-
-func init() {
-	RootCmd.AddCommand(showCmd)
 }

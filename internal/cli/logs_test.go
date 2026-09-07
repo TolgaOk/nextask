@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/TolgaOk/nextask/internal/config"
 	"github.com/TolgaOk/nextask/internal/db"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"go.uber.org/goleak"
 )
 
@@ -20,8 +20,9 @@ func getTestDBURL(t *testing.T) string {
 	return url
 }
 
-func initTestConfig(t *testing.T) {
-	cfg = &config.Config{
+func testConfig(t *testing.T) config.Config {
+	t.Helper()
+	return config.Config{
 		DB: config.DBConfig{
 			URL: getTestDBURL(t),
 		},
@@ -92,7 +93,7 @@ func TestLogsAttach_StreamsLogs(t *testing.T) {
 	defer pool.Close()
 	ctx := context.Background()
 
-	initTestConfig(t)
+	cfg := testConfig(t)
 
 	// Create a running task
 	task := &db.Task{
@@ -112,7 +113,7 @@ func TestLogsAttach_StreamsLogs(t *testing.T) {
 	// Run logsAndAttach in goroutine
 	done := make(chan error, 1)
 	go func() {
-		done <- logsAndAttach(ctx, pool, task.ID, 0)
+		done <- logsAndAttach(ctx, cfg, pool, task.ID, 0, "")
 	}()
 
 	// Give it time to start listening
@@ -148,7 +149,7 @@ func TestLogsAttach_ContextCancel(t *testing.T) {
 	defer pool.Close()
 	ctx := context.Background()
 
-	initTestConfig(t)
+	cfg := testConfig(t)
 
 	// Create a running task
 	task := &db.Task{
@@ -168,7 +169,7 @@ func TestLogsAttach_ContextCancel(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		done <- logsAndAttach(cancelCtx, pool, task.ID, 0)
+		done <- logsAndAttach(cancelCtx, cfg, pool, task.ID, 0, "")
 	}()
 
 	// Give it time to start listening
@@ -197,7 +198,7 @@ func TestLogsAttach_RecoveryAfterConnectionLoss(t *testing.T) {
 	defer pool.Close()
 	ctx := context.Background()
 
-	initTestConfig(t)
+	cfg := testConfig(t)
 
 	// Create a running task
 	task := &db.Task{
@@ -215,7 +216,7 @@ func TestLogsAttach_RecoveryAfterConnectionLoss(t *testing.T) {
 	// Start logsAndAttach
 	done := make(chan error, 1)
 	go func() {
-		done <- logsAndAttach(ctx, pool, task.ID, 0)
+		done <- logsAndAttach(ctx, cfg, pool, task.ID, 0, "")
 	}()
 
 	// Wait for listener to establish
@@ -268,7 +269,7 @@ func TestLogsAttach_PollFallback(t *testing.T) {
 	defer pool.Close()
 	ctx := context.Background()
 
-	initTestConfig(t)
+	cfg := testConfig(t)
 
 	// Create a running task
 	task := &db.Task{
@@ -286,7 +287,7 @@ func TestLogsAttach_PollFallback(t *testing.T) {
 	// Start logsAndAttach
 	done := make(chan error, 1)
 	go func() {
-		done <- logsAndAttach(ctx, pool, task.ID, 0)
+		done <- logsAndAttach(ctx, cfg, pool, task.ID, 0, "")
 	}()
 
 	// Wait for listener

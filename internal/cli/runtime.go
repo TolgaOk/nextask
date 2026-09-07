@@ -18,8 +18,8 @@ import (
 
 // Runtime dispatch is internal to prepared tasks. It deliberately uses only the
 // queued options and worker environment, rather than reloading project config.
-func init() {
-	RootCmd.AddCommand(&cobra.Command{
+func newRuntimeCommand() *cobra.Command {
+	return &cobra.Command{
 		Use: "_run INTEGRATION OPTIONS COMMAND CLEANUP_MS", Hidden: true, Args: cobra.ExactArgs(4),
 		PersistentPreRunE: func(*cobra.Command, []string) error { return nil },
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -66,5 +66,5 @@ func init() {
 			}
 			return nil
 		},
-	})
+	}
 }

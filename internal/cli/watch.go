@@ -8,6 +8,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/TolgaOk/nextask/internal/config"
 	"github.com/TolgaOk/nextask/internal/db"
 	"github.com/cenkalti/backoff/v5"
 )
@@ -24,13 +25,14 @@ func interruptContext(ctx context.Context) (context.Context, context.CancelFunc)
 // stateWatcher treats notifications as hints. Callers decide completion from
 // stored state; polling covers lost hints and state changes without notifications.
 type stateWatcher struct {
+	retry    config.RetryConfig
 	notifier *db.Notifier
 	changes  chan struct{}
 	cancel   context.CancelFunc
 	closed   chan struct{}
 }
 
-func newStateWatcher(ctx context.Context, channels ...string) (*stateWatcher, error) {
+func newStateWatcher(ctx context.Context, cfg config.Config, channels ...string) (*stateWatcher, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	n, err := db.NewNotifier(ctx, cfg.DB.URL,
 		db.NewBackOff(cfg.Retry.InitialInterval, cfg.Retry.MaxInterval), channels)
@@ -38,7 +40,7 @@ func newStateWatcher(ctx context.Context, channels ...string) (*stateWatcher, er
 		cancel()
 		return nil, fmt.Errorf("listen failed: %w", err)
 	}
-	w := &stateWatcher{notifier: n, changes: make(chan struct{}, 1), cancel: cancel, closed: make(chan struct{})}
+	w := &stateWatcher{retry: cfg.Retry, notifier: n, changes: make(chan struct{}, 1), cancel: cancel, closed: make(chan struct{})}
 	// Drain and coalesce hints even while a state check adds subscriptions.
 	// Otherwise a full notification queue could block Notifier.Add.
 	go func() {
@@ -86,7 +88,7 @@ func (w *stateWatcher) Run(ctx context.Context, check func(context.Context) (boo
 			return err
 		}
 		done, err := db.RetryValue(ctx, func() (bool, error) { return check(ctx) },
-			backoff.WithBackOff(db.NewBackOff(cfg.Retry.InitialInterval, cfg.Retry.MaxInterval)),
+			backoff.WithBackOff(db.NewBackOff(w.retry.InitialInterval, w.retry.MaxInterval)),
 			backoff.WithMaxElapsedTime(0),
 			backoff.WithNotify(func(err error, delay time.Duration) {
 				fmt.Fprintf(os.Stderr, "watch: %s, retry in %v\n", db.HumanError(err), delay)

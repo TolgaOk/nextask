@@ -11,12 +11,8 @@ import (
 )
 
 func TestConfigShow(t *testing.T) {
-	oldCfg := cfg
-	t.Cleanup(func() { cfg = oldCfg })
-	cfg = &config.Config{Worker: config.WorkerConfig{Workdir: "/tmp/with spaces"}}
 	t.Setenv("NEXTASK_DB_URL", "postgres://alice:secret-value@localhost/db")
-	var err error
-	cfg, err = config.LoadFrom("/nonexistent/nextask-test-config.toml")
+	cfg, err := config.LoadFrom("/nonexistent/nextask-test-config.toml")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -26,7 +22,7 @@ func TestConfigShow(t *testing.T) {
 		cmd.Flags().Bool("sources", sources, "")
 		var output bytes.Buffer
 		cmd.SetOut(&output)
-		if err := showConfig(cmd, nil); err != nil {
+		if err := showConfig(cmd, *cfg); err != nil {
 			t.Fatal(err)
 		}
 		if strings.Contains(output.String(), "secret-value") || strings.Contains(output.String(), "alice") {

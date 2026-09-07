@@ -17,9 +17,6 @@ import (
 func TestEnqueueGitIntegration(t *testing.T) {
 	pool := setupTestDB(t)
 	defer pool.Close()
-	oldCfg, oldSnapshot, oldRemote, oldAttach, oldTags := cfg, snapshot, remote, attach, tags
-	t.Cleanup(func() { cfg, snapshot, remote, attach, tags = oldCfg, oldSnapshot, oldRemote, oldAttach, oldTags })
-	snapshot, remote, attach, tags = false, "", false, nil
 	root := filepath.Join(t.TempDir(), "project")
 	if err := os.MkdirAll(root, 0755); err != nil {
 		t.Fatal(err)
@@ -44,15 +41,17 @@ func TestEnqueueGitIntegration(t *testing.T) {
 	destination := filepath.Join(t.TempDir(), "remote.git")
 	git("init", "--bare", "-q", destination)
 	git("remote", "add", "snapshots", destination)
-	cfg = &config.Config{
+	cfg := config.Config{
 		DB:           config.DBConfig{URL: getTestDBURL(t)},
 		Integrations: map[string]map[string]any{"git": {"remote": "snapshots"}},
 	}
 	id := "integrated-task"
-	cmd := enqueueTestCommand(&id)
-	cmd.Flags().StringArray("with", []string{"git"}, "")
+	cmd := enqueueTestCommand(&cfg, &id)
+	if err := cmd.Flags().Set("with", "git"); err != nil {
+		t.Fatal(err)
+	}
 	command := `cat payload.txt; printf '%s\n' "$NEXTASK_TASK_ID"; exit 7`
-	if err := enqueueCmd.RunE(cmd, []string{command}); err != nil {
+	if err := cmd.RunE(cmd, []string{command}); err != nil {
 		t.Fatal(err)
 	}
 	task, err := db.GetTask(context.Background(), pool, id, time.Minute)
@@ -84,8 +83,8 @@ func TestEnqueueGitIntegration(t *testing.T) {
 	}
 	// Configured options do not enable integrations for plain tasks.
 	plainID := "plain-task"
-	plain := enqueueTestCommand(&plainID)
-	if err := enqueueCmd.RunE(plain, []string{"echo plain"}); err != nil {
+	plain := enqueueTestCommand(&cfg, &plainID)
+	if err := plain.RunE(plain, []string{"echo plain"}); err != nil {
 		t.Fatal(err)
 	}
 	plainTask, err := db.GetTask(context.Background(), pool, plainID, time.Minute)
@@ -94,10 +93,14 @@ func TestEnqueueGitIntegration(t *testing.T) {
 	}
 	// Validation errors never publish a task.
 	invalidID := "invalid-task"
-	invalid := enqueueTestCommand(&invalidID)
-	invalid.Flags().StringArray("with", []string{"git"}, "")
-	invalid.Flags().StringArray("set", []string{"git.unknown=value"}, "")
-	if err := enqueueCmd.RunE(invalid, []string{"true"}); err == nil {
+	invalid := enqueueTestCommand(&cfg, &invalidID)
+	if err := invalid.Flags().Set("with", "git"); err != nil {
+		t.Fatal(err)
+	}
+	if err := invalid.Flags().Set("set", "git.unknown=value"); err != nil {
+		t.Fatal(err)
+	}
+	if err := invalid.RunE(invalid, []string{"true"}); err == nil {
 		t.Fatal("invalid option accepted")
 	}
 	absent, err := db.GetTask(context.Background(), pool, invalidID, time.Minute)

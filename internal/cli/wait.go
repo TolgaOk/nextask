@@ -9,64 +9,66 @@ import (
 	"strings"
 	"time"
 
+	"github.com/TolgaOk/nextask/internal/config"
 	"github.com/TolgaOk/nextask/internal/db"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/spf13/cobra"
 )
 
-var (
-	waitTags    []string
-	waitTimeout time.Duration
-	waitAny     bool
-)
-
-var waitCmd = &cobra.Command{
-	Use:   "wait TASK_ID [TASK_ID...]",
-	Short: "Block until tasks complete",
-	Args: func(cmd *cobra.Command, args []string) error {
-		if len(waitTags) > 0 && len(args) > 0 {
-			return errWithHints("cannot use both task IDs and --tag",
-				"Use either: "+codeStyle.Render("nextask wait <id1> <id2>"),
-				"Or:         "+codeStyle.Render("nextask wait --tag key=value"),
-			)
-		}
-		if len(waitTags) == 0 && len(args) == 0 {
-			return errWithHints("task ID or --tag is required",
-				"Example: "+codeStyle.Render("nextask wait <id>"),
-				"Or:      "+codeStyle.Render("nextask wait --tag key=value"),
-			)
-		}
-		return nil
-	},
-	RunE: runWait,
+type waitOptions struct {
+	tags    []string
+	timeout time.Duration
+	any     bool
 }
 
-func init() {
-	waitCmd.Flags().StringSliceVar(&waitTags, "tag", nil, "Wait for all tasks matching tag (key=value)")
-	waitCmd.Flags().DurationVar(&waitTimeout, "timeout", 0, "Exit 124 if tasks not done within duration")
-	waitCmd.Flags().BoolVar(&waitAny, "any", false, "Return when any task completes (not all)")
-	RootCmd.AddCommand(waitCmd)
+func newWaitCommand(cfg *config.Config) *cobra.Command {
+	var opts waitOptions
+	cmd := &cobra.Command{
+		Use:   "wait TASK_ID [TASK_ID...]",
+		Short: "Block until tasks complete",
+		Args: func(cmd *cobra.Command, args []string) error {
+			if len(opts.tags) > 0 && len(args) > 0 {
+				return errWithHints("cannot use both task IDs and --tag",
+					"Use either: "+codeStyle.Render("nextask wait <id1> <id2>"),
+					"Or:         "+codeStyle.Render("nextask wait --tag key=value"),
+				)
+			}
+			if len(opts.tags) == 0 && len(args) == 0 {
+				return errWithHints("task ID or --tag is required",
+					"Example: "+codeStyle.Render("nextask wait <id>"),
+					"Or:      "+codeStyle.Render("nextask wait --tag key=value"),
+				)
+			}
+			return nil
+		},
+		RunE: func(cmd *cobra.Command, args []string) error { return runWait(cmd, args, *cfg, opts) },
+	}
+
+	cmd.Flags().StringSliceVar(&opts.tags, "tag", nil, "Wait for all tasks matching tag (key=value)")
+	cmd.Flags().DurationVar(&opts.timeout, "timeout", 0, "Exit 124 if tasks not done within duration")
+	cmd.Flags().BoolVar(&opts.any, "any", false, "Return when any task completes (not all)")
+	return cmd
 }
 
-func runWait(cmd *cobra.Command, args []string) error {
+func runWait(cmd *cobra.Command, args []string, cfg config.Config, opts waitOptions) error {
 	if cfg.DB.URL == "" {
 		return errDBRequired()
 	}
-	if waitTimeout < 0 {
+	if opts.timeout < 0 {
 		return errWithHints("timeout must not be negative", "Example: "+codeStyle.Render("--timeout 30s"))
 	}
 	ctx, stop := interruptContext(cmd.Context())
 	defer stop()
-	if waitTimeout > 0 {
+	if opts.timeout > 0 {
 		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, waitTimeout)
+		ctx, cancel = context.WithTimeout(ctx, opts.timeout)
 		defer cancel()
 	}
 	remaining := make(map[string]bool)
 	for _, id := range args {
 		remaining[id] = true
 	}
-	err := runTaskWait(ctx, args, remaining)
+	err := runTaskWait(ctx, cfg, opts, args, remaining)
 	if errors.Is(err, context.DeadlineExceeded) && ctx.Err() != nil {
 		return handleTimeout(remaining)
 	}
@@ -76,8 +78,8 @@ func runWait(cmd *cobra.Command, args []string) error {
 	return err
 }
 
-func runTaskWait(ctx context.Context, ids []string, remaining map[string]bool) error {
-	parsedTags, err := parseTags(waitTags)
+func runTaskWait(ctx context.Context, cfg config.Config, opts waitOptions, ids []string, remaining map[string]bool) error {
+	parsedTags, err := parseTags(opts.tags)
 	if err != nil {
 		return err
 	}
@@ -93,12 +95,12 @@ func runTaskWait(ctx context.Context, ids []string, remaining map[string]bool) e
 	if len(ids) == 0 {
 		channels = append(channels, db.ToWorkersChannel)
 	}
-	watch, err := newStateWatcher(ctx, channels...)
+	watch, err := newStateWatcher(ctx, cfg, channels...)
 	if err != nil {
 		return err
 	}
 	defer watch.Close()
-	w := &waiter{pool: pool, watch: watch, remaining: remaining, any: waitAny, seen: make(map[string]bool)}
+	w := &waiter{staleThreshold: cfg.Worker.StaleDuration(), pool: pool, watch: watch, remaining: remaining, any: opts.any, seen: make(map[string]bool)}
 	for _, id := range ids {
 		w.add(id)
 	}
@@ -109,7 +111,7 @@ func runTaskWait(ctx context.Context, ids []string, remaining map[string]bool) e
 			}
 			if len(w.seen) == 0 {
 				return false, errWithHints("no tasks found matching tags",
-					"Check with: "+codeStyle.Render("nextask list --tag "+strings.Join(waitTags, " --tag ")))
+					"Check with: "+codeStyle.Render("nextask list --tag "+strings.Join(opts.tags, " --tag ")))
 			}
 		}
 		return w.check(ctx)
@@ -122,13 +124,14 @@ func runTaskWait(ctx context.Context, ids []string, remaining map[string]bool) e
 
 // waiter owns one wait operation's task set and completion policy.
 type waiter struct {
-	pool      *pgxpool.Pool
-	watch     *stateWatcher
-	remaining map[string]bool
-	seen      map[string]bool
-	order     []string
-	any       bool
-	failCode  int
+	staleThreshold time.Duration
+	pool           *pgxpool.Pool
+	watch          *stateWatcher
+	remaining      map[string]bool
+	seen           map[string]bool
+	order          []string
+	any            bool
+	failCode       int
 }
 
 func (w *waiter) add(id string) {
@@ -140,7 +143,7 @@ func (w *waiter) add(id string) {
 }
 
 func (w *waiter) discover(ctx context.Context, tags map[string]string) error {
-	tasks, err := db.ListTasks(ctx, w.pool, db.ListFilter{Tags: tags, StaleThreshold: cfg.Worker.StaleDuration()})
+	tasks, err := db.ListTasks(ctx, w.pool, db.ListFilter{Tags: tags, StaleThreshold: w.staleThreshold})
 	if err != nil {
 		return err
 	}
@@ -165,7 +168,7 @@ func (w *waiter) check(ctx context.Context) (bool, error) {
 		if !w.remaining[id] {
 			continue
 		}
-		task, err := db.GetTask(ctx, w.pool, id, cfg.Worker.StaleDuration())
+		task, err := db.GetTask(ctx, w.pool, id, w.staleThreshold)
 		if err != nil {
 			return false, err
 		}

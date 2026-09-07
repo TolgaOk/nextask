@@ -172,15 +172,13 @@ func TestWatchingCLI(t *testing.T) {
 func TestStateWatcherLifecycle(t *testing.T) {
 	pool := setupTestDB(t)
 	defer pool.Close()
-	previous := cfg
-	initTestConfig(t)
-	defer func() { cfg = previous }()
+	cfg := testConfig(t)
 	cfg.Retry.InitialInterval = 10 * time.Millisecond
 	cfg.Retry.MaxInterval = 20 * time.Millisecond
 	t.Run("cancel-active-query", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		watch, err := newStateWatcher(ctx, "blocked-query")
+		watch, err := newStateWatcher(ctx, cfg, "blocked-query")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -224,7 +222,7 @@ func TestStateWatcherLifecycle(t *testing.T) {
 	t.Run("subscribe-under-notification-load", func(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
-		watch, err := newStateWatcher(ctx, "busy-watch")
+		watch, err := newStateWatcher(ctx, cfg, "busy-watch")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -242,7 +240,7 @@ func TestStateWatcherLifecycle(t *testing.T) {
 		t.Run(fmt.Sprintf("retry-%t", transient), func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 			defer cancel()
-			watch, err := newStateWatcher(ctx, "retry-watch")
+			watch, err := newStateWatcher(ctx, cfg, "retry-watch")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -272,7 +270,7 @@ func TestStateWatcherLifecycle(t *testing.T) {
 	t.Run("closed-listener", func(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
-		watch, err := newStateWatcher(ctx, "closed-watch")
+		watch, err := newStateWatcher(ctx, cfg, "closed-watch")
 		if err != nil {
 			t.Fatal(err)
 		}

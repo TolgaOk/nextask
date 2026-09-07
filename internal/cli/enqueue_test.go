@@ -12,10 +12,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func enqueueTestCommand(id *string) *cobra.Command {
-	cmd := &cobra.Command{}
+func enqueueTestCommand(cfg *config.Config, id *string) *cobra.Command {
+	cmd := newEnqueueCommand(cfg)
 	cmd.SetContext(context.Background())
-	cmd.Flags().String("id", "", "")
 	if id != nil {
 		_ = cmd.Flags().Set("id", *id)
 	}
@@ -24,12 +23,13 @@ func enqueueTestCommand(id *string) *cobra.Command {
 
 func TestEnqueueInvalidID(t *testing.T) {
 	for _, id := range []string{"", "../task", strings.Repeat("a", 54)} {
-		cmd := enqueueTestCommand(&id)
-		if err := enqueueCmd.Args(cmd, []string{"echo test"}); err == nil {
+		cmd := enqueueTestCommand(&config.Config{}, &id)
+		if err := cmd.Args(cmd, []string{"echo test"}); err == nil {
 			t.Errorf("invalid ID %q accepted", id)
 		}
 	}
-	if err := enqueueCmd.Args(enqueueTestCommand(nil), []string{"echo test"}); err != nil {
+	cmd := enqueueTestCommand(&config.Config{}, nil)
+	if err := cmd.Args(cmd, []string{"echo test"}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -37,41 +37,45 @@ func TestEnqueueInvalidID(t *testing.T) {
 func TestEnqueueIDs(t *testing.T) {
 	pool := setupTestDB(t)
 	defer pool.Close()
-	oldCfg, oldSnapshot, oldRemote, oldAttach, oldTags := cfg, snapshot, remote, attach, tags
-	t.Cleanup(func() { cfg, snapshot, remote, attach, tags = oldCfg, oldSnapshot, oldRemote, oldAttach, oldTags })
-	cfg = &config.Config{DB: config.DBConfig{URL: getTestDBURL(t)}}
-	snapshot, remote, attach, tags = false, "", false, nil
+	cfg := testConfig(t)
 	ctx := context.Background()
 	id := "export-42"
-	cmd := enqueueTestCommand(&id)
-	if err := enqueueCmd.RunE(cmd, []string{"echo original"}); err != nil {
+	cmd := enqueueTestCommand(&cfg, &id)
+	if err := cmd.RunE(cmd, []string{"echo original"}); err != nil {
 		t.Fatal(err)
 	}
 	// Duplicate rejection must happen before even attempting a snapshot.
-	snapshot = true
+	if err := cmd.Flags().Set("snapshot", "true"); err != nil {
+		t.Fatal(err)
+	}
 	cfg.Source.Remote = "/nonexistent/nextask-test-remote.git"
 	t.Chdir(t.TempDir())
-	if err := enqueueCmd.RunE(cmd, []string{"echo replacement"}); !errors.Is(err, db.ErrTaskExists) {
+	if err := cmd.RunE(cmd, []string{"echo replacement"}); !errors.Is(err, db.ErrTaskExists) {
 		t.Fatalf("duplicate error = %v", err)
 	}
 	task, err := db.GetTask(ctx, pool, id, time.Minute)
 	if err != nil || task == nil || task.Command != "echo original" || task.SourceType != "noop" {
 		t.Fatalf("duplicate changed original task: %+v, %v", task, err)
 	}
-	// Failed snapshot preparation rolls back the reserved ID.
+	// Failed preparation rolls back the ID; a fresh plain command can reuse it.
 	failedID := "failed-snapshot"
-	if err := enqueueCmd.RunE(enqueueTestCommand(&failedID), []string{"true"}); err == nil {
+	failed := enqueueTestCommand(&cfg, &failedID)
+	if err := failed.Flags().Set("snapshot", "true"); err != nil {
+		t.Fatal(err)
+	}
+	if err := failed.RunE(failed, []string{"true"}); err == nil {
 		t.Fatal("expected snapshot failure outside a repository")
 	}
 	task, err = db.GetTask(ctx, pool, failedID, time.Minute)
 	if err != nil || task != nil {
 		t.Fatalf("failed task was published: %+v, %v", task, err)
 	}
-	snapshot = false
-	if err := enqueueCmd.RunE(enqueueTestCommand(&failedID), []string{"true"}); err != nil {
+	plain := enqueueTestCommand(&cfg, &failedID)
+	if err := plain.RunE(plain, []string{"true"}); err != nil {
 		t.Fatalf("rolled-back ID cannot be reused: %v", err)
 	}
-	if err := enqueueCmd.RunE(enqueueTestCommand(nil), []string{"echo generated"}); err != nil {
+	generated := enqueueTestCommand(&cfg, nil)
+	if err := generated.RunE(generated, []string{"echo generated"}); err != nil {
 		t.Fatal(err)
 	}
 	tasks, err := db.ListTasks(ctx, pool, db.ListFilter{Commands: []string{"echo generated"}})
@@ -83,16 +87,15 @@ func TestEnqueueIDs(t *testing.T) {
 func TestEnqueueConcurrentID(t *testing.T) {
 	pool := setupTestDB(t)
 	defer pool.Close()
-	oldCfg := cfg
-	t.Cleanup(func() { cfg = oldCfg })
-	cfg = &config.Config{DB: config.DBConfig{URL: getTestDBURL(t)}}
+	cfg := testConfig(t)
 	id := "concurrent-task"
 	start := make(chan struct{})
 	results := make(chan error, 2)
 	for range 2 {
 		go func() {
+			cmd := enqueueTestCommand(&cfg, &id)
 			<-start
-			results <- enqueueCmd.RunE(enqueueTestCommand(&id), []string{"true"})
+			results <- cmd.RunE(cmd, []string{"true"})
 		}()
 	}
 	close(start)
