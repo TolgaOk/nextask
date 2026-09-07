@@ -6,6 +6,8 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"io"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -61,5 +63,50 @@ func TestS3TransportRejectsInvalidEndpoint(t *testing.T) {
 		if _, err := NewS3(testConfig(), value); err == nil || strings.Contains(err.Error(), "secret") {
 			t.Fatalf("invalid transport endpoint accepted or exposed: %v", err)
 		}
+	}
+}
+
+func TestS3Downloads(t *testing.T) {
+	server := storagetest.New()
+	defer server.Close()
+	cfg := testConfig()
+	cfg.Bucket, cfg.Region = "bucket", "fsn1"
+	store, err := NewS3(cfg, strings.Replace(server.URL, "://", "://test-access:test-secret@", 1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	for _, key := range []string{"task/a", "task/b", "task/c", "task-other/no"} {
+		if err := store.Put(ctx, key, strings.NewReader(key), int64(len(key)), "", "text/plain"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var keys []string
+	if err := store.List(ctx, "task/", func(key string) error { keys = append(keys, key); return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(keys, []string{"task/a", "task/b", "task/c"}) {
+		t.Fatalf("listed %v", keys)
+	}
+	body, meta, err := store.Get(ctx, "task/b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := io.ReadAll(body)
+	body.Close()
+	if err != nil || string(data) != "task/b" || meta.Size != 6 {
+		t.Fatalf("download: %q %+v %v", data, meta, err)
+	}
+	if _, _, err := store.Get(ctx, "missing"); err == nil {
+		t.Fatal("missing object accepted")
+	}
+	stop := errors.New("stop listing")
+	if err := store.List(ctx, "task/", func(string) error { return stop }); !errors.Is(err, stop) {
+		t.Fatalf("visitor error: %v", err)
+	}
+	cancelled, cancel := context.WithCancel(ctx)
+	cancel()
+	if err := store.List(cancelled, "task/", func(string) error { return nil }); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancel: %v", err)
 	}
 }

@@ -74,6 +74,14 @@ Agreed CLI, config, and defaults: [S3 design](doc/s3.md).
 - [x] Test filters, overrides, changed files, failures, cancellation, retention, and Git composition.
 - [x] Verify live Hetzner uploads/readback, multipart, cancellation, and test-resource cleanup.
 
+## S3 fetch
+
+- [x] Reuse the S3 client for paginated listing and streaming downloads.
+- [ ] Add `s3 fetch TASK_ID --to DIR`, filters, dry-run, and explicit overwrite.
+- [ ] Keep fetching independent of DB credentials and upload filters.
+- [ ] Reject unsafe paths; publish complete downloads atomically.
+- [ ] Test failures, interruption, conflicts, and live Hetzner fetching.
+
 ## Later
 
 - [ ] Add observability integration; create separate tool CLIs only when independently useful.

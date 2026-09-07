@@ -5,10 +5,12 @@ import (
 	"bufio"
 	"bytes"
 	"crypto/md5"
+	"encoding/xml"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -53,7 +55,23 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	key := strings.TrimPrefix(r.URL.Path, "/")
+	if r.Method == "GET" && r.URL.Query().Get("list-type") == "2" {
+		s.list(w, r, strings.TrimSuffix(key, "/"))
+		return
+	}
 	switch r.Method {
+	case "GET":
+		o, ok := s.Object(key)
+		if !ok {
+			s3Error(w, 404, "NoSuchKey")
+			return
+		}
+		w.Header().Set("Content-Length", strconv.Itoa(len(o.Data)))
+		w.Header().Set("ETag", fmt.Sprintf(`"%x"`, md5.Sum(o.Data)))
+		w.Header().Set("Last-Modified", time.Now().UTC().Format(http.TimeFormat))
+		w.Header().Set("X-Amz-Meta-Nextask-Sha256", o.Digest)
+		w.Write(o.Data)
+
 	case "HEAD":
 		o, ok := s.Object(key)
 		if !ok {
@@ -137,4 +155,41 @@ func decodeChunks(raw []byte) ([]byte, error) {
 			return nil, err
 		}
 	}
+}
+
+// Small pages exercise continuation tokens in download clients.
+func (s *Server) list(w http.ResponseWriter, r *http.Request, bucket string) {
+	type entry struct {
+		Key  string
+		Size int
+		ETag string
+	}
+	result := struct {
+		XMLName               xml.Name `xml:"ListBucketResult"`
+		IsTruncated           bool
+		NextContinuationToken string `xml:",omitempty"`
+		Contents              []entry
+	}{}
+	prefix, token := r.URL.Query().Get("prefix"), r.URL.Query().Get("continuation-token")
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	keys := []string{}
+	for full := range s.objects {
+		key, ok := strings.CutPrefix(full, bucket+"/")
+		if ok && strings.HasPrefix(key, prefix) && key > token {
+			keys = append(keys, key)
+		}
+	}
+	sort.Strings(keys)
+	if len(keys) > 2 {
+		keys = keys[:2]
+		result.IsTruncated = true
+		result.NextContinuationToken = keys[1]
+	}
+	for _, key := range keys {
+		o := s.objects[bucket+"/"+key]
+		result.Contents = append(result.Contents, entry{key, len(o.Data), fmt.Sprintf(`"%x"`, md5.Sum(o.Data))})
+	}
+	w.Header().Set("Content-Type", "application/xml")
+	xml.NewEncoder(w).Encode(result)
 }

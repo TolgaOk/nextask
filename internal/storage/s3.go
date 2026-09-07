@@ -19,10 +19,22 @@ type Object struct {
 	SHA256 string
 }
 
-// Store is the small transport boundary used by the upload policy.
+// Store is the transport boundary used by the upload policy.
 type Store interface {
 	Stat(context.Context, string) (Object, error)
 	Put(context.Context, string, io.Reader, int64, string, string) error
+}
+
+// DownloadStore provides streaming reads and paginated object discovery.
+type DownloadStore interface {
+	List(context.Context, string, func(string) error) error
+	Get(context.Context, string) (io.ReadCloser, Object, error)
+}
+
+// Client supports both upload and download policies.
+type Client interface {
+	Store
+	DownloadStore
 }
 
 type s3Store struct {
@@ -31,7 +43,7 @@ type s3Store struct {
 }
 
 // NewS3 constructs a transport from an endpoint already resolved by the integration.
-func NewS3(c Config, resolvedEndpoint string) (Store, error) {
+func NewS3(c Config, resolvedEndpoint string) (Client, error) {
 	connection, err := url.Parse(resolvedEndpoint)
 	if err != nil || connection.User == nil {
 		return nil, fmt.Errorf("invalid storage endpoint")
@@ -65,4 +77,31 @@ func (s *s3Store) Put(ctx context.Context, key string, body io.Reader, size int6
 		SendContentMd5: true, NumThreads: 1,
 	})
 	return err
+}
+
+func (s *s3Store) List(ctx context.Context, prefix string, visit func(string) error) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	for info := range s.client.ListObjects(ctx, s.bucket, minio.ListObjectsOptions{Prefix: prefix, Recursive: true}) {
+		if info.Err != nil {
+			return info.Err
+		}
+		if err := visit(info.Key); err != nil {
+			return err
+		}
+	}
+	return ctx.Err()
+}
+
+func (s *s3Store) Get(ctx context.Context, key string) (io.ReadCloser, Object, error) {
+	object, err := s.client.GetObject(ctx, s.bucket, key, minio.GetObjectOptions{})
+	if err != nil {
+		return nil, Object{}, err
+	}
+	info, err := object.Stat()
+	if err != nil {
+		object.Close()
+		return nil, Object{}, err
+	}
+	return object, Object{Size: info.Size, SHA256: info.Metadata.Get("X-Amz-Meta-Nextask-Sha256")}, nil
 }
