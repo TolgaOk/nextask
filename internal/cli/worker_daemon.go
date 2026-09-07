@@ -1,10 +1,16 @@
 package cli
 
 import (
+	"context"
+	"encoding/csv"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
+	"strings"
 	"syscall"
 	"time"
 
@@ -12,7 +18,10 @@ import (
 	"github.com/moby/moby/pkg/namesgenerator"
 )
 
-func daemonize(cfg worker.Config, timeout time.Duration) error {
+const daemonStartupTimeout = 30 * time.Second
+const daemonStopTimeout = 5 * time.Second
+
+func daemonize(ctx context.Context, cfg worker.Config, timeout time.Duration) error {
 	id := cfg.Name
 	if id == "" {
 		id = namesgenerator.GetRandomName(0)
@@ -38,7 +47,7 @@ func daemonize(cfg worker.Config, timeout time.Duration) error {
 		return fmt.Errorf("failed to get executable: %w", err)
 	}
 
-	args := []string{"worker", "--_id", id, "--workdir", cfg.Workdir}
+	args := []string{"worker", "--_id", id, "--workdir", cfg.Workdir, "--_ready-fd", "3"}
 	if cfg.Once {
 		args = append(args, "--once")
 	}
@@ -51,8 +60,22 @@ func daemonize(cfg worker.Config, timeout time.Duration) error {
 	if cfg.ExitIfIdle != nil {
 		args = append(args, "--exit-if-idle", cfg.ExitIfIdle.String())
 	}
-	for key, value := range cfg.TagFilter {
-		args = append(args, "--filter", key+"="+value)
+	if len(cfg.TagFilter) > 0 {
+		filters := make([]string, 0, len(cfg.TagFilter))
+		for key, value := range cfg.TagFilter {
+			filters = append(filters, key+"="+value)
+		}
+		slices.Sort(filters)
+		var encoded strings.Builder
+		writer := csv.NewWriter(&encoded)
+		if err := writer.Write(filters); err != nil {
+			return err
+		}
+		writer.Flush()
+		if err := writer.Error(); err != nil {
+			return err
+		}
+		args = append(args, "--filter", strings.TrimSuffix(encoded.String(), "\n"))
 	}
 
 	cmd := exec.Command(exe, args...)
@@ -61,17 +84,81 @@ func daemonize(cfg worker.Config, timeout time.Duration) error {
 	cmd.Stderr = logFile
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("failed to start daemon: %w", err)
+	startupCtx, cancel := context.WithTimeout(ctx, daemonStartupTimeout)
+	defer cancel()
+	pid, err := startDaemon(startupCtx, cmd)
+	if err != nil {
+		return fmt.Errorf("daemon startup failed (logs: %s): %w", logPath, err)
 	}
-
-	pid := cmd.Process.Pid
-
-	// Release child so it continues after parent exits
-	if err := cmd.Process.Release(); err != nil {
-		return fmt.Errorf("failed to release daemon process: %w", err)
-	}
-
 	_, err = fmt.Fprintf(cfg.Stderr, "Worker %s started as daemon (pid %d)\nLogs: %s\n", id, pid, logPath)
 	return err
+}
+
+// startDaemon owns the child until readiness. Any failure stops and reaps it;
+// only a confirmed worker is released to outlive the caller.
+func startDaemon(ctx context.Context, cmd *exec.Cmd) (int, error) {
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		return 0, err
+	}
+	defer reader.Close()
+	defer writer.Close()
+	cmd.ExtraFiles = []*os.File{writer}
+	if err := cmd.Start(); err != nil {
+		return 0, err
+	}
+	writer.Close()
+	pid := cmd.Process.Pid
+	if err := awaitDaemonReady(ctx, reader); err != nil {
+		stopDaemon(cmd)
+		return 0, err
+	}
+	if err := cmd.Process.Release(); err != nil {
+		stopDaemon(cmd)
+		return 0, fmt.Errorf("release daemon process: %w", err)
+	}
+	return pid, nil
+}
+
+func awaitDaemonReady(ctx context.Context, reader *os.File) error {
+	done := make(chan error, 1)
+	go func() {
+		var ready [1]byte
+		_, err := io.ReadFull(reader, ready[:])
+		if errors.Is(err, io.EOF) {
+			err = fmt.Errorf("worker exited before confirming readiness")
+		}
+		if err == nil && ready[0] != 1 {
+			err = fmt.Errorf("invalid worker readiness response")
+		}
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		return err
+	case <-ctx.Done():
+		reader.Close()
+		<-done
+		return ctx.Err()
+	}
+}
+
+func stopDaemon(cmd *exec.Cmd) {
+	cmd.Process.Signal(syscall.SIGTERM)
+	done := make(chan struct{})
+	go func() { cmd.Wait(); close(done) }()
+	timer := time.NewTimer(daemonStopTimeout)
+	defer timer.Stop()
+	select {
+	case <-done:
+	case <-timer.C:
+		cmd.Process.Kill()
+		<-done
+	}
 }

@@ -34,10 +34,14 @@ type Worker struct {
 	journal           completionJournal
 	stdout            io.Writer
 	stderr            io.Writer
+	ready             func() error
 }
 
 // Config contains worker configuration options.
 type Config struct {
+	// Ready runs after startup and recovery, before claiming tasks. An error
+	// aborts startup and releases the registration and background goroutines.
+	Ready func() error
 	// Stdout and Stderr receive worker diagnostics; nil uses the process streams.
 	// Writers must support concurrent writes.
 	Stdout            io.Writer
@@ -94,7 +98,7 @@ func New(ctx context.Context, cfg Config) (*Worker, error) {
 
 	return &Worker{
 		ID:     workerID,
-		stdout: cfg.Stdout, stderr: cfg.Stderr,
+		stdout: cfg.Stdout, stderr: cfg.Stderr, ready: cfg.Ready,
 		Info: workerInfo,
 		Pool: pool,
 		Executor: &Executor{
@@ -180,11 +184,18 @@ func (w *Worker) Run(parentCtx context.Context) (runErr error) {
 		<-heartbeatDone
 	}()
 
-	fmt.Fprintf(w.stdout, "Worker %s started\n", w.ID)
-
 	if err := w.recoverCompletions(ctx); err != nil {
 		return err
 	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if w.ready != nil {
+		if err := w.ready(); err != nil {
+			return fmt.Errorf("confirm worker startup: %w", err)
+		}
+	}
+	fmt.Fprintf(w.stdout, "Worker %s started\n", w.ID)
 
 	var idleTimer *time.Timer
 	var idleCh <-chan time.Time

@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"encoding/csv"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -92,8 +93,18 @@ func TestDaemonDatabaseEnvironment(t *testing.T) {
 		return string(out)
 	}
 	id := "daemon-env"
-	run("enqueue", "--id", id, `printf '%s' "$NEXTASK_DB_URL" > db-env; echo ready > ready; while [ ! -f finish ]; do sleep 0.1; done`)
-	out := run("worker", "--daemon", "--rm", "--exit-if-idle", "200ms", "--workdir", workdir)
+	var encoded strings.Builder
+	writer := csv.NewWriter(&encoded)
+	if err := writer.Write([]string{"group=a,b \"quoted\"\nnext"}); err != nil {
+		t.Fatal(err)
+	}
+	writer.Flush()
+	if err := writer.Error(); err != nil {
+		t.Fatal(err)
+	}
+	filter := strings.TrimSuffix(encoded.String(), "\n")
+	run("enqueue", "--tag", filter, "--id", id, `if (: >&3) 2>/dev/null; then exit 19; fi; printf '%s' "$NEXTASK_DB_URL" > db-env; echo ready > ready; while [ ! -f finish ]; do sleep 0.1; done`)
+	out := run("worker", "--daemon", "--filter", filter, "--rm", "--exit-if-idle", "200ms", "--workdir", workdir)
 	match := regexp.MustCompile(`pid ([0-9]+)`).FindStringSubmatch(out)
 	if len(match) != 2 {
 		t.Fatalf("missing daemon PID: %s", out)

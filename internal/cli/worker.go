@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/TolgaOk/nextask/internal/config"
@@ -19,6 +20,7 @@ type workerOptions struct {
 	exitIfIdle string
 	id         string
 	timeout    string
+	readyFD    int
 	filters    []string
 }
 
@@ -39,12 +41,20 @@ func newWorkerCommand(cfg *config.Config) *cobra.Command {
 			}
 			out := outputFor(cmd)
 			resolved.Stdout, resolved.Stderr = out.out, out.err
-			if opts.daemon {
-				return daemonize(resolved, timeout)
-			}
-
 			ctx, stop := interruptContext(cmd.Context())
 			defer stop()
+			if opts.daemon {
+				return daemonize(ctx, resolved, timeout)
+			}
+			if opts.readyFD >= 0 {
+				pipe := os.NewFile(uintptr(opts.readyFD), "daemon-ready")
+				defer pipe.Close()
+				resolved.Ready = func() error {
+					_, err := pipe.Write([]byte{1})
+					pipe.Close() // Close before any payload can inherit the descriptor.
+					return err
+				}
+			}
 			if timeout > 0 {
 				var cancel context.CancelFunc
 				ctx, cancel = context.WithTimeout(ctx, timeout)
@@ -68,12 +78,17 @@ func newWorkerCommand(cfg *config.Config) *cobra.Command {
 	cmd.Flags().StringSliceVar(&opts.filters, "filter", nil, "Only claim tasks with tag (key=value, repeatable)")
 	cmd.Flags().StringVar(&opts.id, "_id", "", "Worker ID (internal use)")
 	cmd.Flags().MarkHidden("_id")
+	cmd.Flags().IntVar(&opts.readyFD, "_ready-fd", -1, "Daemon startup pipe (internal use)")
+	cmd.Flags().MarkHidden("_ready-fd")
 	cmd.AddCommand(newWorkerListCommand(cfg), newWorkerStopCommand(cfg))
 	return cmd
 }
 
 // resolve validates flags before either starting a worker or spawning a daemon.
 func (opts workerOptions) resolve(cfg config.Config) (worker.Config, time.Duration, error) {
+	if opts.readyFD != -1 && (opts.readyFD != 3 || opts.daemon) {
+		return worker.Config{}, 0, fmt.Errorf("invalid daemon startup descriptor")
+	}
 	resolved := worker.Config{
 		DBURL: cfg.DB.URL, Workdir: cfg.Worker.Workdir, Name: opts.id,
 		Once: opts.once, Rm: opts.rm,
