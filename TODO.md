@@ -4,7 +4,7 @@ Nextask runs commands. Built-in integrations prepare tasks and compose runtime w
 
 ## Nextask
 
-- [ ] Unify worker validation and daemon options; preserve `--rm` and `--exit-if-idle`.
+- [x] Unify worker validation and daemon options; preserve `--rm` and `--exit-if-idle`.
 - [ ] Use typed DB errors; preserve causes and classify network failures correctly.
 - [ ] Route CLI output through command writers; report rendering failures.
 - [ ] Move enqueue SQL into a named DB operation; preserve transaction ordering.

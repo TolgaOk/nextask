@@ -41,49 +41,12 @@ func newWorkerCommand(cfg *config.Config) *cobra.Command {
 				return errDBRequired()
 			}
 
-			// Apply overrides to this invocation's copy.
-			effective := *cfg
-			if opts.workdir != "" {
-				effective.Worker.Workdir = opts.workdir
+			resolved, timeout, err := opts.resolve(*cfg)
+			if err != nil {
+				return err
 			}
-
-			// Daemon mode: spawn child process without --daemon and exit
 			if opts.daemon {
-				return daemonize(effective, opts)
-			}
-
-			// Parse timeout if provided
-			var timeout time.Duration
-			if opts.timeout != "" {
-				var err error
-				timeout, err = str2duration.ParseDuration(opts.timeout)
-				if err != nil {
-					return errWithHints(fmt.Sprintf("invalid timeout: %s", opts.timeout),
-						"Examples: "+codeStyle.Render("1h")+", "+codeStyle.Render("24h")+", "+codeStyle.Render("7d"),
-					)
-				}
-				if timeout <= 0 {
-					return errWithHints("timeout must be positive",
-						"Examples: "+codeStyle.Render("1h")+", "+codeStyle.Render("24h")+", "+codeStyle.Render("7d"),
-					)
-				}
-			}
-
-			// Parse exit-if-idle if provided
-			var exitIfIdleDuration *time.Duration
-			if opts.exitIfIdle != "" {
-				d, err := str2duration.ParseDuration(opts.exitIfIdle)
-				if err != nil {
-					return errWithHints(fmt.Sprintf("invalid exit-if-idle: %s", opts.exitIfIdle),
-						"Examples: "+codeStyle.Render("0s")+", "+codeStyle.Render("1m")+", "+codeStyle.Render("5m"),
-					)
-				}
-				if d < 0 {
-					return errWithHints("exit-if-idle must not be negative",
-						"Examples: "+codeStyle.Render("0s")+", "+codeStyle.Render("1m")+", "+codeStyle.Render("5m"),
-					)
-				}
-				exitIfIdleDuration = &d
+				return daemonize(resolved, timeout)
 			}
 
 			ctx, stop := interruptContext(cmd.Context())
@@ -93,28 +56,7 @@ func newWorkerCommand(cfg *config.Config) *cobra.Command {
 				ctx, cancel = context.WithTimeout(ctx, timeout)
 				defer cancel()
 			}
-
-			// Parse tag filters
-			tagFilter, err := parseTags(opts.filters)
-			if err != nil {
-				return err
-			}
-
-			w, err := worker.New(ctx, worker.Config{
-				DBURL:             cfg.DB.URL,
-				Workdir:           effective.Worker.Workdir,
-				Name:              opts.id,
-				Once:              opts.once,
-				Rm:                opts.rm,
-				ExitIfIdle:        exitIfIdleDuration,
-				HeartbeatInterval: effective.Worker.HeartbeatInterval,
-				BackoffInitial:    cfg.Retry.InitialInterval,
-				BackoffMax:        cfg.Retry.MaxInterval,
-				TagFilter:         tagFilter,
-				LogFlushLines:     effective.Worker.LogFlushLines,
-				LogFlushInterval:  effective.Worker.LogFlushInterval,
-				LogBufferSize:     effective.Worker.LogBufferSize,
-			})
+			w, err := worker.New(ctx, resolved)
 			if err != nil {
 				return err
 			}
@@ -134,6 +76,52 @@ func newWorkerCommand(cfg *config.Config) *cobra.Command {
 	cmd.Flags().MarkHidden("_id")
 	cmd.AddCommand(newWorkerListCommand(cfg), newWorkerStopCommand(cfg))
 	return cmd
+}
+
+// resolve validates flags before either starting a worker or spawning a daemon.
+func (opts workerOptions) resolve(cfg config.Config) (worker.Config, time.Duration, error) {
+	resolved := worker.Config{
+		DBURL: cfg.DB.URL, Workdir: cfg.Worker.Workdir, Name: opts.id,
+		Once: opts.once, Rm: opts.rm,
+		HeartbeatInterval: cfg.Worker.HeartbeatInterval,
+		BackoffInitial:    cfg.Retry.InitialInterval, BackoffMax: cfg.Retry.MaxInterval,
+		LogFlushLines: cfg.Worker.LogFlushLines, LogFlushInterval: cfg.Worker.LogFlushInterval,
+		LogBufferSize: cfg.Worker.LogBufferSize,
+	}
+	if opts.workdir != "" {
+		resolved.Workdir = opts.workdir
+	}
+	var timeout time.Duration
+	if opts.timeout != "" {
+		var err error
+		timeout, err = str2duration.ParseDuration(opts.timeout)
+		if err != nil {
+			return worker.Config{}, 0, errWithHints(fmt.Sprintf("invalid timeout: %s", opts.timeout),
+				"Examples: "+codeStyle.Render("1h")+", "+codeStyle.Render("24h")+", "+codeStyle.Render("7d"))
+		}
+		if timeout <= 0 {
+			return worker.Config{}, 0, errWithHints("timeout must be positive",
+				"Examples: "+codeStyle.Render("1h")+", "+codeStyle.Render("24h")+", "+codeStyle.Render("7d"))
+		}
+	}
+	if opts.exitIfIdle != "" {
+		duration, err := str2duration.ParseDuration(opts.exitIfIdle)
+		if err != nil {
+			return worker.Config{}, 0, errWithHints(fmt.Sprintf("invalid exit-if-idle: %s", opts.exitIfIdle),
+				"Examples: "+codeStyle.Render("0s")+", "+codeStyle.Render("1m")+", "+codeStyle.Render("5m"))
+		}
+		if duration < 0 {
+			return worker.Config{}, 0, errWithHints("exit-if-idle must not be negative",
+				"Examples: "+codeStyle.Render("0s")+", "+codeStyle.Render("1m")+", "+codeStyle.Render("5m"))
+		}
+		resolved.ExitIfIdle = &duration
+	}
+	var err error
+	resolved.TagFilter, err = parseTags(opts.filters)
+	if err != nil {
+		return worker.Config{}, 0, err
+	}
+	return resolved, timeout, nil
 }
 
 type workerListOptions struct {
@@ -351,11 +339,14 @@ func workerStatus(ctx context.Context, pool *pgxpool.Pool, id string) (db.Worker
 	return workers[0].Status, nil
 }
 
-func daemonize(cfg config.Config, opts workerOptions) error {
-	id := namesgenerator.GetRandomName(0)
+func daemonize(cfg worker.Config, timeout time.Duration) error {
+	id := cfg.Name
+	if id == "" {
+		id = namesgenerator.GetRandomName(0)
+	}
 
 	// Create log directory: <workdir>/.nextask/<worker_id>/
-	logDir := filepath.Join(cfg.Worker.Workdir, ".nextask", id)
+	logDir := filepath.Join(cfg.Workdir, ".nextask", id)
 	if err := os.MkdirAll(logDir, 0755); err != nil {
 		return fmt.Errorf("failed to create log directory: %w", err)
 	}
@@ -374,19 +365,25 @@ func daemonize(cfg config.Config, opts workerOptions) error {
 		return fmt.Errorf("failed to get executable: %w", err)
 	}
 
-	args := []string{"worker", "--_id", id, "--workdir", cfg.Worker.Workdir}
-	if opts.once {
+	args := []string{"worker", "--_id", id, "--workdir", cfg.Workdir}
+	if cfg.Once {
 		args = append(args, "--once")
 	}
-	if opts.timeout != "" {
-		args = append(args, "--timeout", opts.timeout)
+	if cfg.Rm {
+		args = append(args, "--rm")
 	}
-	for _, f := range opts.filters {
-		args = append(args, "--filter", f)
+	if timeout > 0 {
+		args = append(args, "--timeout", timeout.String())
+	}
+	if cfg.ExitIfIdle != nil {
+		args = append(args, "--exit-if-idle", cfg.ExitIfIdle.String())
+	}
+	for key, value := range cfg.TagFilter {
+		args = append(args, "--filter", key+"="+value)
 	}
 
 	cmd := exec.Command(exe, args...)
-	cmd.Env = append(os.Environ(), "NEXTASK_DB_URL="+cfg.DB.URL)
+	cmd.Env = append(os.Environ(), "NEXTASK_DB_URL="+cfg.DBURL)
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}

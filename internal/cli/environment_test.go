@@ -93,7 +93,7 @@ func TestDaemonDatabaseEnvironment(t *testing.T) {
 	}
 	id := "daemon-env"
 	run("enqueue", "--id", id, `printf '%s' "$NEXTASK_DB_URL" > db-env; echo ready > ready; while [ ! -f finish ]; do sleep 0.1; done`)
-	out := run("worker", "--daemon", "--once", "--workdir", workdir)
+	out := run("worker", "--daemon", "--rm", "--exit-if-idle", "200ms", "--workdir", workdir)
 	match := regexp.MustCompile(`pid ([0-9]+)`).FindStringSubmatch(out)
 	if len(match) != 2 {
 		t.Fatalf("missing daemon PID: %s", out)
@@ -147,6 +147,14 @@ func TestDaemonDatabaseEnvironment(t *testing.T) {
 	wait(func() bool {
 		task, err := db.GetTask(context.Background(), pool, id, time.Minute)
 		return err == nil && task != nil && task.Status == db.StatusCompleted
+	})
+	if _, err := os.Stat(filepath.Join(workdir, id)); !os.IsNotExist(err) {
+		t.Fatalf("daemon ignored --rm: %v", err)
+	}
+	wait(func() bool {
+		var stopped bool
+		err := pool.QueryRow(context.Background(), "SELECT status = 'stopped' FROM workers WHERE pid = $1", pid).Scan(&stopped)
+		return err == nil && stopped
 	})
 	// Plain tasks and daemon workers need no S3 credentials or Git integration.
 }
