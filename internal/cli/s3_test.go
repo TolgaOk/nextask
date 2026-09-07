@@ -25,7 +25,7 @@ func TestS3CLI(t *testing.T) {
 		t.Fatal(err)
 	}
 	workdir, home := t.TempDir(), t.TempDir()
-	env := append(os.Environ(), "HOME="+home, "NEXTASK_DB_URL="+getTestDBURL(t), "S3_ACCESS_KEY=test-access", "S3_SECRET_KEY=test-secret", "NEXTASK_SOURCE_REMOTE=", "NEXTASK_GIT_REMOTE=", "NEXTASK_TASK_ID=inherited", "NEXTASK_EXECUTABLE=/invalid/inherited/path", "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null")
+	env := append(os.Environ(), "HOME="+home, "NEXTASK_DB_URL="+getTestDBURL(t), "S3_ACCESS_KEY=test-access", "S3_SECRET_KEY=test-secret", "NEXTASK_SOURCE_REMOTE=", "NEXTASK_GIT_URL=", "NEXTASK_S3_ENDPOINT=", "NEXTASK_GIT_REMOTE=", "NEXTASK_TASK_ID=inherited", "NEXTASK_EXECUTABLE=/invalid/inherited/path", "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null")
 	command := func(args ...string) *exec.Cmd {
 		cmd := exec.Command(binary, args...)
 		cmd.Dir, cmd.Env = root, env
@@ -68,7 +68,7 @@ final_include = ["reports/**"]
 exclude = ["**/*.tmp"]
 interval = "50ms"
 final_timeout = "10s"
-`, remote, server.URL)
+`, remote, strings.Replace(server.URL, "://", "://${S3_ACCESS_KEY}:${S3_SECRET_KEY}@", 1))
 	if err := os.WriteFile(filepath.Join(root, ".nextask.toml"), []byte(config), 0600); err != nil {
 		t.Fatal(err)
 	}

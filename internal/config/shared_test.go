@@ -11,7 +11,7 @@ import (
 
 func clearConfigEnv(t *testing.T) {
 	t.Helper()
-	for _, name := range []string{"NEXTASK_DB_URL", "NEXTASK_SOURCE_REMOTE", "NEXTASK_GIT_REMOTE", "NEXTASK_WORKER_WORKDIR"} {
+	for _, name := range []string{"NEXTASK_DB_URL", "NEXTASK_SOURCE_REMOTE", "NEXTASK_GIT_REMOTE", "NEXTASK_GIT_URL", "NEXTASK_S3_ENDPOINT", "NEXTASK_WORKER_WORKDIR"} {
 		t.Setenv(name, "")
 	}
 }

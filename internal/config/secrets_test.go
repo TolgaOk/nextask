@@ -120,7 +120,7 @@ func TestDatabaseEnvironmentAndSerialization(t *testing.T) {
 	file := configFixture(t, t.TempDir(), "config.toml", `[integrations.git]
 remote = "ssh://git@host/repo.git"
 [integrations.s3]
-endpoint = "https://fsn1.your-objectstorage.com"
+endpoint = "https://${S3_ACCESS_KEY}:${S3_SECRET_KEY}@fsn1.your-objectstorage.com"
 remote = "s3://bucket/project"
 include = ["outputs/**"]
 `)

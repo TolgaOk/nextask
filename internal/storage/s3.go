@@ -6,10 +6,9 @@ import (
 	"fmt"
 	"io"
 	"net/url"
-	"os"
-	"strings"
 
 	"github.com/TolgaOk/nextask/internal/buildinfo"
+	"github.com/TolgaOk/nextask/internal/endpoint"
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 )
@@ -33,24 +32,21 @@ type s3Store struct {
 }
 
 func NewS3(c Config) (Store, error) {
-	access, secret := os.Getenv("S3_ACCESS_KEY"), os.Getenv("S3_SECRET_KEY")
-	var missing []string
-	for _, entry := range []struct{ name, value string }{
-		{"S3_ACCESS_KEY", access}, {"S3_SECRET_KEY", secret},
-	} {
-		if strings.TrimSpace(entry.value) == "" {
-			missing = append(missing, entry.name)
-		}
+	value, err := endpoint.Resolve(c.Endpoint, endpoint.S3)
+	if err != nil {
+		return nil, fmt.Errorf("s3 endpoint: %w", err)
 	}
-	if len(missing) != 0 {
-		return nil, fmt.Errorf("s3: missing required worker environment variables: %s", strings.Join(missing, ", "))
+	if value == "" {
+		return nil, fmt.Errorf("s3 endpoint is required")
 	}
-	endpoint, err := url.Parse(c.Endpoint)
+	connection, err := url.Parse(value)
 	if err != nil {
 		return nil, fmt.Errorf("invalid storage endpoint")
 	}
-	client, err := minio.New(endpoint.Host, &minio.Options{
-		Secure: endpoint.Scheme == "https", Region: c.Region,
+	access := connection.User.Username()
+	secret, _ := connection.User.Password()
+	client, err := minio.New(connection.Host, &minio.Options{
+		Secure: connection.Scheme == "https", Region: c.Region,
 		Creds: credentials.NewStaticV4(access, secret, ""), MaxRetries: c.Retries + 1,
 	})
 	if err != nil {

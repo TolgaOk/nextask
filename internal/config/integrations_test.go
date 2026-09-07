@@ -82,7 +82,7 @@ func TestSharedConfigCannotEnableIntegrations(t *testing.T) {
 func TestTypedIntegrationLayers(t *testing.T) {
 	clearConfigEnv(t)
 	user := configFixture(t, t.TempDir(), "user.toml", `[integrations.s3]
-endpoint = "https://fsn1.your-objectstorage.com"
+endpoint = "https://${S3_ACCESS_KEY}:${S3_SECRET_KEY}@fsn1.your-objectstorage.com"
 remote = "s3://bucket/project"
 include = ["old/**"]
 concurrency = 2

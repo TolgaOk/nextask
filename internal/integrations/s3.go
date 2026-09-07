@@ -21,7 +21,7 @@ type S3 struct{}
 
 func (S3) Options() Schema {
 	return Schema{
-		"endpoint":       {Kind: String, Default: "", Check: checkS3URL},
+		"endpoint":       {Kind: String, Default: "", Check: checkS3Endpoint},
 		"region":         {Kind: String, Default: ""},
 		"remote":         {Kind: String, Default: "", Check: checkS3URL},
 		"root":           {Kind: String, Default: "."},
@@ -77,9 +77,8 @@ func s3Config(raw Options) (storage.Config, error) {
 		Include: o["include"].([]string), Exclude: o["exclude"].([]string), FinalInclude: o["final_include"].([]string),
 		FinalSync: o["final_sync"].(bool), OnFinalError: o.String("on_final_error"), Symlinks: o.String("symlinks"),
 	}
-	endpoint, err := url.Parse(c.Endpoint)
-	if err != nil || endpoint.Hostname() == "" || (endpoint.Scheme != "https" && endpoint.Scheme != "http") || endpoint.User != nil || (endpoint.Path != "" && endpoint.Path != "/") || endpoint.RawQuery != "" || endpoint.Fragment != "" {
-		return c, fmt.Errorf("endpoint must be an http(s) service URL without credentials, query, or path")
+	if c.Endpoint == "" {
+		return c, fmt.Errorf("endpoint is required")
 	}
 	remote, err := url.Parse(o.String("remote"))
 	if err != nil || remote.Scheme != "s3" || remote.Hostname() == "" || remote.Port() != "" || remote.User != nil || remote.RawQuery != "" || remote.Fragment != "" {

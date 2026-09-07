@@ -18,7 +18,7 @@ import (
 
 func isolatedCLIEnv(t *testing.T) []string {
 	t.Helper()
-	return append(os.Environ(), "HOME="+t.TempDir(), "NEXTASK_DB_URL=", "NEXTASK_GIT_REMOTE=", "NEXTASK_SOURCE_REMOTE=", "S3_ACCESS_KEY=", "S3_SECRET_KEY=", "NEXTASK_TASK_ID=env-check")
+	return append(os.Environ(), "HOME="+t.TempDir(), "NEXTASK_DB_URL=", "NEXTASK_GIT_REMOTE=", "NEXTASK_GIT_URL=", "NEXTASK_S3_ENDPOINT=", "NEXTASK_SOURCE_REMOTE=", "S3_ACCESS_KEY=", "S3_SECRET_KEY=", "NEXTASK_TASK_ID=env-check")
 }
 
 func TestCredentialErrorsCLI(t *testing.T) {
@@ -53,17 +53,17 @@ func TestCredentialErrorsCLI(t *testing.T) {
 	if err := os.Remove(file); err != nil {
 		t.Fatal(err)
 	}
-	options := `{"endpoint":"https://storage.invalid","remote":"s3://bucket/project","include":["outputs/**"]}`
+	options := `{"endpoint":"https://${S3_ACCESS_KEY}:${S3_SECRET_KEY}@storage.invalid","remote":"s3://bucket/project","include":["outputs/**"]}`
 	for _, tc := range []struct {
 		env     []string
 		missing string
 	}{
-		{env, "S3_ACCESS_KEY, S3_SECRET_KEY"},
+		{env, "S3_ACCESS_KEY"},
 		{append(append([]string{}, env...), "S3_ACCESS_KEY=test-access"), "S3_SECRET_KEY"},
 		{append(append([]string{}, env...), "S3_SECRET_KEY=test-secret"), "S3_ACCESS_KEY"},
 	} {
 		out, err = run(tc.env, "_run", "s3", options, "touch started", "0")
-		if err == nil || !strings.Contains(out, "missing required worker environment variables: "+tc.missing) {
+		if err == nil || !strings.Contains(out, "environment variable "+tc.missing+" is required") {
 			t.Fatalf("missing S3 diagnostic: %v %s", err, out)
 		}
 		if strings.Contains(out, "test-secret") || strings.Contains(out, "test-access") {

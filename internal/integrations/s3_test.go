@@ -8,7 +8,7 @@ import (
 )
 
 func s3Options() Options {
-	return Options{"endpoint": "https://fsn1.your-objectstorage.com", "remote": "s3://bucket/project", "include": []string{"outputs/**"}}
+	return Options{"endpoint": "https://${S3_ACCESS_KEY}:${S3_SECRET_KEY}@fsn1.your-objectstorage.com", "remote": "s3://bucket/project", "include": []string{"outputs/**"}}
 }
 func TestS3ValidationAndOverrides(t *testing.T) {
 	for key, values := range map[string][]any{

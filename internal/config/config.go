@@ -178,6 +178,9 @@ func applyEnv(cfg *Config) {
 	if v := os.Getenv("NEXTASK_GIT_REMOTE"); v != "" {
 		cfg.setGitRemote(v, "env:NEXTASK_GIT_REMOTE")
 	}
+	if v := os.Getenv("NEXTASK_S3_ENDPOINT"); v != "" {
+		cfg.setIntegrationOption("s3", "endpoint", endpoint.Reference("NEXTASK_S3_ENDPOINT"), "env:NEXTASK_S3_ENDPOINT")
+	}
 	if v := os.Getenv("NEXTASK_WORKER_WORKDIR"); v != "" {
 		cfg.Worker.Workdir = v
 		cfg.setSource("worker.workdir", "env:NEXTASK_WORKER_WORKDIR")
@@ -279,14 +282,18 @@ func ToAbsPath(path string) string {
 }
 
 func (cfg *Config) setGitRemote(value, source string) {
+	cfg.setIntegrationOption("git", "remote", value, source)
+}
+
+func (cfg *Config) setIntegrationOption(name, key, value, source string) {
 	if cfg.Integrations == nil {
 		cfg.Integrations = make(map[string]map[string]any)
 	}
-	if cfg.Integrations["git"] == nil {
-		cfg.Integrations["git"] = make(map[string]any)
+	if cfg.Integrations[name] == nil {
+		cfg.Integrations[name] = make(map[string]any)
 	}
-	cfg.Integrations["git"]["remote"] = value
-	cfg.setSource("integrations.git.remote", source)
+	cfg.Integrations[name][key] = value
+	cfg.setSource("integrations."+name+"."+key, source)
 }
 
 // Apply deprecated source.remote at its original layer, unless the same file

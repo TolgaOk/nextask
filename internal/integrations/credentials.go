@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+
+	"github.com/TolgaOk/nextask/internal/endpoint"
 )
 
 // Connection options are serialized with tasks. Authentication belongs to the
@@ -16,9 +18,13 @@ func checkGitRemote(value any) error {
 	return nil
 }
 
+func checkS3Endpoint(value any) error {
+	return endpoint.Validate(value.(string), endpoint.S3)
+}
+
 func checkS3URL(value any) error {
 	if err := checkURLCredentials(value.(string), false); err != nil {
-		return fmt.Errorf("%w; supply S3_ACCESS_KEY and S3_SECRET_KEY in the worker environment", err)
+		return fmt.Errorf("%w; put credential environment references in the S3 endpoint", err)
 	}
 	return nil
 }

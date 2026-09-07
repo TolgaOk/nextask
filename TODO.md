@@ -39,7 +39,7 @@ Nextask runs commands. Built-in integrations prepare tasks and compose runtime w
 - [x] Share URL validation and environment-reference resolution; reject literal credentials in config.
 - [x] Accept DB URL templates and complete URLs from the environment.
 - [ ] Authenticate Git with URL credentials resolved separately on submitters and workers.
-- [ ] Read S3 credentials from its endpoint URL; remove fixed credential-variable requirements.
+- [x] Read S3 credentials from its endpoint URL; remove fixed credential-variable requirements.
 - [ ] Test missing variables, escaping, redaction, persisted tasks, and authenticated transfers; update focused docs.
 
 ## Worker failure and retry
