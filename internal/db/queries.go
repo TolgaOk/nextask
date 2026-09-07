@@ -44,6 +44,15 @@ func CreateTask(ctx context.Context, pool Execer, task *Task) error {
 	return wrapPgError(err)
 }
 
+// SetTaskExecution stores the prepared command and cleanup deadline. Enqueue
+// calls it in the transaction that reserved the task ID, before publishing it.
+func SetTaskExecution(ctx context.Context, exec Execer, taskID, command string, cleanup time.Duration) error {
+	_, err := exec.Exec(ctx, `UPDATE tasks
+		SET execution_command = $2, cleanup_timeout_ms = $3, source_type = 'command'
+		WHERE id = $1`, taskID, command, cleanup.Milliseconds())
+	return err
+}
+
 // ListFilter specifies criteria for filtering tasks.
 type ListFilter struct {
 	Statuses       []string
