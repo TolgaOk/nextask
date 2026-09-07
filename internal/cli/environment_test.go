@@ -32,7 +32,7 @@ func TestCredentialErrorsCLI(t *testing.T) {
 		return string(out), err
 	}
 	out, err := run(env, "list")
-	if err == nil || !strings.Contains(out, "NEXTASK_DB_URL is required") {
+	if err == nil || !strings.Contains(out, "database URL is required") {
 		t.Fatalf("missing DB diagnostic: %v %s", err, out)
 	}
 	if out, err := run(env, "config", "show"); err != nil {
@@ -47,7 +47,7 @@ func TestCredentialErrorsCLI(t *testing.T) {
 		t.Fatal(err)
 	}
 	out, err = run(env, "list")
-	if err == nil || !strings.Contains(out, "db.url is not supported") || !strings.Contains(out, "NEXTASK_DB_URL") || strings.Contains(out, "file-secret") {
+	if err == nil || !strings.Contains(out, "URL password must be an environment reference") || strings.Contains(out, "file-secret") {
 		t.Fatalf("unsafe migration diagnostic: %v %s", err, out)
 	}
 	if err := os.Remove(file); err != nil {

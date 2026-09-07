@@ -49,8 +49,8 @@ func errWithHints(msg string, hints ...string) error {
 }
 
 func errDBRequired() error {
-	return errWithHints("NEXTASK_DB_URL is required",
-		"Set it in the environment on the CLI host and each worker",
+	return errWithHints("database URL is required",
+		"Set db.url with environment references or supply NEXTASK_DB_URL on the CLI host and each worker",
 	)
 }
 

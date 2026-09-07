@@ -11,15 +11,18 @@ import (
 
 func TestDatabaseConfigRejectedBeforeOverrides(t *testing.T) {
 	for _, shared := range []bool{false, true} {
-		for _, key := range []string{"db.url", "nextask.db.url", "defaults.db_url", "DB.URL", "Nextask.DB.URL"} {
-			for i, value := range []string{`"postgres://user:file-secret@host/db"`, `""`, `42`, `false`, `["file-secret"]`} {
+		for _, key := range []string{"db.url", "DB.URL"} {
+			if shared {
+				key = "nextask." + key
+			}
+			for i, value := range []string{`"postgres://user:file-secret@host/db"`, `"postgres://host/db?password=file-secret"`, `42`, `false`, `["file-secret"]`} {
 				t.Run(fmt.Sprintf("shared=%t/%s/value%d", shared, key, i), func(t *testing.T) {
 					clearConfigEnv(t)
 					t.Setenv("NEXTASK_DB_URL", "postgres://env:env-secret@host/db")
 					file := configFixture(t, t.TempDir(), "config.toml", key+" = "+value)
 					_, err := loadFiles([]configFile{{file, shared}})
-					if err == nil || !strings.Contains(err.Error(), file) || !strings.Contains(err.Error(), key) || !strings.Contains(err.Error(), "NEXTASK_DB_URL") {
-						t.Fatalf("missing migration guidance: %v", err)
+					if err == nil || !strings.Contains(err.Error(), file) {
+						t.Fatalf("unsafe config accepted: %v", err)
 					}
 					if strings.Contains(err.Error(), "file-secret") || strings.Contains(err.Error(), "env-secret") {
 						t.Fatal("config error exposed a credential")
@@ -27,6 +30,43 @@ func TestDatabaseConfigRejectedBeforeOverrides(t *testing.T) {
 				})
 			}
 		}
+	}
+}
+
+func TestDatabaseURLTemplates(t *testing.T) {
+	clearConfigEnv(t)
+	t.Setenv("MY_PASSWORD", "some:p@ssword?&")
+	for _, shared := range []bool{false, true} {
+		key := "db.url"
+		if shared {
+			key = "nextask." + key
+		}
+		file := configFixture(t, t.TempDir(), "config.toml", key+` = "postgres://nextask:${MY_PASSWORD}@db:5432/nextask?sslmode=require"`)
+		cfg, err := loadFiles([]configFile{{file, shared}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(cfg.DB.URL, "some%3Ap%40ssword%3F&") || !strings.Contains(cfg.DB.Endpoint, "${MY_PASSWORD}") {
+			t.Fatal("resolved URL or template was lost")
+		}
+		var encoded bytes.Buffer
+		if err := toml.NewEncoder(&encoded).Encode(cfg); err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(encoded.String(), "some:") || strings.Contains(encoded.String(), "some%3A") || !strings.Contains(encoded.String(), "${MY_PASSWORD}") {
+			t.Fatal("serialization exposed credentials or lost their reference")
+		}
+	}
+	t.Setenv("MY_PASSWORD", "")
+	file := configFixture(t, t.TempDir(), "config.toml", `db.url = "postgres://nextask:${MY_PASSWORD}@db/nextask"`)
+	if _, err := LoadFrom(file); err == nil || !strings.Contains(err.Error(), "MY_PASSWORD") {
+		t.Fatalf("missing variable was not named: %v", err)
+	}
+	t.Setenv("MY_URL", "postgres://nextask:secret@db/nextask")
+	file = configFixture(t, t.TempDir(), "config.toml", `db.url = "${MY_URL}"`)
+	cfg, err := LoadFrom(file)
+	if err != nil || cfg.DB.URL != "postgres://nextask:secret@db/nextask" {
+		t.Fatalf("whole URL reference failed: %v", err)
 	}
 }
 
@@ -101,7 +141,7 @@ include = ["outputs/**"]
 		if err := toml.NewEncoder(&encoded).Encode(cfg); err != nil {
 			t.Fatal(err)
 		}
-		if strings.Contains(encoded.String(), "env-secret") || strings.Contains(encoded.String(), "[db]") {
+		if strings.Contains(encoded.String(), "env-secret") {
 			t.Fatal("serializing config wrote runtime credentials")
 		}
 	}

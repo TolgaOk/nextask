@@ -7,12 +7,12 @@ import (
 	"strings"
 
 	"github.com/BurntSushi/toml"
+	"github.com/TolgaOk/nextask/internal/endpoint"
 	"github.com/TolgaOk/nextask/internal/integrations"
 )
 
-// decodeFile checks forbidden settings before decoding values into Config. This
-// also rejects empty or wrongly typed DB settings, even when an environment
-// value or a later config layer would otherwise override them.
+// decodeFile validates each file before merging later layers, so an override
+// cannot hide literal credentials in a shareable configuration file.
 func decodeFile(file configFile, cfg *Config) error {
 	var document toml.Primitive
 	meta, err := toml.DecodeFile(file.path, &document)
@@ -35,8 +35,8 @@ func decodeFile(file configFile, cfg *Config) error {
 			return fmt.Errorf("%s: %s must be a table", file.path, strings.Join(key, "."))
 		}
 		switch name {
-		case "db.url", "nextask.db.url", "defaults.db_url":
-			return fmt.Errorf("%s: %s is not supported in config; set NEXTASK_DB_URL in the environment", file.path, strings.Join(key, "."))
+		case "defaults.db_url":
+			return fmt.Errorf("%s: defaults.db_url is unsupported; use nextask.db.url with environment references", file.path)
 		}
 	}
 
@@ -56,6 +56,9 @@ func decodeFile(file configFile, cfg *Config) error {
 	}
 	if err != nil {
 		return configFileError(file.path, err)
+	}
+	if err := endpoint.Validate(cfg.DB.Endpoint, endpoint.Database); err != nil {
+		return fmt.Errorf("%s: db.url: %w", file.path, err)
 	}
 	selectionKey := append(append([]string{}, prefix...), "enqueue", "with")
 	if meta.IsDefined(selectionKey...) {

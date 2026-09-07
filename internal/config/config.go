@@ -5,8 +5,8 @@
 //	CLI flags > env vars > project files > user files > defaults
 //
 // Within each scope, the Nextask file overrides [nextask] in the shared tasktools
-// file. Other tools' sections are ignored. Database connections come only from
-// NEXTASK_DB_URL.
+// file. Other tools' sections are ignored. Connection URLs may reference
+// environment variables for credentials.
 //
 // Config file format (same for both global and local):
 //
@@ -23,17 +23,20 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/BurntSushi/toml"
+	"github.com/TolgaOk/nextask/internal/endpoint"
 )
 
-// DBConfig holds the database connection supplied by the environment.
+// DBConfig keeps the shareable template separate from the resolved connection.
 type DBConfig struct {
-	URL string `toml:"-"`
+	Endpoint string `toml:"url"`
+	URL      string `toml:"-"`
 }
 
 // SourceConfig holds source snapshotting configuration.
@@ -75,7 +78,7 @@ func (w WorkerConfig) StaleDuration() time.Duration {
 
 // Config holds the complete nextask configuration.
 type Config struct {
-	DB           DBConfig                  `toml:"-"`
+	DB           DBConfig                  `toml:"db"`
 	Source       SourceConfig              `toml:"source"`
 	Worker       WorkerConfig              `toml:"worker"`
 	Retry        RetryConfig               `toml:"retry"`
@@ -146,6 +149,10 @@ func loadFiles(files []configFile) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
+	cfg.DB.URL, err = endpoint.Resolve(cfg.DB.Endpoint, endpoint.Database)
+	if err != nil {
+		return nil, fmt.Errorf("%s: db.url: %w", cfg.SourceFor("db.url"), err)
+	}
 	if err := cfg.validate(); err != nil {
 		return nil, err
 	}
@@ -160,7 +167,7 @@ func LoadFrom(path string) (*Config, error) {
 // applyEnv overrides config values with environment variables if set.
 func applyEnv(cfg *Config) {
 	if v := os.Getenv("NEXTASK_DB_URL"); strings.TrimSpace(v) != "" {
-		cfg.DB.URL = v
+		cfg.DB.Endpoint = endpoint.Reference("NEXTASK_DB_URL")
 		cfg.setSource("db.url", "env:NEXTASK_DB_URL")
 	}
 	if v := os.Getenv("NEXTASK_SOURCE_REMOTE"); v != "" {
