@@ -1,35 +1,38 @@
-package endpoint
+package integrations
 
 import (
 	"fmt"
 	"net/url"
+
+	"github.com/TolgaOk/nextask/internal/storage"
+	"github.com/TolgaOk/nextask/internal/urltemplate"
 )
 
 // ValidateS3Endpoint checks an S3 service URL with credential references.
-func ValidateS3Endpoint(value string) error { return validate(value, checkS3Template) }
+func ValidateS3Endpoint(value string) error { return urltemplate.Validate(value, checkS3Template) }
 
 // ResolveS3Endpoint resolves S3 access and secret keys from the worker environment.
 func ResolveS3Endpoint(value string) (string, error) {
-	return resolve(value, checkS3Template, func(value string) error {
-		return checkResolvedURL(value, checkS3URL)
+	return urltemplate.Resolve(value, checkS3Template, func(value string) error {
+		return urltemplate.CheckResolvedURL(value, checkS3ServiceURL)
 	})
 }
 
-func checkS3Template(t *template) error {
-	if err := checkS3URL(t.url); err != nil {
+func checkS3Template(t *urltemplate.Template) error {
+	if err := checkS3ServiceURL(t.URL); err != nil {
 		return err
 	}
-	if err := checkPasswordReference(t); err != nil {
+	if err := t.CheckPasswordReference(); err != nil {
 		return err
 	}
-	if !isReference(t.url.User.Username(), t.refs) {
+	if !t.IsReference(t.URL.User.Username()) {
 		return fmt.Errorf("S3 access key must be an environment reference such as ${VARIABLE}")
 	}
 	return nil
 }
 
-func checkS3URL(u *url.URL) error {
-	if err := checkURL(u); err != nil {
+func checkS3ServiceURL(u *url.URL) error {
+	if err := urltemplate.CheckURL(u); err != nil {
 		return err
 	}
 	if u.Hostname() == "" {
@@ -49,4 +52,15 @@ func checkS3URL(u *url.URL) error {
 		return fmt.Errorf("S3 endpoint requires an access key and secret key")
 	}
 	return nil
+}
+
+func newS3Store(cfg storage.Config) (storage.Store, error) {
+	value, err := ResolveS3Endpoint(cfg.Endpoint)
+	if err != nil {
+		return nil, fmt.Errorf("s3 endpoint: %w", err)
+	}
+	if value == "" {
+		return nil, fmt.Errorf("s3 endpoint is required")
+	}
+	return storage.NewS3(cfg, value)
 }

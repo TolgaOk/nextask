@@ -1,6 +1,6 @@
-// Package endpoint validates shareable connection URLs and resolves environment
+// Package urltemplate parses connection templates and resolves environment
 // references only at the point of use. Resolved credentials must not be persisted.
-package endpoint
+package urltemplate
 
 import (
 	"fmt"
@@ -18,18 +18,20 @@ func Reference(name string) string { return "${" + name + "}" }
 
 func HasReferences(value string) bool { return reference.MatchString(value) }
 
-type template struct {
+// Template exposes a URL with temporary reference markers during validation.
+// URL is nil for paths and remote names. Reference markers remain private.
+type Template struct {
 	whole string
-	url   *url.URL
+	URL   *url.URL
 	local string
 	refs  []envReference
 }
 
 type envReference struct{ marker, name string }
 
-// validate checks syntax and rejects literal secrets without reading the
+// Validate checks syntax and rejects literal secrets without reading the
 // environment. Unselected integrations do not require their credentials.
-func validate(value string, check func(*template) error) error {
+func Validate(value string, check func(*Template) error) error {
 	t, err := parse(value)
 	if err != nil || value == "" || t.whole != "" {
 		return err
@@ -37,9 +39,9 @@ func validate(value string, check func(*template) error) error {
 	return check(t)
 }
 
-// resolve expands references once. Values substituted into URL components are
+// Resolve expands references once. Values substituted into URL components are
 // escaped by net/url, so punctuation in a password cannot change the destination.
-func resolve(value string, check func(*template) error, checkResolved func(string) error) (string, error) {
+func Resolve(value string, check func(*Template) error, checkResolved func(string) error) (string, error) {
 	t, err := parse(value)
 	if err != nil || value == "" {
 		return "", err
@@ -66,14 +68,14 @@ func resolve(value string, check func(*template) error, checkResolved func(strin
 		replacements = append(replacements, ref.marker, value)
 	}
 	expand := strings.NewReplacer(replacements...).Replace
-	if t.url == nil {
+	if t.URL == nil {
 		value := expand(t.local)
 		if err := checkResolved(value); err != nil {
 			return "", err
 		}
 		return value, nil
 	}
-	u := *t.url
+	u := *t.URL
 	u.Scheme, u.Host = expand(u.Scheme), expand(u.Host)
 	if strings.ContainsAny(u.Host, "/?#@\\\r\n\x00") {
 		return "", fmt.Errorf("environment reference produced an invalid URL host")
@@ -112,8 +114,8 @@ func environment(name string) (string, error) {
 	return value, nil
 }
 
-func parse(value string) (*template, error) {
-	t := &template{}
+func parse(value string) (*Template, error) {
+	t := &Template{}
 	if value == "" {
 		return t, nil
 	}
@@ -147,7 +149,7 @@ func parse(value string) (*template, error) {
 	if err != nil {
 		return nil, fmt.Errorf("invalid connection URL")
 	}
-	t.url = u
+	t.URL = u
 	return t, nil
 }
 
@@ -176,8 +178,8 @@ func parseMaskedURL(value, prefix string) (*url.URL, error) {
 	return url.Parse(value)
 }
 
-// checkURL validates URL structure shared by connection types.
-func checkURL(u *url.URL) error {
+// CheckURL validates URL structure shared by connection types.
+func CheckURL(u *url.URL) error {
 	if u == nil {
 		return fmt.Errorf("invalid connection URL")
 	}
@@ -193,7 +195,8 @@ func checkURL(u *url.URL) error {
 	return nil
 }
 
-func checkResolvedURL(value string, check func(*url.URL) error) error {
+// CheckResolvedURL parses a resolved URL without exposing its value in parse errors.
+func CheckResolvedURL(value string, check func(*url.URL) error) error {
 	u, err := url.Parse(value)
 	if err != nil {
 		return fmt.Errorf("invalid connection URL")
@@ -201,18 +204,30 @@ func checkResolvedURL(value string, check func(*url.URL) error) error {
 	return check(u)
 }
 
-func checkPasswordReference(t *template) error {
-	if t.url.User != nil {
-		if password, ok := t.url.User.Password(); ok && !isReference(password, t.refs) {
+// CheckPasswordReference requires a whole environment reference in the password field.
+func (t *Template) CheckPasswordReference() error {
+	if t.URL.User != nil {
+		if password, ok := t.URL.User.Password(); ok && !t.IsReference(password) {
 			return fmt.Errorf("URL password must be an environment reference such as ${VARIABLE}")
 		}
 	}
 	return nil
 }
 
-func isReference(value string, refs []envReference) bool {
-	for _, ref := range refs {
+// IsReference reports whether a parsed component is exactly one environment reference.
+func (t *Template) IsReference(value string) bool {
+	for _, ref := range t.refs {
 		if value == ref.marker {
+			return true
+		}
+	}
+	return false
+}
+
+// ContainsReference reports whether a parsed component contains a reference.
+func (t *Template) ContainsReference(value string) bool {
+	for _, ref := range t.refs {
+		if strings.Contains(value, ref.marker) {
 			return true
 		}
 	}

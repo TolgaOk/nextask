@@ -1,9 +1,13 @@
-package endpoint
+package urltemplate_test
 
 import (
 	"net/url"
 	"strings"
 	"testing"
+
+	"github.com/TolgaOk/nextask/internal/db"
+	"github.com/TolgaOk/nextask/internal/integrations"
+	"github.com/TolgaOk/nextask/internal/urltemplate"
 )
 
 // The same behavioral cases exercise each independent public API.
@@ -14,9 +18,9 @@ type connectionAPI struct {
 }
 
 var (
-	databaseAPI = connectionAPI{"database", "postgres", ValidateDatabaseURL, ResolveDatabaseURL}
-	gitAPI      = connectionAPI{"git", "https", ValidateGitRemote, ResolveGitRemote}
-	s3API       = connectionAPI{"s3", "https", ValidateS3Endpoint, ResolveS3Endpoint}
+	databaseAPI = connectionAPI{"database", "postgres", db.ValidateURL, db.ResolveURL}
+	gitAPI      = connectionAPI{"git", "https", integrations.ValidateGitRemote, integrations.ResolveGitRemote}
+	s3API       = connectionAPI{"s3", "https", integrations.ValidateS3Endpoint, integrations.ResolveS3Endpoint}
 )
 
 func TestTemplates(t *testing.T) {
@@ -269,8 +273,8 @@ func TestWholeEnvironmentValidation(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv("CONNECTION_TEST", tc.value)
-			ref := Reference("CONNECTION_TEST")
-			if !HasReferences(ref) || HasReferences(tc.value) {
+			ref := urltemplate.Reference("CONNECTION_TEST")
+			if !urltemplate.HasReferences(ref) || urltemplate.HasReferences(tc.value) {
 				t.Fatal("incorrect reference detection")
 			}
 			got, err := tc.api.resolve(ref)
@@ -323,7 +327,7 @@ func FuzzCredentialRoundTrip(f *testing.F) {
 func TestGitRemotePrefixExpansion(t *testing.T) {
 	for _, value := range []string{"https://user:password@host", "https://user:bad%0A@host", "https://host%ZZ"} {
 		t.Setenv("GIT_BASE", value)
-		got, err := ResolveGitRemote("${GIT_BASE}/repo.git")
+		got, err := integrations.ResolveGitRemote("${GIT_BASE}/repo.git")
 		if value == "https://user:password@host" {
 			if err != nil || got != value+"/repo.git" {
 				t.Fatalf("valid prefix expansion failed: %v", err)

@@ -14,13 +14,11 @@ import (
 )
 
 func TestS3Transport(t *testing.T) {
-	t.Setenv("CUSTOM_ACCESS", "test-access")
-	t.Setenv("CUSTOM_SECRET", "test-secret")
 	server := storagetest.New()
 	defer server.Close()
 	cfg := testConfig()
-	cfg.Endpoint, cfg.Bucket, cfg.Retries = strings.Replace(server.URL, "://", "://${CUSTOM_ACCESS}:${CUSTOM_SECRET}@", 1), "bucket", 1
-	store, err := NewS3(cfg)
+	cfg.Endpoint, cfg.Bucket, cfg.Retries = strings.Replace(server.URL, "://", "://test-access:test-secret@", 1), "bucket", 1
+	store, err := NewS3(cfg, cfg.Endpoint)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,35 +55,11 @@ func TestS3Transport(t *testing.T) {
 		t.Fatal("incomplete upload published")
 	}
 }
-func TestS3RequiresWorkerCredentials(t *testing.T) {
-	for _, tc := range []struct {
-		access, secret string
-		missing        []string
-	}{
-		{"", "", []string{"CUSTOM_ACCESS"}},
-		{"test-access", "", []string{"CUSTOM_SECRET"}},
-		{"", "test-secret", []string{"CUSTOM_ACCESS"}},
-		{" ", "test-secret", []string{"CUSTOM_ACCESS"}},
-	} {
-		t.Setenv("CUSTOM_ACCESS", tc.access)
-		t.Setenv("CUSTOM_SECRET", tc.secret)
-		cfg := testConfig()
-		cfg.Endpoint = "https://${CUSTOM_ACCESS}:${CUSTOM_SECRET}@storage.invalid"
-		_, err := NewS3(cfg)
-		if err == nil {
-			t.Fatal("missing credentials accepted")
-		}
-		for _, name := range []string{"CUSTOM_ACCESS", "CUSTOM_SECRET"} {
-			want := false
-			for _, missing := range tc.missing {
-				want = want || name == missing
-			}
-			if strings.Contains(err.Error(), name) != want {
-				t.Fatalf("incorrect missing variable diagnostic: %v", err)
-			}
-		}
-		if strings.Contains(err.Error(), "test-secret") || strings.Contains(err.Error(), "test-access") {
-			t.Fatal("credential value exposed in error")
+
+func TestS3TransportRejectsInvalidEndpoint(t *testing.T) {
+	for _, value := range []string{"", "https://host", "https://access:secret@host%ZZ"} {
+		if _, err := NewS3(testConfig(), value); err == nil || strings.Contains(err.Error(), "secret") {
+			t.Fatalf("invalid transport endpoint accepted or exposed: %v", err)
 		}
 	}
 }

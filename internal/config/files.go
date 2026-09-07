@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/BurntSushi/toml"
-	"github.com/TolgaOk/nextask/internal/endpoint"
+	"github.com/TolgaOk/nextask/internal/db"
 	"github.com/TolgaOk/nextask/internal/integrations"
 )
 
@@ -57,7 +57,7 @@ func decodeFile(file configFile, cfg *Config) error {
 	if err != nil {
 		return configFileError(file.path, err)
 	}
-	if err := endpoint.ValidateDatabaseURL(cfg.DB.Endpoint); err != nil {
+	if err := db.ValidateURL(cfg.DB.Endpoint); err != nil {
 		return fmt.Errorf("%s: db.url: %w", file.path, err)
 	}
 	selectionKey := append(append([]string{}, prefix...), "enqueue", "with")

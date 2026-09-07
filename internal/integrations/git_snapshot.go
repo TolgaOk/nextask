@@ -14,7 +14,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/TolgaOk/nextask/internal/endpoint"
+	"github.com/TolgaOk/nextask/internal/urltemplate"
 )
 
 // gitCommand isolates inherited repository routing. Read commands use the source
@@ -189,15 +189,15 @@ func publishSnapshot(ctx context.Context, repo, taskID, remote string) (GitSnaps
 		return GitSnapshot{}, fmt.Errorf("publish snapshot: %w", err)
 	}
 	snapshot := GitSnapshot{Remote: fetchConnection.remote, Ref: ref, Commit: commit}
-	if endpoint.HasReferences(fetchURL) {
+	if urltemplate.HasReferences(fetchURL) {
 		snapshot.Endpoint = fetchURL
 	}
 	return snapshot, nil
 }
 
 func resolveRemote(ctx context.Context, repo, remote string) (fetch, push string, err error) {
-	if endpoint.HasReferences(remote) {
-		resolved, err := endpoint.ResolveGitRemote(remote)
+	if urltemplate.HasReferences(remote) {
+		resolved, err := ResolveGitRemote(remote)
 		if err != nil {
 			return "", "", err
 		}
@@ -215,7 +215,7 @@ func resolveRemote(ctx context.Context, repo, remote string) (fetch, push string
 		}
 		fetch, push = strings.TrimSpace(fetch), strings.TrimSpace(push)
 	} else {
-		if !endpoint.HasReferences(remote) && !strings.ContainsAny(remote, "/:") && !strings.HasPrefix(remote, ".") && !filepath.IsAbs(remote) {
+		if !urltemplate.HasReferences(remote) && !strings.ContainsAny(remote, "/:") && !strings.HasPrefix(remote, ".") && !filepath.IsAbs(remote) {
 			return "", "", fmt.Errorf("unknown Git remote; use an existing remote name or URL/path")
 		}
 		fetch, push = remote, remote
@@ -224,7 +224,7 @@ func resolveRemote(ctx context.Context, repo, remote string) (fetch, push string
 		if err := checkGitRemote(value); err != nil {
 			return "", err
 		}
-		if endpoint.HasReferences(value) || strings.Contains(value, ":") {
+		if urltemplate.HasReferences(value) || strings.Contains(value, ":") {
 			return value, nil
 		}
 		if strings.HasPrefix(value, "~/") {

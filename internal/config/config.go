@@ -30,7 +30,8 @@ import (
 	"time"
 
 	"github.com/BurntSushi/toml"
-	"github.com/TolgaOk/nextask/internal/endpoint"
+	"github.com/TolgaOk/nextask/internal/db"
+	"github.com/TolgaOk/nextask/internal/urltemplate"
 )
 
 // DBConfig keeps the shareable template separate from the resolved connection.
@@ -149,7 +150,7 @@ func loadFiles(files []configFile) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	cfg.DB.URL, err = endpoint.ResolveDatabaseURL(cfg.DB.Endpoint)
+	cfg.DB.URL, err = db.ResolveURL(cfg.DB.Endpoint)
 	if err != nil {
 		return nil, fmt.Errorf("%s: db.url: %w", cfg.SourceFor("db.url"), err)
 	}
@@ -167,22 +168,22 @@ func LoadFrom(path string) (*Config, error) {
 // applyEnv overrides config values with environment variables if set.
 func applyEnv(cfg *Config) {
 	if v := os.Getenv("NEXTASK_DB_URL"); strings.TrimSpace(v) != "" {
-		cfg.DB.Endpoint = endpoint.Reference("NEXTASK_DB_URL")
+		cfg.DB.Endpoint = urltemplate.Reference("NEXTASK_DB_URL")
 		cfg.setSource("db.url", "env:NEXTASK_DB_URL")
 	}
 	if v := os.Getenv("NEXTASK_SOURCE_REMOTE"); v != "" {
-		cfg.Source.Remote = endpoint.Reference("NEXTASK_SOURCE_REMOTE")
+		cfg.Source.Remote = urltemplate.Reference("NEXTASK_SOURCE_REMOTE")
 		cfg.setSource("source.remote", "env:NEXTASK_SOURCE_REMOTE")
-		cfg.setGitRemote(endpoint.Reference("NEXTASK_SOURCE_REMOTE"), "env:NEXTASK_SOURCE_REMOTE")
+		cfg.setGitRemote(urltemplate.Reference("NEXTASK_SOURCE_REMOTE"), "env:NEXTASK_SOURCE_REMOTE")
 	}
 	if v := os.Getenv("NEXTASK_GIT_REMOTE"); v != "" {
-		cfg.setGitRemote(endpoint.Reference("NEXTASK_GIT_REMOTE"), "env:NEXTASK_GIT_REMOTE")
+		cfg.setGitRemote(urltemplate.Reference("NEXTASK_GIT_REMOTE"), "env:NEXTASK_GIT_REMOTE")
 	}
 	if v := os.Getenv("NEXTASK_GIT_URL"); v != "" {
-		cfg.setGitRemote(endpoint.Reference("NEXTASK_GIT_URL"), "env:NEXTASK_GIT_URL")
+		cfg.setGitRemote(urltemplate.Reference("NEXTASK_GIT_URL"), "env:NEXTASK_GIT_URL")
 	}
 	if v := os.Getenv("NEXTASK_S3_ENDPOINT"); v != "" {
-		cfg.setIntegrationOption("s3", "endpoint", endpoint.Reference("NEXTASK_S3_ENDPOINT"), "env:NEXTASK_S3_ENDPOINT")
+		cfg.setIntegrationOption("s3", "endpoint", urltemplate.Reference("NEXTASK_S3_ENDPOINT"), "env:NEXTASK_S3_ENDPOINT")
 	}
 	if v := os.Getenv("NEXTASK_WORKER_WORKDIR"); v != "" {
 		cfg.Worker.Workdir = v

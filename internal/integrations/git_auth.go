@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
-
-	"github.com/TolgaOk/nextask/internal/endpoint"
 )
 
 type gitConnection struct {
@@ -32,7 +30,7 @@ printf 'username=%s\npassword=%s\n' "$NEXTASK_GIT_AUTH_USERNAME" "$NEXTASK_GIT_A
 }; f`
 
 func resolveGitConnection(value string) (gitConnection, error) {
-	resolved, err := endpoint.ResolveGitRemote(value)
+	resolved, err := ResolveGitRemote(value)
 	if err != nil {
 		return gitConnection{}, err
 	}

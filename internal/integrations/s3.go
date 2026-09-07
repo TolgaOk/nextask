@@ -59,7 +59,7 @@ func (S3) Run(ctx context.Context, task Task, options Options, streams IO) *task
 	if err != nil {
 		return &taskexec.Result{Code: 1, Err: err}
 	}
-	store, err := storage.NewS3(cfg)
+	store, err := newS3Store(cfg)
 	if err != nil {
 		return &taskexec.Result{Code: 1, Err: err}
 	}

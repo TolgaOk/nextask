@@ -8,7 +8,6 @@ import (
 	"net/url"
 
 	"github.com/TolgaOk/nextask/internal/buildinfo"
-	"github.com/TolgaOk/nextask/internal/endpoint"
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 )
@@ -31,16 +30,10 @@ type s3Store struct {
 	bucket string
 }
 
-func NewS3(c Config) (Store, error) {
-	value, err := endpoint.ResolveS3Endpoint(c.Endpoint)
-	if err != nil {
-		return nil, fmt.Errorf("s3 endpoint: %w", err)
-	}
-	if value == "" {
-		return nil, fmt.Errorf("s3 endpoint is required")
-	}
-	connection, err := url.Parse(value)
-	if err != nil {
+// NewS3 constructs a transport from an endpoint already resolved by the integration.
+func NewS3(c Config, resolvedEndpoint string) (Store, error) {
+	connection, err := url.Parse(resolvedEndpoint)
+	if err != nil || connection.User == nil {
 		return nil, fmt.Errorf("invalid storage endpoint")
 	}
 	access := connection.User.Username()

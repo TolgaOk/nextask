@@ -4,22 +4,20 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
-
-	"github.com/TolgaOk/nextask/internal/endpoint"
 )
 
 // Connection options are serialized with tasks. Authentication belongs to the
 // worker environment or Git's SSH/credential helpers, so these values must be
 // usable in shared configuration without carrying passwords or tokens.
 func checkGitRemote(value any) error {
-	if err := endpoint.ValidateGitRemote(value.(string)); err != nil {
+	if err := ValidateGitRemote(value.(string)); err != nil {
 		return fmt.Errorf("%w; use environment references or a Git credential helper", err)
 	}
 	return nil
 }
 
 func checkS3Endpoint(value any) error {
-	return endpoint.ValidateS3Endpoint(value.(string))
+	return ValidateS3Endpoint(value.(string))
 }
 
 func checkS3URL(value any) error {
