@@ -122,7 +122,7 @@ func TestFetchRejectsUnsafePaths(t *testing.T) {
 	}
 }
 func TestFetchRejectsSymlinksAndDirectories(t *testing.T) {
-	for _, kind := range []string{"root", "parent", "file", "directory"} {
+	for _, kind := range []string{"root", "root-trailing-slash", "parent", "file", "directory"} {
 		for _, overwrite := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/%t", kind, overwrite), func(t *testing.T) {
 				o := fetchOptions(t)
@@ -131,7 +131,7 @@ func TestFetchRejectsSymlinksAndDirectories(t *testing.T) {
 				if err := os.WriteFile(filepath.Join(outside, "file"), []byte("untouched"), 0600); err != nil {
 					t.Fatal(err)
 				}
-				if kind == "root" {
+				if kind == "root" || kind == "root-trailing-slash" {
 					if err := os.Symlink(outside, o.Destination); err != nil {
 						t.Fatal(err)
 					}
@@ -157,6 +157,9 @@ func TestFetchRejectsSymlinksAndDirectories(t *testing.T) {
 							t.Fatal(err)
 						}
 					}
+				}
+				if kind == "root-trailing-slash" {
+					o.Destination += "/"
 				}
 				f := &downloadFixture{keys: []string{"task/sub/file"}}
 				if err := Fetch(context.Background(), f, "", "task", o, io.Discard); err == nil {

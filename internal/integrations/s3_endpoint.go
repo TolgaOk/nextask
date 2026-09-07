@@ -2,12 +2,12 @@ package integrations
 
 import (
 	"fmt"
-	"github.com/minio/minio-go/v7/pkg/s3utils"
 	"net/url"
 	"strings"
 
 	"github.com/TolgaOk/nextask/internal/storage"
 	"github.com/TolgaOk/nextask/internal/urltemplate"
+	"github.com/minio/minio-go/v7/pkg/s3utils"
 )
 
 // ValidateS3Endpoint checks an S3 service URL with credential references.

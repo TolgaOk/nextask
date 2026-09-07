@@ -6,12 +6,14 @@ import (
 	"io/fs"
 	"os"
 	"path"
+	"path/filepath"
 	"strings"
 )
 
 // The caller chooses the destination's parent. Object paths only traverse roots
 // anchored by directory handles, with symlinks rejected at each component.
 func openFetchRoot(destination string, create bool) (*os.Root, error) {
+	destination = filepath.Clean(destination)
 	info, err := os.Lstat(destination)
 	if errors.Is(err, fs.ErrNotExist) {
 		if !create {

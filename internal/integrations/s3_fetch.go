@@ -3,8 +3,9 @@ package integrations
 import (
 	"context"
 	"fmt"
-	"github.com/TolgaOk/nextask/internal/storage"
 	"io"
+
+	"github.com/TolgaOk/nextask/internal/storage"
 )
 
 // FetchS3 reuses connection settings without requiring any upload policy or DB.

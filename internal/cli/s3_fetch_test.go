@@ -98,7 +98,16 @@ exclude = ["**"]
 }
 
 func TestS3FetchArgumentsBeforeConfig(t *testing.T) {
-	for _, args := range [][]string{{}, {"id"}, {"id", "extra", "--to", "dir"}, {"../escape", "--to", "dir"}, {"id", "--to", "dir", "--include", "["}, {"id", "--to", "dir", "--timeout", "0s"}, {"id", "--to", "dir", "--timeout", "-1s"}} {
+	for _, args := range [][]string{
+		{},
+		{"id"},
+		{"id", "extra", "--to", "dir"},
+		{"../escape", "--to", "dir"},
+		{"id", "--to", "dir", "--include", "["},
+		{"id", "--to", "dir", "--timeout", "0s"},
+		{"id", "--to", "dir", "--timeout", "-1s"},
+		{"id", "--to", "dir", "--timeout", "2d"},
+	} {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
 			loaded := false
 			cmd := newRootCommand("test", func() (*config.Config, error) { loaded = true; return &config.Config{}, nil })

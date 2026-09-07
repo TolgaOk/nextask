@@ -1,12 +1,13 @@
 package cli
 
 import (
+	"time"
+
 	"github.com/TolgaOk/nextask/internal/config"
 	"github.com/TolgaOk/nextask/internal/db"
 	"github.com/TolgaOk/nextask/internal/integrations"
 	"github.com/TolgaOk/nextask/internal/storage"
 	"github.com/spf13/cobra"
-	"time"
 )
 
 func newS3Command(cfg *config.Config) *cobra.Command {
@@ -17,7 +18,7 @@ func newS3Command(cfg *config.Config) *cobra.Command {
 
 func newS3FetchCommand(cfg *config.Config) *cobra.Command {
 	options := storage.FetchOptions{}
-	var timeout durationFlag
+	timeout := durationFlag{Duration: 5 * time.Minute}
 	cmd := &cobra.Command{
 		Use:   "fetch TASK_ID --to DIR",
 		Short: "Download a task's artifacts without database access",
@@ -42,6 +43,6 @@ func newS3FetchCommand(cfg *config.Config) *cobra.Command {
 	cmd.Flags().StringArrayVar(&options.Exclude, "exclude", nil, "Exclude matching relative paths (repeatable)")
 	cmd.Flags().BoolVar(&options.DryRun, "dry-run", false, "List selected paths without writing files")
 	cmd.Flags().BoolVar(&options.Overwrite, "overwrite", false, "Replace existing regular files after complete downloads")
-	timeout.addFlag(cmd, "timeout", 5*time.Minute, "Time limit for listing and each file download (up to 24h)")
+	cmd.Flags().Var(&timeout, "timeout", "Time limit for listing and each download (e.g., 30s, 1h; maximum 24h)")
 	return cmd
 }
