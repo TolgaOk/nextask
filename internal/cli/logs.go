@@ -2,16 +2,13 @@ package cli
 
 import (
 	"context"
-	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
-	"os/signal"
-	"syscall"
-	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/TolgaOk/nextask/internal/db"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/spf13/cobra"
 )
 
@@ -41,7 +38,7 @@ var logsCmd = &cobra.Command{
 			return errDBRequired()
 		}
 
-		ctx := context.Background()
+		ctx := cmd.Context()
 
 		pool, err := db.Connect(ctx, cfg.DB.URL)
 		if err != nil {
@@ -149,106 +146,21 @@ func init() {
 }
 
 func logsAndAttach(ctx context.Context, pool *pgxpool.Pool, taskID string, lastLogID int) error {
-	fromChannel := db.FromTaskChannel(taskID)
-	backoff := db.NewBackOff(cfg.Retry.InitialInterval, cfg.Retry.MaxInterval)
-	listener, err := db.Listen(ctx, cfg.DB.URL, backoff, fromChannel)
-	if err != nil {
-		return fmt.Errorf("listen failed: %w", err)
-	}
-	defer listener.Close(context.Background())
-
+	ctx, stop := interruptContext(ctx)
+	defer stop()
 	fmt.Fprintln(os.Stderr, hintStyle.Render("Streaming logs (Ctrl+C to stop watching)..."))
-
-	cancelCtx, cancelFunc := context.WithCancel(ctx)
-	defer cancelFunc()
-
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-	defer signal.Stop(sigCh)
-
-	go func() {
-		select {
-		case <-sigCh:
-			cancelFunc()
-		case <-cancelCtx.Done():
+	task, err := streamTask(ctx, pool, taskID, &lastLogID, func(log db.TaskLog) {
+		if logsStream == "" || log.Stream == logsStream {
+			printLog(log)
 		}
-	}()
-
-	// Poll ticker for status check (handles missed events during reconnect)
-	pollTicker := time.NewTicker(5 * time.Second)
-	defer pollTicker.Stop()
-
-	for {
-		select {
-		case notif, ok := <-listener.C:
-			if !ok {
-				// Listener closed - check final status
-				return logsCheckCompletion(ctx, pool, taskID, &lastLogID)
-			}
-
-			eventType, data, err := db.ParseEvent(notif.Payload)
-			if err != nil {
-				continue
-			}
-
-			switch eventType {
-			case db.EventTypeLog:
-				logsFetchLogs(ctx, pool, taskID, &lastLogID)
-
-			case db.EventTypeStatus:
-				var status db.TaskStatusEvent
-				if err := json.Unmarshal(data, &status); err != nil {
-					continue
-				}
-				logsFetchLogs(ctx, pool, taskID, &lastLogID)
-				fmt.Fprintf(os.Stderr, "\nTask %s (exit %d)\n", status.Status, status.ExitCode)
-				return nil
-			}
-
-		case <-pollTicker.C:
-			if err := logsCheckCompletion(ctx, pool, taskID, &lastLogID); err == nil {
-				return nil
-			}
-
-		case <-cancelCtx.Done():
-			fmt.Fprintln(os.Stderr) // newline after Ctrl+C
-			return nil
-		}
+	})
+	if errors.Is(err, context.Canceled) && ctx.Err() != nil {
+		fmt.Fprintln(os.Stderr)
+		return nil
 	}
-}
-
-func logsFetchLogs(ctx context.Context, pool *pgxpool.Pool, taskID string, lastLogID *int) {
-	logs, err := db.GetLogsSince(ctx, pool, taskID, *lastLogID)
 	if err != nil {
-		return
+		return err
 	}
-	for _, log := range logs {
-		printLog(log)
-		if log.ID > *lastLogID {
-			*lastLogID = log.ID
-		}
-	}
-}
-
-func logsCheckCompletion(ctx context.Context, pool *pgxpool.Pool, taskID string, lastLogID *int) error {
-	task, err := db.GetTask(ctx, pool, taskID, cfg.Worker.StaleDuration())
-	if err != nil || task == nil {
-		return fmt.Errorf("not done")
-	}
-
-	logsFetchLogs(ctx, pool, taskID, lastLogID)
-
-	if task.Status == db.StatusCompleted || task.Status == db.StatusFailed || task.Status == db.StatusCancelled {
-		exitCode := 0
-		if task.ExitCode != nil {
-			exitCode = *task.ExitCode
-		}
-		fmt.Fprintf(os.Stderr, "\nTask %s (exit %d)\n", task.Status, exitCode)
-		return nil
-	}
-	if task.Status == db.StatusStale {
-		fmt.Fprintf(os.Stderr, "\nTask %s (worker heartbeat expired)\n", task.Status)
-		return nil
-	}
-	return fmt.Errorf("not done")
+	printAttachedCompletion(task)
+	return nil
 }

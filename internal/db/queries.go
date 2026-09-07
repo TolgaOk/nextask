@@ -426,6 +426,7 @@ func UpdateHeartbeat(ctx context.Context, pool *pgxpool.Pool, id string) error {
 
 // WorkerListFilter specifies criteria for filtering workers.
 type WorkerListFilter struct {
+	ID     string
 	Status *WorkerStatus
 	Since  time.Time
 	Limit  uint64
@@ -448,6 +449,9 @@ func workerListQuery(filter WorkerListFilter) sq.SelectBuilder {
 	}
 
 	query := psql.Select().FromSelect(workers, "w")
+	if filter.ID != "" {
+		query = query.Where(sq.Eq{"id": filter.ID})
+	}
 	if filter.Status != nil {
 		query = query.Where(sq.Eq{"status": *filter.Status})
 	}

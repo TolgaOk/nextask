@@ -2,17 +2,17 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
-	"os/signal"
 	"path/filepath"
 	"syscall"
 	"time"
 
 	"github.com/TolgaOk/nextask/internal/db"
 	"github.com/TolgaOk/nextask/internal/worker"
-	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/moby/moby/pkg/namesgenerator"
 	"github.com/spf13/cobra"
 	str2duration "github.com/xhit/go-str2duration/v2"
@@ -82,32 +82,13 @@ var workerCmd = &cobra.Command{
 			exitIfIdleDuration = &d
 		}
 
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
-
-		// Start timeout goroutine if specified
+		ctx, stop := interruptContext(cmd.Context())
+		defer stop()
 		if timeout > 0 {
-			go func() {
-				select {
-				case <-time.After(timeout):
-					fmt.Fprintf(os.Stderr, "\nTimeout reached (%s), shutting down...\n", workerTimeout)
-					cancel()
-				case <-ctx.Done():
-				}
-			}()
+			var cancel context.CancelFunc
+			ctx, cancel = context.WithTimeout(ctx, timeout)
+			defer cancel()
 		}
-
-		sigCh := make(chan os.Signal, 1)
-		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-		go func() {
-			select {
-			case sig := <-sigCh:
-				fmt.Fprintf(os.Stderr, "\nReceived %s, shutting down...\n", sig)
-				cancel()
-			case <-ctx.Done():
-				signal.Stop(sigCh)
-			}
-		}()
 
 		// Parse tag filters
 		tagFilter, err := parseTags(workerFilters)
@@ -279,77 +260,63 @@ var workerStopCmd = &cobra.Command{
 			)
 		}
 
-		ctx := context.Background()
-		workerID := args[0]
-
+		ctx, stop := interruptContext(cmd.Context())
+		defer stop()
+		ctx, cancel := context.WithTimeout(ctx, workerStopTimeout)
+		defer cancel()
 		pool, err := db.Connect(ctx, cfg.DB.URL)
 		if err != nil {
 			return err
 		}
 		defer pool.Close()
-
-		// Verify worker exists and is running
-		workers, err := db.ListWorkers(ctx, pool, db.WorkerListFilter{})
-		if err != nil {
-			return err
-		}
-
-		var found *db.WorkerRecord
-		for _, w := range workers {
-			if w.ID == workerID {
-				found = &w
-				break
-			}
-		}
-
-		if found == nil {
-			return errWithHints(
-				fmt.Sprintf("worker not found: %s", workerID),
-				"Run "+codeStyle.Render("nextask worker list")+" to see available workers",
-			)
-		}
-
-		if found.Status == db.WorkerStatusStopped {
-			fmt.Fprintf(os.Stderr, "Worker %s is already stopped\n", workerID)
-			return nil
-		}
-
-		// Set up listener for confirmation before sending stop signal
-		listenConn, err := pgx.Connect(ctx, cfg.DB.URL)
-		if err != nil {
-			return err
-		}
-		defer listenConn.Close(ctx)
-
-		fromWorkerCh := db.FromWorkerChannel(workerID)
-		if _, err := listenConn.Exec(ctx, `LISTEN "`+fromWorkerCh+`"`); err != nil {
-			return err
-		}
-
-		// Send stop notification
-		toWorkerCh := db.ToWorkerChannel(workerID)
-		if _, err := pool.Exec(ctx, "SELECT pg_notify($1, '')", toWorkerCh); err != nil {
-			return fmt.Errorf("failed to send stop signal: %w", err)
-		}
-
-		// Wait for confirmation with timeout
-		waitCtx, waitCancel := context.WithTimeout(ctx, workerStopTimeout)
-		defer waitCancel()
-
-		_, err = listenConn.WaitForNotification(waitCtx)
-		if err != nil {
-			if waitCtx.Err() == context.DeadlineExceeded {
-				return errWithHints("stop signal sent but worker did not confirm",
-					"Worker may be unresponsive or processing a task",
-					"Check worker status with "+codeStyle.Render("nextask worker list"),
-				)
-			}
-			return err
-		}
-
-		fmt.Fprintf(os.Stderr, "Worker %s stopped\n", workerID)
-		return nil
+		return stopWorker(ctx, pool, args[0])
 	},
+}
+
+// stopWorker checks the registry before sending a hint and confirms stored state
+// after subscribing, including when the worker's confirmation hint is lost.
+func stopWorker(ctx context.Context, pool *pgxpool.Pool, id string) error {
+	status, err := workerStatus(ctx, pool, id)
+	if err != nil {
+		return err
+	}
+	if status == db.WorkerStatusStopped {
+		fmt.Fprintf(os.Stderr, "Worker %s is already stopped\n", id)
+		return nil
+	}
+	watch, err := newStateWatcher(ctx, db.FromWorkerChannel(id))
+	if err != nil {
+		return err
+	}
+	defer watch.Close()
+	if _, err := pool.Exec(ctx, "SELECT pg_notify($1, '')", db.ToWorkerChannel(id)); err != nil {
+		return fmt.Errorf("failed to send stop signal: %w", err)
+	}
+	err = watch.Run(ctx, func(ctx context.Context) (bool, error) {
+		status, err := workerStatus(ctx, pool, id)
+		return status == db.WorkerStatusStopped, err
+	})
+	if errors.Is(err, context.DeadlineExceeded) && ctx.Err() != nil {
+		return errWithHints("stop signal sent but worker did not confirm",
+			"Worker may be unresponsive or processing a task",
+			"Check worker status with "+codeStyle.Render("nextask worker list"))
+	}
+	if err == nil {
+		fmt.Fprintf(os.Stderr, "Worker %s stopped\n", id)
+	}
+	return err
+}
+
+func workerStatus(ctx context.Context, pool *pgxpool.Pool, id string) (db.WorkerStatus, error) {
+	workers, err := db.ListWorkers(ctx, pool, db.WorkerListFilter{ID: id, Limit: 1})
+	if err != nil {
+		return "", err
+	}
+	if len(workers) == 0 {
+		return "", errWithHints(fmt.Sprintf("worker not found: %s", id),
+			"Run "+codeStyle.Render("nextask worker list")+" to see available workers")
+	}
+	return workers[0].Status, nil
 }
 
 func init() {

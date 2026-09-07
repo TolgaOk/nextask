@@ -2,11 +2,9 @@ package cli
 
 import (
 	"context"
-	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
-	"os/signal"
-	"syscall"
 	"time"
 
 	"github.com/TolgaOk/nextask/internal/config"
@@ -80,7 +78,7 @@ var enqueueCmd = &cobra.Command{
 			return err
 		}
 		baseCtx := cmd.Context()
-		ctx, stopSignals := signal.NotifyContext(baseCtx, os.Interrupt, syscall.SIGTERM)
+		ctx, stopSignals := interruptContext(baseCtx)
 		defer stopSignals()
 		pool, err := db.Connect(ctx, cfg.DB.URL)
 		if err != nil {
@@ -142,140 +140,54 @@ func init() {
 }
 
 func enqueueAndAttach(ctx context.Context, pool *pgxpool.Pool, taskID string) error {
-	// Create listener with auto-reconnect before notifying workers
-	fromChannel := db.FromTaskChannel(taskID)
-	backoff := db.NewBackOff(cfg.Retry.InitialInterval, cfg.Retry.MaxInterval)
-	listener, err := db.Listen(ctx, cfg.DB.URL, backoff, fromChannel)
-	if err != nil {
-		return fmt.Errorf("listen failed: %w", err)
-	}
-	defer listener.Close(context.Background())
-
-	// Notify workers
-	if err := db.Notify(ctx, pool, db.ToWorkersChannel, db.WorkerWakeEvent{}); err != nil {
+	sigCtx, stop := interruptContext(ctx)
+	defer stop()
+	if err := db.Notify(sigCtx, pool, db.ToWorkersChannel, db.WorkerWakeEvent{}); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: notify failed: %v\n", err)
 	}
-
 	fmt.Fprintf(os.Stderr, "Task enqueued: %s\n", taskID)
-	fmt.Fprintf(os.Stderr, "Watching output (Ctrl+C to cancel)...\n")
-
-	// Signal handler: Ctrl+C cancels the task
-	cancelCtx, cancelFunc := context.WithCancel(ctx)
-	defer cancelFunc()
-
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-	go func() {
-		select {
-		case <-sigCh:
-			fmt.Fprintf(os.Stderr, "\nCancelling task...\n")
-
-			originalStatus, err := db.RequestCancel(ctx, pool, taskID)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "failed to request cancel: %v\n", err)
-				cancelFunc()
-				return
-			}
-
-			if originalStatus != nil && *originalStatus == db.StatusPending {
-				fmt.Fprintf(os.Stderr, "Task cancelled\n")
-				cancelFunc()
-				return
-			}
-
-			// Running task - notify worker
-			toChannel := db.ToTaskChannel(taskID)
-			if err := db.Notify(ctx, pool, toChannel, db.TaskCancelEvent{}); err != nil {
-				fmt.Fprintf(os.Stderr, "failed to send cancel: %v\n", err)
-			}
-		case <-cancelCtx.Done():
-			signal.Stop(sigCh)
-		}
-	}()
-
-	// Poll ticker for status check (handles missed events during reconnect)
-	pollTicker := time.NewTicker(5 * time.Second)
-	defer pollTicker.Stop()
+	fmt.Fprintln(os.Stderr, "Watching output (Ctrl+C to cancel)...")
 
 	var lastLogID int
-	for {
-		select {
-		case notif, ok := <-listener.C:
-			if !ok {
-				// Listener closed - check final status
-				return enqueueCheckCompletion(ctx, pool, taskID, &lastLogID)
-			}
-
-			eventType, data, err := db.ParseEvent(notif.Payload)
-			if err != nil {
-				continue
-			}
-
-			switch eventType {
-			case db.EventTypeLog:
-				enqueueFetchLogs(ctx, pool, taskID, &lastLogID)
-
-			case db.EventTypeStatus:
-				var status db.TaskStatusEvent
-				if err := json.Unmarshal(data, &status); err != nil {
-					continue
-				}
-				enqueueFetchLogs(ctx, pool, taskID, &lastLogID)
-				fmt.Fprintf(os.Stderr, "\nTask %s (exit %d)\n", status.Status, status.ExitCode)
-				if status.ExitCode != 0 {
-					return &exitCodeError{code: status.ExitCode}
-				}
-				return nil
-			}
-
-		case <-pollTicker.C:
-			if err := enqueueCheckCompletion(ctx, pool, taskID, &lastLogID); err == nil {
-				return nil
-			}
-
-		case <-cancelCtx.Done():
-			return nil
+	task, err := streamTask(sigCtx, pool, taskID, &lastLogID, printLogLine)
+	if errors.Is(err, context.Canceled) && ctx.Err() == nil {
+		// The signal interrupts reads first. Persist cancellation using a fresh,
+		// bounded context, then keep watching the worker's final outcome.
+		stop()
+		pending, cancelErr := cancelAttachedTask(ctx, pool, taskID)
+		if cancelErr != nil || pending {
+			return cancelErr
 		}
+		task, err = streamTask(ctx, pool, taskID, &lastLogID, printLogLine)
 	}
-}
-
-func enqueueFetchLogs(ctx context.Context, pool *pgxpool.Pool, taskID string, lastLogID *int) {
-	logs, err := db.GetLogsSince(ctx, pool, taskID, *lastLogID)
 	if err != nil {
-		return
+		return err
 	}
-	for _, log := range logs {
-		printLogLine(log)
-		if log.ID > *lastLogID {
-			*lastLogID = log.ID
-		}
-	}
+	printAttachedCompletion(task)
+	return exitOrNil(taskExitCode(task))
 }
 
-func enqueueCheckCompletion(ctx context.Context, pool *pgxpool.Pool, taskID string, lastLogID *int) error {
-	task, err := db.GetTask(ctx, pool, taskID, cfg.Worker.StaleDuration())
-	if err != nil || task == nil {
-		return fmt.Errorf("not done")
+func cancelAttachedTask(ctx context.Context, pool *pgxpool.Pool, taskID string) (bool, error) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	fmt.Fprintln(os.Stderr, "\nCancelling task...")
+	status, err := db.RequestCancel(ctx, pool, taskID)
+	if err != nil {
+		return false, fmt.Errorf("failed to request cancel: %w", err)
 	}
-
-	enqueueFetchLogs(ctx, pool, taskID, lastLogID)
-
-	if task.Status == db.StatusCompleted || task.Status == db.StatusFailed || task.Status == db.StatusCancelled {
-		exitCode := 0
-		if task.ExitCode != nil {
-			exitCode = *task.ExitCode
+	if status == nil {
+		return false, fmt.Errorf("task not found: %s", taskID)
+	}
+	if *status == db.StatusPending {
+		fmt.Fprintln(os.Stderr, "Task cancelled")
+		return true, nil
+	}
+	if *status == db.StatusRunning {
+		if err := db.Notify(ctx, pool, db.ToTaskChannel(taskID), db.TaskCancelEvent{}); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: cancel requested but notification failed: %v\n", err)
 		}
-		fmt.Fprintf(os.Stderr, "\nTask %s (exit %d)\n", task.Status, exitCode)
-		if exitCode != 0 {
-			return &exitCodeError{code: exitCode}
-		}
-		return nil
 	}
-	if task.Status == db.StatusStale {
-		fmt.Fprintf(os.Stderr, "\nTask %s (worker heartbeat expired)\n", task.Status)
-		return &exitCodeError{code: 1}
-	}
-	return fmt.Errorf("not done")
+	return false, nil
 }
 
 func printLogLine(log db.TaskLog) {

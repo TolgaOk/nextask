@@ -2,14 +2,12 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
-	"os/signal"
-	"syscall"
 	"time"
 
 	"github.com/TolgaOk/nextask/internal/db"
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/spf13/cobra"
 )
@@ -31,7 +29,7 @@ var cancelCmd = &cobra.Command{
 			)
 		}
 
-		ctx := context.Background()
+		ctx := cmd.Context()
 		taskID := args[0]
 
 		pool, err := db.Connect(ctx, cfg.DB.URL)
@@ -79,66 +77,50 @@ var cancelCmd = &cobra.Command{
 }
 
 func waitForCancel(ctx context.Context, pool *pgxpool.Pool, taskID string, timeout time.Duration) error {
-	conn, err := pgx.Connect(ctx, cfg.DB.URL)
+	sigCtx, stop := interruptContext(ctx)
+	defer stop()
+	waitCtx, cancel := context.WithTimeout(sigCtx, timeout)
+	defer cancel()
+	err := confirmCancellation(waitCtx, pool, taskID)
+	if errors.Is(err, context.Canceled) && sigCtx.Err() != nil {
+		fmt.Fprintln(os.Stderr, "\nInterrupted - cancel request already sent")
+		fmt.Fprintf(os.Stderr, "Check task status with %s\n", codeStyle.Render("nextask show "+taskID))
+		return nil
+	}
+	if errors.Is(err, context.DeadlineExceeded) && waitCtx.Err() != nil {
+		return errWithHints("cancel requested but worker did not confirm",
+			"The task may still be stopping, finalizing, or disconnected",
+			"Check task status with "+codeStyle.Render("nextask show "+taskID))
+	}
+	return err
+}
+
+func confirmCancellation(ctx context.Context, pool *pgxpool.Pool, taskID string) error {
+	watch, err := newStateWatcher(ctx, db.FromTaskChannel(taskID))
 	if err != nil {
 		return err
 	}
-	defer conn.Close(ctx)
-
-	fromChannel := db.FromTaskChannel(taskID)
-	if _, err := conn.Exec(ctx, "LISTEN "+pgx.Identifier{fromChannel}.Sanitize()); err != nil {
+	defer watch.Close()
+	if err := db.Notify(ctx, pool, db.ToTaskChannel(taskID), db.TaskCancelEvent{}); err != nil {
 		return err
 	}
-
-	toChannel := db.ToTaskChannel(taskID)
-	if err := db.Notify(ctx, pool, toChannel, db.TaskCancelEvent{}); err != nil {
-		return err
-	}
-
-	sigCtx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
-	defer stop()
-	waitCtx, waitCancel := context.WithTimeout(sigCtx, timeout)
-	defer waitCancel()
-
-	for {
-		// A worker may act on the durable request before this CLI starts
-		// listening, or its confirmation notification may be lost.
-		task, err := db.GetTask(waitCtx, pool, taskID, cfg.Worker.StaleDuration())
+	return watch.Run(ctx, func(ctx context.Context) (bool, error) {
+		task, err := db.GetTask(ctx, pool, taskID, cfg.Worker.StaleDuration())
 		if err != nil {
-			return err
+			return false, err
 		}
 		if task == nil {
-			return fmt.Errorf("task not found: %s", taskID)
+			return false, fmt.Errorf("task not found: %s", taskID)
 		}
 		switch task.Status {
 		case db.StatusCancelled:
 			fmt.Fprintln(os.Stderr, "Task cancelled")
-			return nil
+			return true, nil
 		case db.StatusCompleted, db.StatusFailed:
-			return fmt.Errorf("task %s finished as %s before cancellation was confirmed", taskID, task.Status)
+			return false, fmt.Errorf("task %s finished as %s before cancellation was confirmed", taskID, task.Status)
 		}
-
-		pollCtx, pollCancel := context.WithTimeout(waitCtx, time.Second)
-		_, err = conn.WaitForNotification(pollCtx)
-		pollCancel()
-		if err != nil {
-			if sigCtx.Err() == context.Canceled {
-				fmt.Fprintln(os.Stderr, "\nInterrupted - cancel request already sent")
-				fmt.Fprintf(os.Stderr, "Check task status with %s\n", codeStyle.Render("nextask show "+taskID))
-				return nil
-			}
-			if waitCtx.Err() == context.DeadlineExceeded {
-				return errWithHints("cancel requested but worker did not confirm",
-					"The task may still be stopping, finalizing, or disconnected",
-					"Check task status with "+codeStyle.Render("nextask show "+taskID),
-				)
-			}
-			if pollCtx.Err() == context.DeadlineExceeded {
-				continue
-			}
-			return err
-		}
-	}
+		return false, nil
+	})
 }
 
 func init() {
