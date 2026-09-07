@@ -36,8 +36,8 @@ type Notifier struct {
 }
 
 type addRequest struct {
-	channel string
-	result  chan error
+	channels []string
+	result   chan error
 }
 
 // NewNotifier creates a notifier listening on the given channels with auto-reconnect.
@@ -75,11 +75,14 @@ func newNotifier(ctx context.Context, dbURL string, b *backoff.ExponentialBackOf
 	return n, nil
 }
 
-// Add subscribes to a new channel. Blocks until LISTEN is confirmed or ctx expires.
-func (n *Notifier) Add(ctx context.Context, channel string) error {
+// Add subscribes to channels in one batch. Blocks until all LISTENs are confirmed or ctx expires.
+func (n *Notifier) Add(ctx context.Context, channels ...string) error {
+	if len(channels) == 0 {
+		return nil
+	}
 	req := addRequest{
-		channel: channel,
-		result:  make(chan error, 1),
+		channels: append([]string(nil), channels...),
+		result:   make(chan error, 1),
 	}
 	select {
 	case n.addCh <- req:
@@ -179,21 +182,7 @@ func (n *Notifier) processRequests(ctx context.Context) {
 	for {
 		select {
 		case req := <-n.addCh:
-			if n.channels[req.channel] {
-				req.result <- nil
-				continue
-			}
-			if n.conn == nil {
-				req.result <- fmt.Errorf("connection down")
-				continue
-			}
-			execCtx, cancel := context.WithTimeout(ctx, connectTimeout)
-			_, err := n.conn.Exec(execCtx, "LISTEN "+pgx.Identifier{req.channel}.Sanitize())
-			cancel()
-			if err == nil {
-				n.channels[req.channel] = true
-			}
-			req.result <- err
+			req.result <- n.addChannels(ctx, req.channels)
 		case ch := <-n.removeCh:
 			if !n.channels[ch] {
 				continue
@@ -208,6 +197,21 @@ func (n *Notifier) processRequests(ctx context.Context) {
 			return
 		}
 	}
+}
+
+func (n *Notifier) addChannels(ctx context.Context, channels []string) error {
+	execCtx, cancel := context.WithTimeout(ctx, connectTimeout)
+	defer cancel()
+	for _, channel := range channels {
+		if n.channels[channel] {
+			continue
+		}
+		if _, err := n.conn.Exec(execCtx, "LISTEN "+pgx.Identifier{channel}.Sanitize()); err != nil {
+			return err
+		}
+		n.channels[channel] = true
+	}
+	return nil
 }
 
 func (n *Notifier) failPendingAdds(err error) {

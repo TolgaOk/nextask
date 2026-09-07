@@ -76,16 +76,16 @@ func TestNotifierReconnectSubscriptions(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer pool.Close()
-	base, removed, added := "shared_base", `shared_removed"channel`, `shared_added"channel`
+	base, removed, added, extra := "shared_base", `shared_removed"channel`, `shared_added"channel`, `batch_extra"channel`
 	notifier, err := NewNotifier(ctx, getTestDBURL(t), NewBackOff(10*time.Millisecond, time.Second), []string{base, removed})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer notifier.Close(context.Background())
-	if err := notifier.Add(ctx, added); err != nil {
+	if err := notifier.Add(ctx, added, base, added, extra); err != nil {
 		t.Fatal(err)
 	}
-	pid := waitForSubscriptionQuery(t, ctx, pool, "LISTEN "+pgx.Identifier{added}.Sanitize())
+	pid := waitForSubscriptionQuery(t, ctx, pool, "LISTEN "+pgx.Identifier{extra}.Sanitize())
 	notifier.Remove(removed)
 	waitForSubscriptionQuery(t, ctx, pool, "UNLISTEN "+pgx.Identifier{removed}.Sanitize())
 	if err := terminateBackend(ctx, pool, pid); err != nil {
@@ -116,19 +116,22 @@ ready:
 	if _, err := pool.Exec(ctx, "SELECT pg_notify($1, 'removed')", removed); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := pool.Exec(ctx, "SELECT pg_notify($1, 'after')", base); err != nil {
-		t.Fatal(err)
+	remaining := map[string]bool{base: true, extra: true}
+	for channel := range remaining {
+		if _, err := pool.Exec(ctx, "SELECT pg_notify($1, 'after')", channel); err != nil {
+			t.Fatal(err)
+		}
 	}
-	for {
+	for len(remaining) > 0 {
 		select {
 		case <-ctx.Done():
-			t.Fatal("initial subscription was not restored")
+			t.Fatalf("subscriptions were not restored: %v", remaining)
 		case notification := <-notifier.C:
 			if notification == nil || notification.Channel == removed {
 				t.Fatalf("removed subscription returned: %+v", notification)
 			}
-			if notification.Channel == base && notification.Payload == "after" {
-				return
+			if notification.Payload == "after" {
+				delete(remaining, notification.Channel)
 			}
 		}
 	}
