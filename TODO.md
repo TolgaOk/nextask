@@ -36,7 +36,8 @@ Nextask runs commands. Built-in integrations prepare tasks and compose runtime w
 
 ## Connection URLs
 
-- [x] Share URL validation and environment-reference resolution; reject literal credentials in config.
+- [x] Separate DB/Git/S3 validation; share parsing and expansion; require credential references.
+- [x] Cover endpoint validation paths and fuzz URLs/credentials; fix IPv6 zones and partial Git URL checks.
 - [x] Use Gitleaks for repository secret scanning; keep explicit credential-reference validation.
 - [x] Accept DB URL templates and complete URLs from the environment.
 - [x] Authenticate Git with URL credentials resolved separately on submitters and workers.

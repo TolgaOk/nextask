@@ -197,7 +197,7 @@ func publishSnapshot(ctx context.Context, repo, taskID, remote string) (GitSnaps
 
 func resolveRemote(ctx context.Context, repo, remote string) (fetch, push string, err error) {
 	if endpoint.HasReferences(remote) {
-		resolved, err := endpoint.Resolve(remote, endpoint.Git)
+		resolved, err := endpoint.ResolveGitRemote(remote)
 		if err != nil {
 			return "", "", err
 		}

@@ -12,14 +12,14 @@ import (
 // worker environment or Git's SSH/credential helpers, so these values must be
 // usable in shared configuration without carrying passwords or tokens.
 func checkGitRemote(value any) error {
-	if err := endpoint.Validate(value.(string), endpoint.Git); err != nil {
+	if err := endpoint.ValidateGitRemote(value.(string)); err != nil {
 		return fmt.Errorf("%w; use environment references or a Git credential helper", err)
 	}
 	return nil
 }
 
 func checkS3Endpoint(value any) error {
-	return endpoint.Validate(value.(string), endpoint.S3)
+	return endpoint.ValidateS3Endpoint(value.(string))
 }
 
 func checkS3URL(value any) error {

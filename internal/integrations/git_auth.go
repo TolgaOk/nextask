@@ -32,7 +32,7 @@ printf 'username=%s\npassword=%s\n' "$NEXTASK_GIT_AUTH_USERNAME" "$NEXTASK_GIT_A
 }; f`
 
 func resolveGitConnection(value string) (gitConnection, error) {
-	resolved, err := endpoint.Resolve(value, endpoint.Git)
+	resolved, err := endpoint.ResolveGitRemote(value)
 	if err != nil {
 		return gitConnection{}, err
 	}

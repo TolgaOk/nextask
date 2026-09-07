@@ -57,7 +57,7 @@ func decodeFile(file configFile, cfg *Config) error {
 	if err != nil {
 		return configFileError(file.path, err)
 	}
-	if err := endpoint.Validate(cfg.DB.Endpoint, endpoint.Database); err != nil {
+	if err := endpoint.ValidateDatabaseURL(cfg.DB.Endpoint); err != nil {
 		return fmt.Errorf("%s: db.url: %w", file.path, err)
 	}
 	selectionKey := append(append([]string{}, prefix...), "enqueue", "with")

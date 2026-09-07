@@ -32,7 +32,7 @@ type s3Store struct {
 }
 
 func NewS3(c Config) (Store, error) {
-	value, err := endpoint.Resolve(c.Endpoint, endpoint.S3)
+	value, err := endpoint.ResolveS3Endpoint(c.Endpoint)
 	if err != nil {
 		return nil, fmt.Errorf("s3 endpoint: %w", err)
 	}

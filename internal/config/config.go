@@ -149,7 +149,7 @@ func loadFiles(files []configFile) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	cfg.DB.URL, err = endpoint.Resolve(cfg.DB.Endpoint, endpoint.Database)
+	cfg.DB.URL, err = endpoint.ResolveDatabaseURL(cfg.DB.Endpoint)
 	if err != nil {
 		return nil, fmt.Errorf("%s: db.url: %w", cfg.SourceFor("db.url"), err)
 	}
