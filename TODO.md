@@ -34,6 +34,16 @@ Nextask runs commands. Built-in integrations prepare tasks and compose runtime w
 - [x] Test selection, config precedence, quoting, composition, cancellation, and failures.
 - [x] Fix cancellation/channel handling; verify race tests and CLI workflows; add CI.
 
+## Worker failure and retry
+
+- [ ] Keep `failed` for task failures; add `worker_failed` for worker interruptions, including intentional shutdown.
+- [ ] Preserve `cancelled` for explicit task cancellation; never auto-requeue cancelled tasks.
+- [ ] Update DB compatibility, CLI status filters, display, and wait behavior.
+- [ ] Consider opt-in automatic requeue after worker failure, with retry limits and backoff.
+- [ ] Keep task ID and original snapshot; preserve each attempt's logs and outcome.
+- [ ] Treat stale heartbeats as uncertain loss; coordinate execution ownership and reject obsolete attempt updates.
+- [ ] Test abrupt loss, intentional stops, DB outages, cancellation races, and retry exhaustion.
+
 ## Git integration
 
 - [x] Snapshot/push during enqueue; restore the exact commit through the queued command.
