@@ -4,6 +4,7 @@ package cli
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 
 	"github.com/TolgaOk/nextask/internal/config"
@@ -95,18 +96,23 @@ func Execute(version string) {
 		if errors.As(err, &ec) {
 			os.Exit(ec.code)
 		}
-		printError(err)
+		printError(os.Stderr, err)
 		os.Exit(1)
 	}
 }
 
-func printError(err error) {
-	fmt.Fprintln(os.Stderr, errStyle.Render("Error: ")+err.Error())
+func printError(out io.Writer, err error) error {
+	if _, writeErr := fmt.Fprintln(out, errStyle.Render("Error: ")+err.Error()); writeErr != nil {
+		return writeErr
+	}
 
 	hints := getErrorHints(err)
 	for _, hint := range hints {
-		fmt.Fprintln(os.Stderr, hintStyle.Render("  → ")+hint)
+		if _, err := fmt.Fprintln(out, hintStyle.Render("  → ")+hint); err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
 func getErrorHints(err error) []string {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -18,6 +19,7 @@ import (
 
 // LogConfig holds batching parameters for the task logger.
 type LogConfig struct {
+	Stderr        io.Writer // Diagnostics; nil uses the process stderr. Must support concurrent writes.
 	FlushLines    int
 	FlushInterval time.Duration
 	BufferSize    int
@@ -58,6 +60,9 @@ type TaskLogger struct {
 
 // NewTaskLogger creates a batching logger that writes to DB and files.
 func NewTaskLogger(pool *pgxpool.Pool, taskID, taskDir string, cfg LogConfig) (*TaskLogger, error) {
+	if cfg.Stderr == nil {
+		cfg.Stderr = os.Stderr
+	}
 	logDir := filepath.Join(taskDir, ".nextask", "log")
 	if err := os.MkdirAll(logDir, 0755); err != nil {
 		return nil, fmt.Errorf("create log directory: %w", err)
@@ -109,7 +114,7 @@ func (l *TaskLogger) Log(ctx context.Context, stream, data string) {
 		diagnostic := l.fileErr
 		l.errMu.Unlock()
 		if first {
-			fmt.Fprintf(os.Stderr, "[error] %v\n", diagnostic)
+			fmt.Fprintf(l.cfg.Stderr, "[error] %v\n", diagnostic)
 			l.enqueue(ctx, "nextask", fmt.Sprintf("[error] %v", diagnostic))
 		}
 	}
@@ -229,7 +234,7 @@ func (l *TaskLogger) flush(parent context.Context, entries []db.LogEntry) bool {
 	}, backoff.WithBackOff(db.NewBackOff(100*time.Millisecond, time.Second)))
 	if err != nil {
 		if parent.Err() != context.Canceled {
-			fmt.Fprintf(os.Stderr, "log batch insert failed (%d lines): %s\n", len(entries), db.HumanError(err))
+			fmt.Fprintf(l.cfg.Stderr, "log batch insert failed (%d lines): %s\n", len(entries), db.HumanError(err))
 		}
 		return false
 	}
@@ -242,7 +247,7 @@ func (l *TaskLogger) flush(parent context.Context, entries []db.LogEntry) bool {
 		notifyCtx, notifyCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer notifyCancel()
 		if err := db.Notify(notifyCtx, l.pool, channel, db.TaskLogEvent{ID: maxID}); err != nil {
-			fmt.Fprintf(os.Stderr, "log notify failed: %s\n", db.HumanError(err))
+			fmt.Fprintf(l.cfg.Stderr, "log notify failed: %s\n", db.HumanError(err))
 		}
 	}()
 	return true
@@ -251,13 +256,18 @@ func (l *TaskLogger) flush(parent context.Context, entries []db.LogEntry) bool {
 // DBLogger writes log lines to the database synchronously (used before task dir exists).
 // Not batched — only used for a few status messages, not high-throughput output.
 type DBLogger struct {
+	stderr io.Writer
 	pool   *pgxpool.Pool
 	taskID string
 }
 
 // NewDBLogger creates a logger that persists output to the database.
-func NewDBLogger(pool *pgxpool.Pool, taskID string) *DBLogger {
+func NewDBLogger(pool *pgxpool.Pool, taskID string, stderr io.Writer) *DBLogger {
+	if stderr == nil {
+		stderr = os.Stderr
+	}
 	return &DBLogger{
+		stderr: stderr,
 		pool:   pool,
 		taskID: taskID,
 	}
@@ -272,7 +282,7 @@ func (l *DBLogger) Log(ctx context.Context, stream, data string) {
 	id, err := db.InsertLog(ctx, l.pool, l.taskID, stream, data)
 	if err != nil {
 		if ctx.Err() == nil {
-			fmt.Fprintf(os.Stderr, "log insert failed: %s\n", db.HumanError(err))
+			fmt.Fprintf(l.stderr, "log insert failed: %s\n", db.HumanError(err))
 		}
 		return
 	}
@@ -280,7 +290,7 @@ func (l *DBLogger) Log(ctx context.Context, stream, data string) {
 	channel := db.FromTaskChannel(l.taskID)
 	if err := db.Notify(ctx, l.pool, channel, db.TaskLogEvent{ID: id}); err != nil {
 		if ctx.Err() == nil {
-			fmt.Fprintf(os.Stderr, "log notify failed: %s\n", db.HumanError(err))
+			fmt.Fprintf(l.stderr, "log notify failed: %s\n", db.HumanError(err))
 		}
 	}
 }

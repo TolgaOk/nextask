@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"io"
 	"strings"
 	"testing"
 	"time"
@@ -28,7 +29,7 @@ func TestCancelConfirmationWithoutNotification(t *testing.T) {
 				t.Fatal(err)
 			}
 			done := make(chan error, 1)
-			go func() { done <- waitForCancel(ctx, cfg, pool, name, 3*time.Second) }()
+			go func() { done <- waitForCancel(ctx, cfg, io.Discard, pool, name, 3*time.Second) }()
 			if !immediate {
 				time.Sleep(100 * time.Millisecond)
 				if err := db.CompleteTask(ctx, pool, name, db.StatusCancelled, -1); err != nil {
@@ -50,7 +51,7 @@ func TestCancelConfirmationTimeout(t *testing.T) {
 	if err := db.CreateTask(ctx, pool, &db.Task{ID: "no-confirmation", Command: "sleep 60", Status: db.StatusRunning, SourceType: "noop"}); err != nil {
 		t.Fatal(err)
 	}
-	err := waitForCancel(ctx, cfg, pool, "no-confirmation", 100*time.Millisecond)
+	err := waitForCancel(ctx, cfg, io.Discard, pool, "no-confirmation", 100*time.Millisecond)
 	if err == nil || !strings.Contains(err.Error(), "worker did not confirm") {
 		t.Fatalf("missing bounded cancellation diagnostic: %v", err)
 	}

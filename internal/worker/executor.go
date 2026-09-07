@@ -19,6 +19,7 @@ import (
 
 // Executor runs task commands and captures their output.
 type Executor struct {
+	Stderr           io.Writer
 	Pool             *pgxpool.Pool
 	DBURL            string
 	Workdir          string
@@ -47,7 +48,7 @@ func (e *Executor) Execute(ctx context.Context, task *db.Task) *ExitResult {
 func (e *Executor) cleanup(directory string) {
 	if e.RemoveWorkdir && directory != "" {
 		if err := os.RemoveAll(directory); err != nil {
-			fmt.Fprintf(os.Stderr, "cleanup failed: %v\n", err)
+			fmt.Fprintf(e.errorWriter(), "cleanup failed: %v\n", err)
 		}
 	}
 }
@@ -55,7 +56,7 @@ func (e *Executor) cleanup(directory string) {
 // execute returns the outcome and the directory owned by this execution.
 func (e *Executor) execute(ctx context.Context, task *db.Task) (result *ExitResult, directory string) {
 	taskDir := filepath.Join(e.Workdir, task.ID)
-	dbLog := NewDBLogger(e.Pool, task.ID)
+	dbLog := NewDBLogger(e.Pool, task.ID, e.errorWriter())
 
 	if err := db.ValidateTaskID(task.ID); err != nil {
 		return &ExitResult{Code: 1, Err: err}, directory
@@ -79,6 +80,7 @@ func (e *Executor) execute(ctx context.Context, task *db.Task) (result *ExitResu
 
 	// Create task logger with file output now that taskDir exists
 	log, err := NewTaskLogger(e.Pool, task.ID, taskDir, LogConfig{
+		Stderr:        e.errorWriter(),
 		FlushLines:    e.LogFlushLines,
 		FlushInterval: e.LogFlushInterval,
 		BufferSize:    e.LogBufferSize,
@@ -171,4 +173,11 @@ func scanLines(ctx context.Context, r io.Reader, stream string, log Logger) {
 			return
 		}
 	}
+}
+
+func (e *Executor) errorWriter() io.Writer {
+	if e.Stderr != nil {
+		return e.Stderr
+	}
+	return os.Stderr
 }

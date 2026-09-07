@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"sync"
 	"time"
@@ -21,6 +22,7 @@ const (
 // with dynamic Add/Remove support. A single pgx.Conn handles all channels.
 // Only the run goroutine touches the connection — no mutex required.
 type Notifier struct {
+	stderr  io.Writer
 	dbURL   string
 	backoff *backoff.ExponentialBackOff
 
@@ -42,11 +44,15 @@ type addRequest struct {
 
 // NewNotifier creates a notifier listening on the given channels with auto-reconnect.
 // Use Add and Remove to dynamically subscribe/unsubscribe channels after creation.
-func NewNotifier(ctx context.Context, dbURL string, b *backoff.ExponentialBackOff, channels []string) (*Notifier, error) {
-	return newNotifier(ctx, dbURL, b, channels, 16)
+// Diagnostics go to stderr (nil uses process stderr); the writer must support concurrent writes.
+func NewNotifier(ctx context.Context, dbURL string, b *backoff.ExponentialBackOff, channels []string, stderr io.Writer) (*Notifier, error) {
+	return newNotifier(ctx, dbURL, b, channels, 16, stderr)
 }
 
-func newNotifier(ctx context.Context, dbURL string, b *backoff.ExponentialBackOff, channels []string, bufferSize int) (*Notifier, error) {
+func newNotifier(ctx context.Context, dbURL string, b *backoff.ExponentialBackOff, channels []string, bufferSize int, stderr io.Writer) (*Notifier, error) {
+	if stderr == nil {
+		stderr = os.Stderr
+	}
 	innerCtx, cancel := context.WithCancel(ctx)
 
 	chMap := make(map[string]bool, len(channels))
@@ -55,6 +61,7 @@ func newNotifier(ctx context.Context, dbURL string, b *backoff.ExponentialBackOf
 	}
 
 	n := &Notifier{
+		stderr:   stderr,
 		dbURL:    dbURL,
 		backoff:  b,
 		cancel:   cancel,
@@ -167,7 +174,7 @@ func (n *Notifier) reconnect(ctx context.Context) error {
 			return err
 		}
 
-		fmt.Fprintf(os.Stderr, "notifier reconnect: %s, retry in %v\n", HumanError(err), wait)
+		fmt.Fprintf(n.stderr, "notifier reconnect: %s, retry in %v\n", HumanError(err), wait)
 
 		timer.Reset(wait)
 		select {
@@ -274,7 +281,7 @@ func (n *Notifier) run(ctx context.Context) {
 
 		if err := n.reconnect(ctx); err != nil {
 			if ctx.Err() == nil {
-				fmt.Fprintf(os.Stderr, "notifier gave up: %s\n", HumanError(err))
+				fmt.Fprintf(n.stderr, "notifier gave up: %s\n", HumanError(err))
 			}
 			n.failPendingAdds(err)
 			return

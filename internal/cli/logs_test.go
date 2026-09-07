@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"io"
 	"os"
 	"testing"
 	"time"
@@ -113,7 +114,7 @@ func TestLogsAttach_StreamsLogs(t *testing.T) {
 	// Run logsAndAttach in goroutine
 	done := make(chan error, 1)
 	go func() {
-		done <- logsAndAttach(ctx, cfg, pool, task.ID, 0, "")
+		done <- logsAndAttach(ctx, cfg, commandOutput{io.Discard, io.Discard}, pool, task.ID, 0, "")
 	}()
 
 	// Give it time to start listening
@@ -169,7 +170,7 @@ func TestLogsAttach_ContextCancel(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		done <- logsAndAttach(cancelCtx, cfg, pool, task.ID, 0, "")
+		done <- logsAndAttach(cancelCtx, cfg, commandOutput{io.Discard, io.Discard}, pool, task.ID, 0, "")
 	}()
 
 	// Give it time to start listening
@@ -216,7 +217,7 @@ func TestLogsAttach_RecoveryAfterConnectionLoss(t *testing.T) {
 	// Start logsAndAttach
 	done := make(chan error, 1)
 	go func() {
-		done <- logsAndAttach(ctx, cfg, pool, task.ID, 0, "")
+		done <- logsAndAttach(ctx, cfg, commandOutput{io.Discard, io.Discard}, pool, task.ID, 0, "")
 	}()
 
 	// Wait for listener to establish
@@ -287,7 +288,7 @@ func TestLogsAttach_PollFallback(t *testing.T) {
 	// Start logsAndAttach
 	done := make(chan error, 1)
 	go func() {
-		done <- logsAndAttach(ctx, cfg, pool, task.ID, 0, "")
+		done <- logsAndAttach(ctx, cfg, commandOutput{io.Discard, io.Discard}, pool, task.ID, 0, "")
 	}()
 
 	// Wait for listener

@@ -106,12 +106,12 @@ func TestWorkerStopDuringCompletion(t *testing.T) {
 		t.Fatalf("claim: %v", err)
 	}
 	channel := db.ToWorkerChannel(w.ID)
-	notifier, err := db.NewNotifier(ctx, getTestDBURL(t), db.NewBackOff(time.Millisecond, time.Second), []string{channel})
+	notifier, err := db.NewNotifier(ctx, getTestDBURL(t), db.NewBackOff(time.Millisecond, time.Second), []string{channel}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer notifier.Close(context.Background())
-	control := watchWorker(ctx, cancel, notifier.C, channel)
+	control := watchWorker(ctx, cancel, notifier.C, channel, nil)
 	defer func() { cancel(); <-control.done }()
 	done := make(chan error, 1)
 	go func() { done <- w.processTask(ctx, notifier, control.events, task) }()

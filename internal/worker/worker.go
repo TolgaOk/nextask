@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"runtime"
 	"strings"
@@ -31,10 +32,16 @@ type Worker struct {
 	backoffInitial    time.Duration
 	backoffMax        time.Duration
 	journal           completionJournal
+	stdout            io.Writer
+	stderr            io.Writer
 }
 
 // Config contains worker configuration options.
 type Config struct {
+	// Stdout and Stderr receive worker diagnostics; nil uses the process streams.
+	// Writers must support concurrent writes.
+	Stdout            io.Writer
+	Stderr            io.Writer
 	DBURL             string
 	Workdir           string
 	Name              string
@@ -52,6 +59,12 @@ type Config struct {
 
 // New creates a worker with the given configuration.
 func New(ctx context.Context, cfg Config) (*Worker, error) {
+	if cfg.Stdout == nil {
+		cfg.Stdout = os.Stdout
+	}
+	if cfg.Stderr == nil {
+		cfg.Stderr = os.Stderr
+	}
 	pool, err := db.Connect(ctx, cfg.DBURL)
 	if err != nil {
 		return nil, err
@@ -80,11 +93,13 @@ func New(ctx context.Context, cfg Config) (*Worker, error) {
 	}
 
 	return &Worker{
-		ID:   workerID,
+		ID:     workerID,
+		stdout: cfg.Stdout, stderr: cfg.Stderr,
 		Info: workerInfo,
 		Pool: pool,
 		Executor: &Executor{
-			Pool: pool, DBURL: cfg.DBURL, Workdir: cfg.Workdir,
+			Stderr: cfg.Stderr,
+			Pool:   pool, DBURL: cfg.DBURL, Workdir: cfg.Workdir,
 			LogFlushLines: cfg.LogFlushLines, LogFlushInterval: cfg.LogFlushInterval,
 			LogBufferSize: cfg.LogBufferSize, RemoveWorkdir: cfg.Rm,
 		},
@@ -136,7 +151,7 @@ func (w *Worker) Run(parentCtx context.Context) (runErr error) {
 	notifier, err := db.NewNotifier(ctx, w.dbURL, w.newBackoff(), []string{
 		db.ToWorkersChannel,
 		toWorkerCh,
-	})
+	}, w.stderr)
 	if err != nil {
 		return fmt.Errorf("failed to start notifier: %w", err)
 	}
@@ -149,7 +164,7 @@ func (w *Worker) Run(parentCtx context.Context) (runErr error) {
 		}
 	}()
 
-	control := watchWorker(ctx, cancel, notifier.C, toWorkerCh)
+	control := watchWorker(ctx, cancel, notifier.C, toWorkerCh, w.stdout)
 	defer func() {
 		cancel()
 		<-control.done
@@ -165,7 +180,7 @@ func (w *Worker) Run(parentCtx context.Context) (runErr error) {
 		<-heartbeatDone
 	}()
 
-	fmt.Printf("Worker %s started\n", w.ID)
+	fmt.Fprintf(w.stdout, "Worker %s started\n", w.ID)
 
 	if err := w.recoverCompletions(ctx); err != nil {
 		return err
@@ -211,9 +226,9 @@ func (w *Worker) Run(parentCtx context.Context) (runErr error) {
 				for k, v := range w.tagFilter {
 					filters = append(filters, k+"="+v)
 				}
-				fmt.Printf("No pending tasks matching filter: %s\n", strings.Join(filters, ", "))
+				fmt.Fprintf(w.stdout, "No pending tasks matching filter: %s\n", strings.Join(filters, ", "))
 			} else {
-				fmt.Println("No pending tasks")
+				fmt.Fprintln(w.stdout, "No pending tasks")
 			}
 			return nil
 		}
@@ -225,7 +240,7 @@ func (w *Worker) Run(parentCtx context.Context) (runErr error) {
 			}
 			// wake event — loop to claim
 		case <-idleCh:
-			fmt.Println("No tasks received, exiting (idle timeout)")
+			fmt.Fprintln(w.stdout, "No tasks received, exiting (idle timeout)")
 			return nil
 		case <-ctx.Done():
 			return nil
@@ -242,7 +257,7 @@ func (w *Worker) claimTask(ctx context.Context) (*db.Task, error) {
 		return db.ClaimTask(ctx, w.Pool, w.ID, w.Info, w.tagFilter)
 	}, backoff.WithBackOff(w.newBackoff()), backoff.WithMaxElapsedTime(0),
 		backoff.WithNotify(func(err error, delay time.Duration) {
-			fmt.Fprintf(os.Stderr, "failed to claim task: %s (retry in %v)\n", db.HumanError(err), delay)
+			fmt.Fprintf(w.stderr, "failed to claim task: %s (retry in %v)\n", db.HumanError(err), delay)
 		}))
 }
 
@@ -277,7 +292,7 @@ func (w *Worker) runHeartbeat(ctx context.Context) {
 				return db.UpdateHeartbeat(hbCtx, w.Pool, w.ID)
 			}, backoff.WithBackOff(w.newBackoff()), backoff.WithMaxTries(3))
 			if err != nil && ctx.Err() == nil {
-				fmt.Fprintf(os.Stderr, "heartbeat failed: %v\n", err)
+				fmt.Fprintf(w.stderr, "heartbeat failed: %v\n", err)
 			}
 			hbCancel()
 		case <-ctx.Done():

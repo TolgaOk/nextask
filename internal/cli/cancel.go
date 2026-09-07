@@ -4,11 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
+	"io"
 	"time"
 
 	"github.com/TolgaOk/nextask/internal/config"
 	"github.com/TolgaOk/nextask/internal/db"
+	"github.com/cenkalti/backoff/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/spf13/cobra"
 )
@@ -56,8 +57,8 @@ func newCancelCommand(cfg *config.Config) *cobra.Command {
 
 			switch *originalStatus {
 			case db.StatusPending:
-				fmt.Fprintln(os.Stderr, "Task cancelled")
-				return nil
+				_, err := fmt.Fprintln(cmd.ErrOrStderr(), "Task cancelled")
+				return err
 
 			case db.StatusRunning:
 				timeout := opts.timeout
@@ -70,7 +71,7 @@ func newCancelCommand(cfg *config.Config) *cobra.Command {
 						timeout += time.Duration(task.CleanupTimeoutMS) * time.Millisecond
 					}
 				}
-				return waitForCancel(ctx, *cfg, pool, taskID, timeout)
+				return waitForCancel(ctx, *cfg, outputFor(cmd).err, pool, taskID, timeout)
 
 			default:
 				return errWithHints(
@@ -85,16 +86,15 @@ func newCancelCommand(cfg *config.Config) *cobra.Command {
 	return cmd
 }
 
-func waitForCancel(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, taskID string, timeout time.Duration) error {
+func waitForCancel(ctx context.Context, cfg config.Config, stderr io.Writer, pool *pgxpool.Pool, taskID string, timeout time.Duration) error {
 	sigCtx, stop := interruptContext(ctx)
 	defer stop()
 	waitCtx, cancel := context.WithTimeout(sigCtx, timeout)
 	defer cancel()
-	err := confirmCancellation(waitCtx, cfg, pool, taskID)
+	err := confirmCancellation(waitCtx, cfg, stderr, pool, taskID)
 	if errors.Is(err, context.Canceled) && sigCtx.Err() != nil {
-		fmt.Fprintln(os.Stderr, "\nInterrupted - cancel request already sent")
-		fmt.Fprintf(os.Stderr, "Check task status with %s\n", codeStyle.Render("nextask show "+taskID))
-		return nil
+		_, err := fmt.Fprintf(stderr, "\nInterrupted - cancel request already sent\nCheck task status with %s\n", codeStyle.Render("nextask show "+taskID))
+		return err
 	}
 	if errors.Is(err, context.DeadlineExceeded) && waitCtx.Err() != nil {
 		return errWithHints("cancel requested but worker did not confirm",
@@ -104,8 +104,8 @@ func waitForCancel(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, t
 	return err
 }
 
-func confirmCancellation(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, taskID string) error {
-	watch, err := newStateWatcher(ctx, cfg, db.FromTaskChannel(taskID))
+func confirmCancellation(ctx context.Context, cfg config.Config, stderr io.Writer, pool *pgxpool.Pool, taskID string) error {
+	watch, err := newStateWatcher(ctx, cfg, stderr, db.FromTaskChannel(taskID))
 	if err != nil {
 		return err
 	}
@@ -123,7 +123,10 @@ func confirmCancellation(ctx context.Context, cfg config.Config, pool *pgxpool.P
 		}
 		switch task.Status {
 		case db.StatusCancelled:
-			fmt.Fprintln(os.Stderr, "Task cancelled")
+			_, err := fmt.Fprintln(stderr, "Task cancelled")
+			if err != nil {
+				return false, backoff.Permanent(err)
+			}
 			return true, nil
 		case db.StatusCompleted, db.StatusFailed:
 			return false, fmt.Errorf("task %s finished as %s before cancellation was confirmed", taskID, task.Status)

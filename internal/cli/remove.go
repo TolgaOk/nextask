@@ -2,7 +2,6 @@ package cli
 
 import (
 	"fmt"
-	"os"
 
 	"github.com/TolgaOk/nextask/internal/config"
 	"github.com/TolgaOk/nextask/internal/db"
@@ -54,8 +53,8 @@ func newRemoveCommand(cfg *config.Config) *cobra.Command {
 				)
 			}
 
-			fmt.Fprintln(os.Stderr, "Task removed")
-			return nil
+			_, err = fmt.Fprintln(cmd.ErrOrStderr(), "Task removed")
+			return err
 		},
 	}
 

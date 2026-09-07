@@ -46,7 +46,7 @@ func (w *Worker) finishTask(ctx context.Context, task *db.Task, execution taskEx
 	}
 	if confirmed {
 		logCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		log := NewDBLogger(w.Pool, task.ID)
+		log := NewDBLogger(w.Pool, task.ID, w.stderr)
 		if result.Err != nil {
 			log.Log(logCtx, "nextask", fmt.Sprintf("[error] %v", result.Err))
 		}
@@ -63,7 +63,7 @@ func (w *Worker) saveCompletion(ctx context.Context, c db.TaskCompletion) (bool,
 			return db.CompleteClaim(parent, w.Pool, c)
 		}, backoff.WithBackOff(w.newBackoff()), backoff.WithMaxElapsedTime(0),
 			backoff.WithNotify(func(err error, delay time.Duration) {
-				fmt.Fprintf(os.Stderr, "save task %s result: %s (retry in %v)\n", c.TaskID, db.HumanError(err), delay)
+				fmt.Fprintf(w.stderr, "save task %s result: %s (retry in %v)\n", c.TaskID, db.HumanError(err), delay)
 			}))
 	}
 	confirmed, err := save(ctx)
@@ -77,7 +77,7 @@ func (w *Worker) saveCompletion(ctx context.Context, c db.TaskCompletion) (bool,
 			c.TaskID, c.ExitCode, filepath.Join(w.journal.dir, completionName(c)), err)
 	}
 	if !confirmed {
-		fmt.Fprintf(os.Stderr, "discarding obsolete result for task %s: original claim or outcome no longer matches\n", c.TaskID)
+		fmt.Fprintf(w.stderr, "discarding obsolete result for task %s: original claim or outcome no longer matches\n", c.TaskID)
 	}
 	return confirmed, nil
 }
@@ -87,9 +87,9 @@ func (w *Worker) notifyCompletion(c db.TaskCompletion) {
 	defer cancel()
 	event := db.TaskStatusEvent{Status: string(c.Status), ExitCode: c.ExitCode}
 	if err := db.Notify(ctx, w.Pool, db.FromTaskChannel(c.TaskID), event); err != nil {
-		fmt.Fprintf(os.Stderr, "failed to notify status: %v\n", err)
+		fmt.Fprintf(w.stderr, "failed to notify status: %v\n", err)
 	}
-	fmt.Printf("Task %s %s (exit %d)\n", c.TaskID, c.Status, c.ExitCode)
+	fmt.Fprintf(w.stdout, "Task %s %s (exit %d)\n", c.TaskID, c.Status, c.ExitCode)
 }
 
 func (w *Worker) acknowledgeCompletion(c db.TaskCompletion) error {
@@ -120,7 +120,7 @@ func (w *Worker) recoverCompletions(ctx context.Context) error {
 			return err
 		}
 		if confirmed {
-			fmt.Printf("Recovered result for task %s\n", completion.TaskID)
+			fmt.Fprintf(w.stdout, "Recovered result for task %s\n", completion.TaskID)
 			w.notifyCompletion(completion)
 		}
 		// Recovery updates results only. Old task directories may have been reused.

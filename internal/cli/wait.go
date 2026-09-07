@@ -4,13 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
+	"io"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/TolgaOk/nextask/internal/config"
 	"github.com/TolgaOk/nextask/internal/db"
+	"github.com/cenkalti/backoff/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/spf13/cobra"
 )
@@ -68,9 +69,9 @@ func runWait(cmd *cobra.Command, args []string, cfg config.Config, opts waitOpti
 	for _, id := range args {
 		remaining[id] = true
 	}
-	err := runTaskWait(ctx, cfg, opts, args, remaining)
+	err := runTaskWait(ctx, cfg, outputFor(cmd).err, opts, args, remaining)
 	if errors.Is(err, context.DeadlineExceeded) && ctx.Err() != nil {
-		return handleTimeout(remaining)
+		return handleTimeout(cmd.ErrOrStderr(), remaining)
 	}
 	if errors.Is(err, context.Canceled) && ctx.Err() != nil {
 		return nil
@@ -78,7 +79,7 @@ func runWait(cmd *cobra.Command, args []string, cfg config.Config, opts waitOpti
 	return err
 }
 
-func runTaskWait(ctx context.Context, cfg config.Config, opts waitOptions, ids []string, remaining map[string]bool) error {
+func runTaskWait(ctx context.Context, cfg config.Config, stderr io.Writer, opts waitOptions, ids []string, remaining map[string]bool) error {
 	parsedTags, err := parseTags(opts.tags)
 	if err != nil {
 		return err
@@ -95,12 +96,12 @@ func runTaskWait(ctx context.Context, cfg config.Config, opts waitOptions, ids [
 	if len(ids) == 0 {
 		channels = append(channels, db.ToWorkersChannel)
 	}
-	watch, err := newStateWatcher(ctx, cfg, channels...)
+	watch, err := newStateWatcher(ctx, cfg, stderr, channels...)
 	if err != nil {
 		return err
 	}
 	defer watch.Close()
-	w := &waiter{staleThreshold: cfg.Worker.StaleDuration(), pool: pool, watch: watch, remaining: remaining, any: opts.any, seen: make(map[string]bool)}
+	w := &waiter{stderr: stderr, staleThreshold: cfg.Worker.StaleDuration(), pool: pool, watch: watch, remaining: remaining, any: opts.any, seen: make(map[string]bool)}
 	for _, id := range ids {
 		w.add(id)
 	}
@@ -124,6 +125,7 @@ func runTaskWait(ctx context.Context, cfg config.Config, opts waitOptions, ids [
 
 // waiter owns one wait operation's task set and completion policy.
 type waiter struct {
+	stderr         io.Writer
 	staleThreshold time.Duration
 	pool           *pgxpool.Pool
 	watch          *stateWatcher
@@ -178,11 +180,14 @@ func (w *waiter) check(ctx context.Context) (bool, error) {
 		delete(w.remaining, id)
 		code := 1
 		if task == nil {
-			printError(errWithHints(fmt.Sprintf("task not found: %s", id),
+			err = printError(w.stderr, errWithHints(fmt.Sprintf("task not found: %s", id),
 				"Run "+codeStyle.Render("nextask list")+" to see available tasks"))
 		} else {
 			code = taskExitCode(task)
-			printWaitLine(id, task.Status, code)
+			err = printWaitLine(w.stderr, id, task.Status, code)
+		}
+		if err != nil {
+			return false, backoff.Permanent(err)
 		}
 		w.failCode = firstNonZero(w.failCode, code)
 		if w.any {
@@ -192,14 +197,14 @@ func (w *waiter) check(ctx context.Context) (bool, error) {
 	return len(w.remaining) == 0, nil
 }
 
-func handleTimeout(remaining map[string]bool) error {
+func handleTimeout(stderr io.Writer, remaining map[string]bool) error {
 	ids := make([]string, 0, len(remaining))
 	for id := range remaining {
 		ids = append(ids, id)
 	}
 	sort.Strings(ids)
-	fmt.Fprintf(os.Stderr, "timeout: %s still running\n", strings.Join(ids, ", "))
-	return &exitCodeError{code: 124}
+	_, err := fmt.Fprintf(stderr, "timeout: %s still running\n", strings.Join(ids, ", "))
+	return errors.Join(&exitCodeError{code: 124}, err)
 }
 
 func isTerminal(status db.TaskStatus) bool {
@@ -220,12 +225,13 @@ func taskExitCode(task *db.Task) int {
 	return 0
 }
 
-func printWaitLine(id string, status db.TaskStatus, exitCode int) {
+func printWaitLine(stderr io.Writer, id string, status db.TaskStatus, exitCode int) error {
 	if status == db.StatusStale {
-		fmt.Fprintf(os.Stderr, "task %s stale (worker heartbeat expired)\n", id)
-		return
+		_, err := fmt.Fprintf(stderr, "task %s stale (worker heartbeat expired)\n", id)
+		return err
 	}
-	fmt.Fprintf(os.Stderr, "task %s %s (exit %d)\n", id, status, exitCode)
+	_, err := fmt.Fprintf(stderr, "task %s %s (exit %d)\n", id, status, exitCode)
+	return err
 }
 
 func firstNonZero(current, new int) int {

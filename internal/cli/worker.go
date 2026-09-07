@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -45,6 +46,8 @@ func newWorkerCommand(cfg *config.Config) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			out := outputFor(cmd)
+			resolved.Stdout, resolved.Stderr = out.out, out.err
 			if opts.daemon {
 				return daemonize(resolved, timeout)
 			}
@@ -208,13 +211,13 @@ func newWorkerListCommand(cfg *config.Config) *cobra.Command {
 
 			if len(workers) == 0 {
 				if opts.json {
-					fmt.Println("[]")
+					_, err = fmt.Fprintln(cmd.OutOrStdout(), "[]")
 				} else if opts.csv {
-					fmt.Println("ID,PID,HOSTNAME,STATUS,STARTED")
+					_, err = fmt.Fprintln(cmd.OutOrStdout(), "ID,PID,HOSTNAME,STATUS,STARTED")
 				} else {
-					fmt.Fprintln(os.Stderr, "No workers found")
+					_, err = fmt.Fprintln(cmd.ErrOrStderr(), "No workers found")
 				}
-				return nil
+				return err
 			}
 
 			plain := opts.json || opts.csv
@@ -235,7 +238,7 @@ func newWorkerListCommand(cfg *config.Config) *cobra.Command {
 				})
 			}
 
-			return PrintTable(TableConfig{
+			return PrintTable(outputFor(cmd), TableConfig{
 				Headers: []string{"ID", "PID", "HOSTNAME", "STATUS", "STARTED"},
 				Rows:    rows,
 				Count:   total,
@@ -286,7 +289,7 @@ func newWorkerStopCommand(cfg *config.Config) *cobra.Command {
 				return err
 			}
 			defer pool.Close()
-			return stopWorker(ctx, *cfg, pool, args[0])
+			return stopWorker(ctx, *cfg, outputFor(cmd).err, pool, args[0])
 		},
 	}
 	cmd.Flags().DurationVar(&opts.timeout, "timeout", 10*time.Second, "Timeout waiting for stop confirmation")
@@ -295,16 +298,16 @@ func newWorkerStopCommand(cfg *config.Config) *cobra.Command {
 
 // stopWorker checks the registry before sending a hint and confirms stored state
 // after subscribing, including when the worker's confirmation hint is lost.
-func stopWorker(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, id string) error {
+func stopWorker(ctx context.Context, cfg config.Config, stderr io.Writer, pool *pgxpool.Pool, id string) error {
 	status, err := workerStatus(ctx, pool, id)
 	if err != nil {
 		return err
 	}
 	if status == db.WorkerStatusStopped {
-		fmt.Fprintf(os.Stderr, "Worker %s is already stopped\n", id)
-		return nil
+		_, err := fmt.Fprintf(stderr, "Worker %s is already stopped\n", id)
+		return err
 	}
-	watch, err := newStateWatcher(ctx, cfg, db.FromWorkerChannel(id))
+	watch, err := newStateWatcher(ctx, cfg, stderr, db.FromWorkerChannel(id))
 	if err != nil {
 		return err
 	}
@@ -322,7 +325,7 @@ func stopWorker(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, id s
 			"Check worker status with "+codeStyle.Render("nextask worker list"))
 	}
 	if err == nil {
-		fmt.Fprintf(os.Stderr, "Worker %s stopped\n", id)
+		_, err = fmt.Fprintf(stderr, "Worker %s stopped\n", id)
 	}
 	return err
 }
@@ -399,8 +402,6 @@ func daemonize(cfg worker.Config, timeout time.Duration) error {
 		return fmt.Errorf("failed to release daemon process: %w", err)
 	}
 
-	fmt.Fprintf(os.Stderr, "Worker %s started as daemon (pid %d)\n", id, pid)
-	fmt.Fprintf(os.Stderr, "Logs: %s\n", logPath)
-
-	return nil
+	_, err = fmt.Fprintf(cfg.Stderr, "Worker %s started as daemon (pid %d)\nLogs: %s\n", id, pid, logPath)
+	return err
 }

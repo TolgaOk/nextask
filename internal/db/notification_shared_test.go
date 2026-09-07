@@ -32,7 +32,7 @@ func TestNotificationChannelsAndBackpressure(t *testing.T) {
 				}
 				notifications, closeStream = listener.C, listener.Close
 			} else {
-				notifier, err := NewNotifier(ctx, getTestDBURL(t), NewBackOff(time.Millisecond, time.Second), []string{channel})
+				notifier, err := NewNotifier(ctx, getTestDBURL(t), NewBackOff(time.Millisecond, time.Second), []string{channel}, nil)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -77,7 +77,7 @@ func TestNotifierReconnectSubscriptions(t *testing.T) {
 	}
 	defer pool.Close()
 	base, removed, added, extra := "shared_base", `shared_removed"channel`, `shared_added"channel`, `batch_extra"channel`
-	notifier, err := NewNotifier(ctx, getTestDBURL(t), NewBackOff(10*time.Millisecond, time.Second), []string{base, removed})
+	notifier, err := NewNotifier(ctx, getTestDBURL(t), NewBackOff(10*time.Millisecond, time.Second), []string{base, removed}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

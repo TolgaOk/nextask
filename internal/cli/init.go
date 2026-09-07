@@ -2,7 +2,6 @@ package cli
 
 import (
 	"fmt"
-	"os"
 
 	"github.com/TolgaOk/nextask/internal/config"
 	"github.com/TolgaOk/nextask/internal/db"
@@ -39,8 +38,8 @@ func newInitDBCommand(cfg *config.Config) *cobra.Command {
 				return fmt.Errorf("migration failed: %w", err)
 			}
 
-			fmt.Fprintln(os.Stderr, "Database initialized successfully")
-			return nil
+			_, err = fmt.Fprintln(cmd.ErrOrStderr(), "Database initialized successfully")
+			return err
 		},
 	}
 	return cmd

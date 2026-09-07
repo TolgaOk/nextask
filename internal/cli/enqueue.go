@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
+	"io"
 	"time"
 
 	"github.com/TolgaOk/nextask/internal/config"
@@ -118,15 +118,15 @@ func newEnqueueCommand(cfg *config.Config) *cobra.Command {
 			stopSignals()
 			ctx = baseCtx
 			if opts.attach {
-				return enqueueAndAttach(ctx, *cfg, pool, id)
+				return enqueueAndAttach(ctx, *cfg, outputFor(cmd), pool, id)
 			}
 
 			if err := db.Notify(ctx, pool, db.ToWorkersChannel, db.WorkerWakeEvent{}); err != nil {
-				fmt.Fprintf(os.Stderr, "warning: notify failed: %v\n", err)
+				fmt.Fprintf(cmd.ErrOrStderr(), "warning: notify failed: %v\n", err)
 			}
 
-			fmt.Fprintf(os.Stderr, "Task enqueued: %s\n", id)
-			return nil
+			_, err = fmt.Fprintf(cmd.ErrOrStderr(), "Task enqueued: %s\n", id)
+			return err
 		},
 	}
 
@@ -142,38 +142,39 @@ func newEnqueueCommand(cfg *config.Config) *cobra.Command {
 	return cmd
 }
 
-func enqueueAndAttach(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, taskID string) error {
+func enqueueAndAttach(ctx context.Context, cfg config.Config, out commandOutput, pool *pgxpool.Pool, taskID string) error {
 	sigCtx, stop := interruptContext(ctx)
 	defer stop()
 	if err := db.Notify(sigCtx, pool, db.ToWorkersChannel, db.WorkerWakeEvent{}); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: notify failed: %v\n", err)
+		fmt.Fprintf(out.err, "warning: notify failed: %v\n", err)
 	}
-	fmt.Fprintf(os.Stderr, "Task enqueued: %s\n", taskID)
-	fmt.Fprintln(os.Stderr, "Watching output (Ctrl+C to cancel)...")
+	if _, err := fmt.Fprintf(out.err, "Task enqueued: %s\nWatching output (Ctrl+C to cancel)...\n", taskID); err != nil {
+		return err
+	}
 
+	print := func(log db.TaskLog) error { return printLogLine(out, log) }
 	var lastLogID int
-	task, err := streamTask(sigCtx, cfg, pool, taskID, &lastLogID, printLogLine)
+	task, err := streamTask(sigCtx, cfg, out.err, pool, taskID, &lastLogID, print)
 	if errors.Is(err, context.Canceled) && ctx.Err() == nil {
 		// The signal interrupts reads first. Persist cancellation using a fresh,
 		// bounded context, then keep watching the worker's final outcome.
 		stop()
-		pending, cancelErr := cancelAttachedTask(ctx, pool, taskID)
+		pending, cancelErr := cancelAttachedTask(ctx, out.err, pool, taskID)
 		if cancelErr != nil || pending {
 			return cancelErr
 		}
-		task, err = streamTask(ctx, cfg, pool, taskID, &lastLogID, printLogLine)
+		task, err = streamTask(ctx, cfg, out.err, pool, taskID, &lastLogID, print)
 	}
 	if err != nil {
 		return err
 	}
-	printAttachedCompletion(task)
-	return exitOrNil(taskExitCode(task))
+	return errors.Join(exitOrNil(taskExitCode(task)), printAttachedCompletion(out.err, task))
 }
 
-func cancelAttachedTask(ctx context.Context, pool *pgxpool.Pool, taskID string) (bool, error) {
+func cancelAttachedTask(ctx context.Context, stderr io.Writer, pool *pgxpool.Pool, taskID string) (bool, error) {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	fmt.Fprintln(os.Stderr, "\nCancelling task...")
+	fmt.Fprintln(stderr, "\nCancelling task...")
 	status, err := db.RequestCancel(ctx, pool, taskID)
 	if err != nil {
 		return false, fmt.Errorf("failed to request cancel: %w", err)
@@ -182,23 +183,24 @@ func cancelAttachedTask(ctx context.Context, pool *pgxpool.Pool, taskID string) 
 		return false, fmt.Errorf("task not found: %s", taskID)
 	}
 	if *status == db.StatusPending {
-		fmt.Fprintln(os.Stderr, "Task cancelled")
-		return true, nil
+		_, err := fmt.Fprintln(stderr, "Task cancelled")
+		return true, err
 	}
 	if *status == db.StatusRunning {
 		if err := db.Notify(ctx, pool, db.ToTaskChannel(taskID), db.TaskCancelEvent{}); err != nil {
-			fmt.Fprintf(os.Stderr, "warning: cancel requested but notification failed: %v\n", err)
+			fmt.Fprintf(stderr, "warning: cancel requested but notification failed: %v\n", err)
 		}
 	}
 	return false, nil
 }
 
-func printLogLine(log db.TaskLog) {
+func printLogLine(out commandOutput, log db.TaskLog) error {
 	if log.Stream == "nextask" {
-		fmt.Fprintf(os.Stderr, "%s %s\n", hintStyle.Render("[nextask]"), log.Data)
-	} else {
-		fmt.Println(log.Data)
+		_, err := fmt.Fprintf(out.err, "%s %s\n", hintStyle.Render("[nextask]"), log.Data)
+		return err
 	}
+	_, err := fmt.Fprintln(out.out, log.Data)
+	return err
 }
 
 func enqueueIntegrations(cmd *cobra.Command, cfg config.Config, opts enqueueOptions) (*integrations.Plan, error) {

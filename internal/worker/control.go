@@ -3,6 +3,8 @@ package worker
 import (
 	"context"
 	"fmt"
+	"io"
+	"os"
 
 	"github.com/jackc/pgx/v5/pgconn"
 )
@@ -14,7 +16,10 @@ type workerControl struct {
 	done   chan struct{}
 }
 
-func watchWorker(ctx context.Context, stop context.CancelFunc, notifications <-chan *pgconn.Notification, stopChannel string) *workerControl {
+func watchWorker(ctx context.Context, stop context.CancelFunc, notifications <-chan *pgconn.Notification, stopChannel string, stdout io.Writer) *workerControl {
+	if stdout == nil {
+		stdout = os.Stdout
+	}
 	control := &workerControl{events: make(chan *pgconn.Notification, 16), done: make(chan struct{})}
 	go func() {
 		defer close(control.done)
@@ -29,7 +34,7 @@ func watchWorker(ctx context.Context, stop context.CancelFunc, notifications <-c
 					return
 				}
 				if notification.Channel == stopChannel {
-					fmt.Println("Received stop signal, shutting down...")
+					fmt.Fprintln(stdout, "Received stop signal, shutting down...")
 					stop()
 					return
 				}

@@ -3,7 +3,6 @@ package worker
 import (
 	"context"
 	"fmt"
-	"os"
 	"time"
 
 	"github.com/TolgaOk/nextask/internal/db"
@@ -12,7 +11,7 @@ import (
 )
 
 func (w *Worker) processTask(ctx context.Context, notifier *db.Notifier, events <-chan *pgconn.Notification, task *db.Task) error {
-	fmt.Printf("Processing %s: %s\n", task.ID, task.Command)
+	fmt.Fprintf(w.stdout, "Processing %s: %s\n", task.ID, task.Command)
 
 	taskCtx, taskCancel := context.WithCancel(ctx)
 	defer taskCancel()
@@ -24,7 +23,7 @@ func (w *Worker) processTask(ctx context.Context, notifier *db.Notifier, events 
 	// Subscribe to task cancel channel on the existing connection
 	toTaskCh := db.ToTaskChannel(task.ID)
 	if err := notifier.Add(taskCtx, toTaskCh); err != nil {
-		fmt.Fprintf(os.Stderr, "failed to listen for cancel: %v\n", err)
+		fmt.Fprintf(w.stderr, "failed to listen for cancel: %v\n", err)
 		return finish(taskExecution{result: &ExitResult{Code: -1, Err: err}}, false)
 	}
 	defer notifier.Remove(toTaskCh)
@@ -81,7 +80,7 @@ func (w *Worker) processTask(ctx context.Context, notifier *db.Notifier, events 
 			checkCancel()
 			if err != nil {
 				if ctx.Err() == nil {
-					fmt.Fprintf(os.Stderr, "check task cancellation: %s\n", db.HumanError(err))
+					fmt.Fprintf(w.stderr, "check task cancellation: %s\n", db.HumanError(err))
 				}
 				continue
 			}

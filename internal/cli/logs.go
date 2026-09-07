@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
+	"io"
 
 	"github.com/TolgaOk/nextask/internal/config"
 	"github.com/TolgaOk/nextask/internal/db"
@@ -98,13 +98,18 @@ func newLogsCommand(cfg *config.Config) *cobra.Command {
 			var lastLogID int
 			if len(logs) == 0 {
 				if opts.stream != "" {
-					fmt.Fprintln(os.Stderr, hintStyle.Render(fmt.Sprintf("No logs with stream %q", opts.stream)))
+					_, err = fmt.Fprintln(cmd.ErrOrStderr(), hintStyle.Render(fmt.Sprintf("No logs with stream %q", opts.stream)))
 				} else if !opts.attach {
-					fmt.Fprintln(os.Stderr, hintStyle.Render("No logs available"))
+					_, err = fmt.Fprintln(cmd.ErrOrStderr(), hintStyle.Render("No logs available"))
+				}
+				if err != nil {
+					return err
 				}
 			} else {
 				for _, log := range logs {
-					printLog(log)
+					if err := printLog(cmd.OutOrStdout(), log); err != nil {
+						return err
+					}
 					if log.ID > lastLogID {
 						lastLogID = log.ID
 					}
@@ -120,7 +125,7 @@ func newLogsCommand(cfg *config.Config) *cobra.Command {
 				return nil
 			}
 
-			return logsAndAttach(ctx, *cfg, pool, task.ID, lastLogID, opts.stream)
+			return logsAndAttach(ctx, *cfg, outputFor(cmd), pool, task.ID, lastLogID, opts.stream)
 		},
 	}
 
@@ -131,7 +136,7 @@ func newLogsCommand(cfg *config.Config) *cobra.Command {
 	return cmd
 }
 
-func printLog(log db.TaskLog) {
+func printLog(out io.Writer, log db.TaskLog) error {
 	style, ok := logsStreamStyles[log.Stream]
 	if !ok {
 		style = defaultLogStyle
@@ -144,25 +149,28 @@ func printLog(log db.TaskLog) {
 		prefix = defaultLogPrefixStyle.Bold(true).Render("["+log.Stream+"]") + " "
 	}
 
-	fmt.Println(prefix + style.Render(log.Data))
+	_, err := fmt.Fprintln(out, prefix+style.Render(log.Data))
+	return err
 }
 
-func logsAndAttach(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, taskID string, lastLogID int, stream string) error {
+func logsAndAttach(ctx context.Context, cfg config.Config, out commandOutput, pool *pgxpool.Pool, taskID string, lastLogID int, stream string) error {
 	ctx, stop := interruptContext(ctx)
 	defer stop()
-	fmt.Fprintln(os.Stderr, hintStyle.Render("Streaming logs (Ctrl+C to stop watching)..."))
-	task, err := streamTask(ctx, cfg, pool, taskID, &lastLogID, func(log db.TaskLog) {
+	if _, err := fmt.Fprintln(out.err, hintStyle.Render("Streaming logs (Ctrl+C to stop watching)...")); err != nil {
+		return err
+	}
+	task, err := streamTask(ctx, cfg, out.err, pool, taskID, &lastLogID, func(log db.TaskLog) error {
 		if stream == "" || log.Stream == stream {
-			printLog(log)
+			return printLog(out.out, log)
 		}
+		return nil
 	})
 	if errors.Is(err, context.Canceled) && ctx.Err() != nil {
-		fmt.Fprintln(os.Stderr)
-		return nil
+		_, err := fmt.Fprintln(out.err)
+		return err
 	}
 	if err != nil {
 		return err
 	}
-	printAttachedCompletion(task)
-	return nil
+	return printAttachedCompletion(out.err, task)
 }

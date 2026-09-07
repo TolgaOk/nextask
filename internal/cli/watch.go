@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"syscall"
@@ -26,21 +27,22 @@ func interruptContext(ctx context.Context) (context.Context, context.CancelFunc)
 // stored state; polling covers lost hints and state changes without notifications.
 type stateWatcher struct {
 	retry    config.RetryConfig
+	stderr   io.Writer
 	notifier *db.Notifier
 	changes  chan struct{}
 	cancel   context.CancelFunc
 	closed   chan struct{}
 }
 
-func newStateWatcher(ctx context.Context, cfg config.Config, channels ...string) (*stateWatcher, error) {
+func newStateWatcher(ctx context.Context, cfg config.Config, stderr io.Writer, channels ...string) (*stateWatcher, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	n, err := db.NewNotifier(ctx, cfg.DB.URL,
-		db.NewBackOff(cfg.Retry.InitialInterval, cfg.Retry.MaxInterval), channels)
+		db.NewBackOff(cfg.Retry.InitialInterval, cfg.Retry.MaxInterval), channels, stderr)
 	if err != nil {
 		cancel()
 		return nil, fmt.Errorf("listen failed: %w", err)
 	}
-	w := &stateWatcher{retry: cfg.Retry, notifier: n, changes: make(chan struct{}, 1), cancel: cancel, closed: make(chan struct{})}
+	w := &stateWatcher{retry: cfg.Retry, stderr: stderr, notifier: n, changes: make(chan struct{}, 1), cancel: cancel, closed: make(chan struct{})}
 	// Drain and coalesce hints even while a state check adds subscriptions.
 	// Otherwise a full notification queue could block Notifier.Add.
 	go func() {
@@ -69,7 +71,7 @@ func (w *stateWatcher) Close() {
 	ctx, cancel := context.WithTimeout(context.Background(), watchCloseTimeout)
 	defer cancel()
 	if err := w.notifier.Close(ctx); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: listener cleanup: %v\n", err)
+		fmt.Fprintf(w.stderr, "warning: listener cleanup: %v\n", err)
 	}
 	select {
 	case <-w.closed:
@@ -91,7 +93,7 @@ func (w *stateWatcher) Run(ctx context.Context, check func(context.Context) (boo
 			backoff.WithBackOff(db.NewBackOff(w.retry.InitialInterval, w.retry.MaxInterval)),
 			backoff.WithMaxElapsedTime(0),
 			backoff.WithNotify(func(err error, delay time.Duration) {
-				fmt.Fprintf(os.Stderr, "watch: %s, retry in %v\n", db.HumanError(err), delay)
+				fmt.Fprintf(w.stderr, "watch: %s, retry in %v\n", db.HumanError(err), delay)
 			}))
 		if ctx.Err() != nil {
 			return ctx.Err()

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"testing"
@@ -178,7 +179,7 @@ func TestStateWatcherLifecycle(t *testing.T) {
 	t.Run("cancel-active-query", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		watch, err := newStateWatcher(ctx, cfg, "blocked-query")
+		watch, err := newStateWatcher(ctx, cfg, io.Discard, "blocked-query")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -222,7 +223,7 @@ func TestStateWatcherLifecycle(t *testing.T) {
 	t.Run("subscribe-under-notification-load", func(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
-		watch, err := newStateWatcher(ctx, cfg, "busy-watch")
+		watch, err := newStateWatcher(ctx, cfg, io.Discard, "busy-watch")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -240,7 +241,7 @@ func TestStateWatcherLifecycle(t *testing.T) {
 		t.Run(fmt.Sprintf("retry-%t", transient), func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 			defer cancel()
-			watch, err := newStateWatcher(ctx, cfg, "retry-watch")
+			watch, err := newStateWatcher(ctx, cfg, io.Discard, "retry-watch")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -270,7 +271,7 @@ func TestStateWatcherLifecycle(t *testing.T) {
 	t.Run("closed-listener", func(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
-		watch, err := newStateWatcher(ctx, cfg, "closed-watch")
+		watch, err := newStateWatcher(ctx, cfg, io.Discard, "closed-watch")
 		if err != nil {
 			t.Fatal(err)
 		}

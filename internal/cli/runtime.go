@@ -2,6 +2,7 @@ package cli
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -57,14 +58,13 @@ func newRuntimeCommand() *cobra.Command {
 			}
 			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
-			result := runtime.Run(ctx, integrations.Task{ID: id, Command: args[2], CleanupTimeout: time.Duration(cleanupMS) * time.Millisecond}, options, integrations.IO{In: cmd.InOrStdin(), Out: cmd.OutOrStdout(), Err: cmd.ErrOrStderr()})
+			out := outputFor(cmd)
+			result := runtime.Run(ctx, integrations.Task{ID: id, Command: args[2], CleanupTimeout: time.Duration(cleanupMS) * time.Millisecond}, options, integrations.IO{In: cmd.InOrStdin(), Out: out.out, Err: out.err})
+			var writeErr error
 			if result.Err != nil {
-				fmt.Fprintln(cmd.ErrOrStderr(), "nextask:", result.Err)
+				_, writeErr = fmt.Fprintln(out.err, "nextask:", result.Err)
 			}
-			if result.Code != 0 {
-				return &exitCodeError{code: result.ShellCode()}
-			}
-			return nil
+			return errors.Join(exitOrNil(result.ShellCode()), writeErr)
 		},
 	}
 }

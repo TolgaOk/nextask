@@ -16,7 +16,7 @@ type Listener struct {
 
 // Listen creates a listener with auto-reconnect on connection failure.
 func Listen(ctx context.Context, dbURL string, b *backoff.ExponentialBackOff, channel string) (*Listener, error) {
-	notifier, err := newNotifier(ctx, dbURL, b, []string{channel}, 1)
+	notifier, err := newNotifier(ctx, dbURL, b, []string{channel}, 1, nil)
 	if err != nil {
 		return nil, err
 	}

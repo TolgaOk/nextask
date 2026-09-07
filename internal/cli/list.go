@@ -2,7 +2,6 @@ package cli
 
 import (
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
@@ -104,13 +103,13 @@ func newListCommand(cfg *config.Config) *cobra.Command {
 
 			if len(tasks) == 0 {
 				if opts.json {
-					fmt.Println("[]")
+					_, err = fmt.Fprintln(cmd.OutOrStdout(), "[]")
 				} else if opts.csv {
-					fmt.Println("ID,STATUS,COMMAND,TAGS,CREATED")
+					_, err = fmt.Fprintln(cmd.OutOrStdout(), "ID,STATUS,COMMAND,TAGS,CREATED")
 				} else {
-					fmt.Fprintln(os.Stderr, "No tasks found")
+					_, err = fmt.Fprintln(cmd.ErrOrStderr(), "No tasks found")
 				}
-				return nil
+				return err
 			}
 
 			plain := opts.json || opts.csv
@@ -136,7 +135,7 @@ func newListCommand(cfg *config.Config) *cobra.Command {
 				})
 			}
 
-			return PrintTable(TableConfig{
+			return PrintTable(outputFor(cmd), TableConfig{
 				Headers: []string{"ID", "STATUS", "COMMAND", "TAGS", "CREATED"},
 				Rows:    rows,
 				Count:   total,

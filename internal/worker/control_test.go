@@ -11,7 +11,7 @@ import (
 func TestWorkerControlStopWithoutConsumer(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	notifications := make(chan *pgconn.Notification, 64)
-	control := watchWorker(ctx, cancel, notifications, "stop")
+	control := watchWorker(ctx, cancel, notifications, "stop", nil)
 	defer func() { cancel(); <-control.done }()
 	// Fill the forwarded queue while the main loop is blocked on database work.
 	for range 32 {
@@ -28,7 +28,7 @@ func TestWorkerControlStopWithoutConsumer(t *testing.T) {
 func TestWorkerControlForwardAndDisconnect(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	notifications := make(chan *pgconn.Notification, 1)
-	control := watchWorker(ctx, cancel, notifications, "stop")
+	control := watchWorker(ctx, cancel, notifications, "stop", nil)
 	defer func() { cancel(); <-control.done }()
 	notification := &pgconn.Notification{Channel: "to_task_example", Payload: "cancel"}
 	notifications <- notification
