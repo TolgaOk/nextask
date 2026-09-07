@@ -77,10 +77,10 @@ Agreed CLI, config, and defaults: [S3 design](doc/s3.md).
 ## S3 fetch
 
 - [x] Reuse the S3 client for paginated listing and streaming downloads.
-- [ ] Add `s3 fetch TASK_ID --to DIR`, filters, dry-run, and explicit overwrite.
-- [ ] Keep fetching independent of DB credentials and upload filters.
-- [ ] Reject unsafe paths; publish complete downloads atomically.
-- [ ] Test failures, interruption, conflicts, and live Hetzner fetching.
+- [x] Add `s3 fetch TASK_ID --to DIR`, filters, dry-run, and explicit overwrite.
+- [x] Keep fetching independent of DB credentials and upload filters.
+- [x] Reject unsafe paths; publish complete downloads atomically.
+- [x] Test failures, interruption, conflicts, and live Hetzner fetching.
 
 ## Later
 
