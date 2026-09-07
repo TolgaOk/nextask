@@ -8,19 +8,13 @@ import (
 	"github.com/TolgaOk/nextask/internal/config"
 	"github.com/TolgaOk/nextask/internal/db"
 	"github.com/spf13/cobra"
-	str2duration "github.com/xhit/go-str2duration/v2"
 )
 
 type listOptions struct {
 	statuses []string
 	tags     []string
 	commands []string
-	since    string
-	limit    int
-	offset   int
-	json     bool
-	csv      bool
-	wrap     bool
+	listingOptions
 }
 
 func newListCommand(cfg *config.Config) *cobra.Command {
@@ -30,66 +24,19 @@ func newListCommand(cfg *config.Config) *cobra.Command {
 		Short: "List tasks with optional filters",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			filter, err := opts.filter(cfg.Worker.StaleDuration(), time.Now())
+			if err != nil {
+				return err
+			}
 			if cfg.DB.URL == "" {
 				return errDBRequired()
 			}
-
 			ctx := cmd.Context()
-
 			pool, err := db.Connect(ctx, cfg.DB.URL)
 			if err != nil {
 				return err
 			}
 			defer pool.Close()
-
-			parsedTags, err := parseTags(opts.tags)
-			if err != nil {
-				return err
-			}
-
-			var since time.Time
-			if opts.since != "" {
-				dur, err := str2duration.ParseDuration(opts.since)
-				if err != nil {
-					return errWithHints(fmt.Sprintf("invalid since format: %s", opts.since),
-						"Examples: "+codeStyle.Render("1h")+", "+codeStyle.Render("24h")+", "+codeStyle.Render("7d"),
-					)
-				}
-				since = time.Now().Add(-dur)
-			}
-
-			if opts.limit <= 0 {
-				return errWithHints("limit must be positive",
-					"Example: "+codeStyle.Render("--limit 50"),
-				)
-			}
-
-			if opts.offset < 0 {
-				return errWithHints("offset must not be negative",
-					"Example: "+codeStyle.Render("--offset 50"),
-				)
-			}
-
-			for _, s := range opts.statuses {
-				switch db.TaskStatus(s) {
-				case db.StatusPending, db.StatusRunning, db.StatusCompleted,
-					db.StatusFailed, db.StatusCancelled, db.StatusStale:
-				default:
-					return errWithHints(fmt.Sprintf("unknown status: %s", s),
-						"Valid: "+codeStyle.Render("pending")+", "+codeStyle.Render("running")+", "+codeStyle.Render("completed")+", "+codeStyle.Render("failed")+", "+codeStyle.Render("cancelled")+", "+codeStyle.Render("stale"),
-					)
-				}
-			}
-
-			filter := db.ListFilter{
-				Statuses:       opts.statuses,
-				Tags:           parsedTags,
-				Commands:       opts.commands,
-				Since:          since,
-				Limit:          uint64(opts.limit),
-				Offset:         uint64(opts.offset),
-				StaleThreshold: cfg.Worker.StaleDuration(),
-			}
 
 			tasks, err := db.ListTasks(ctx, pool, filter)
 			if err != nil {
@@ -150,11 +97,27 @@ func newListCommand(cfg *config.Config) *cobra.Command {
 	cmd.Flags().StringSliceVar(&opts.statuses, "status", nil, "Filter by status (comma-separated)")
 	cmd.Flags().StringSliceVar(&opts.tags, "tag", nil, "Filter by tag key=value (repeatable)")
 	cmd.Flags().StringSliceVar(&opts.commands, "command", nil, "Substring match in command (repeatable)")
-	cmd.Flags().StringVar(&opts.since, "since", "", "Tasks created after (e.g., 1h, 24h, 7d)")
-	cmd.Flags().IntVar(&opts.limit, "limit", 50, "Max results")
-	cmd.Flags().IntVar(&opts.offset, "offset", 0, "Skip first N results")
-	cmd.Flags().BoolVar(&opts.json, "json", false, "Output as JSON")
-	cmd.Flags().BoolVar(&opts.csv, "csv", false, "Output as CSV")
-	cmd.Flags().BoolVar(&opts.wrap, "wrap", false, "Wrap long lines instead of truncating")
+	opts.listingOptions.addFlags(cmd, "Tasks created within the past duration")
 	return cmd
+}
+
+func (opts listOptions) filter(stale time.Duration, now time.Time) (db.ListFilter, error) {
+	since, err := opts.listingOptions.resolve(now)
+	if err != nil {
+		return db.ListFilter{}, err
+	}
+	tags, err := parseTags(opts.tags)
+	if err != nil {
+		return db.ListFilter{}, err
+	}
+	for _, status := range opts.statuses {
+		switch db.TaskStatus(status) {
+		case db.StatusPending, db.StatusRunning, db.StatusCompleted, db.StatusFailed, db.StatusCancelled, db.StatusStale:
+		default:
+			return db.ListFilter{}, errWithHints(fmt.Sprintf("unknown status: %s", status),
+				"Valid: pending, running, completed, failed, cancelled, stale")
+		}
+	}
+	return db.ListFilter{Statuses: opts.statuses, Tags: tags, Commands: opts.commands, Since: since,
+		Limit: uint64(opts.limit), Offset: uint64(opts.offset), StaleThreshold: stale}, nil
 }

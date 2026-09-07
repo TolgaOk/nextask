@@ -7,16 +7,11 @@ import (
 	"github.com/TolgaOk/nextask/internal/config"
 	"github.com/TolgaOk/nextask/internal/db"
 	"github.com/spf13/cobra"
-	str2duration "github.com/xhit/go-str2duration/v2"
 )
 
 type workerListOptions struct {
-	limit  int
-	offset int
-	since  string
-	json   bool
-	csv    bool
-	wrap   bool
+	listingOptions
+	status string
 }
 
 func newWorkerListCommand(cfg *config.Config) *cobra.Command {
@@ -26,61 +21,19 @@ func newWorkerListCommand(cfg *config.Config) *cobra.Command {
 		Short: "List registered workers",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			filter, err := opts.filter(cfg.Worker.StaleDuration(), time.Now())
+			if err != nil {
+				return err
+			}
 			if cfg.DB.URL == "" {
 				return errDBRequired()
 			}
-
 			ctx := cmd.Context()
 			pool, err := db.Connect(ctx, cfg.DB.URL)
 			if err != nil {
 				return err
 			}
 			defer pool.Close()
-
-			statusFlag, _ := cmd.Flags().GetString("status")
-			var statusFilter *db.WorkerStatus
-			if statusFlag != "" {
-				s := db.WorkerStatus(statusFlag)
-				switch s {
-				case db.WorkerStatusRunning, db.WorkerStatusStopped, db.WorkerStatusStale:
-				default:
-					return errWithHints(fmt.Sprintf("unknown status: %s", statusFlag),
-						"Valid: "+codeStyle.Render("running")+", "+codeStyle.Render("stopped")+", "+codeStyle.Render("stale"),
-					)
-				}
-				statusFilter = &s
-			}
-
-			var since time.Time
-			if opts.since != "" {
-				dur, err := str2duration.ParseDuration(opts.since)
-				if err != nil {
-					return errWithHints(fmt.Sprintf("invalid since format: %s", opts.since),
-						"Examples: "+codeStyle.Render("1h")+", "+codeStyle.Render("24h")+", "+codeStyle.Render("7d"),
-					)
-				}
-				since = time.Now().Add(-dur)
-			}
-
-			if opts.limit <= 0 {
-				return errWithHints("limit must be positive",
-					"Example: "+codeStyle.Render("--limit 50"),
-				)
-			}
-
-			if opts.offset < 0 {
-				return errWithHints("offset must not be negative",
-					"Example: "+codeStyle.Render("--offset 50"),
-				)
-			}
-
-			filter := db.WorkerListFilter{
-				Status:         statusFilter,
-				Since:          since,
-				Limit:          uint64(opts.limit),
-				Offset:         uint64(opts.offset),
-				StaleThreshold: cfg.Worker.StaleDuration(),
-			}
 
 			workers, err := db.ListWorkers(ctx, pool, filter)
 			if err != nil {
@@ -132,12 +85,27 @@ func newWorkerListCommand(cfg *config.Config) *cobra.Command {
 			})
 		},
 	}
-	cmd.Flags().String("status", "", "Filter by status (running, stopped, stale)")
-	cmd.Flags().IntVar(&opts.limit, "limit", 50, "Max results")
-	cmd.Flags().IntVar(&opts.offset, "offset", 0, "Skip first N results")
-	cmd.Flags().StringVar(&opts.since, "since", "", "Workers started after (e.g., 1h, 24h, 7d)")
-	cmd.Flags().BoolVar(&opts.json, "json", false, "Output as JSON")
-	cmd.Flags().BoolVar(&opts.csv, "csv", false, "Output as CSV")
-	cmd.Flags().BoolVar(&opts.wrap, "wrap", false, "Wrap long lines instead of truncating")
+	cmd.Flags().StringVar(&opts.status, "status", "", "Filter by status (running, stopped, stale)")
+	opts.listingOptions.addFlags(cmd, "Workers started within the past duration")
 	return cmd
+}
+
+func (opts workerListOptions) filter(stale time.Duration, now time.Time) (db.WorkerListFilter, error) {
+	since, err := opts.listingOptions.resolve(now)
+	if err != nil {
+		return db.WorkerListFilter{}, err
+	}
+	var status *db.WorkerStatus
+	if opts.status != "" {
+		value := db.WorkerStatus(opts.status)
+		switch value {
+		case db.WorkerStatusRunning, db.WorkerStatusStopped, db.WorkerStatusStale:
+		default:
+			return db.WorkerListFilter{}, errWithHints(fmt.Sprintf("unknown status: %s", opts.status),
+				"Valid: running, stopped, stale")
+		}
+		status = &value
+	}
+	return db.WorkerListFilter{Status: status, Since: since, Limit: uint64(opts.limit),
+		Offset: uint64(opts.offset), StaleThreshold: stale}, nil
 }

@@ -25,14 +25,14 @@ func newCancelCommand(cfg *config.Config) *cobra.Command {
 		Short: "Cancel a pending or running task",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if cfg.DB.URL == "" {
-				return errDBRequired()
-			}
-
 			if opts.timeout <= 0 {
 				return errWithHints("timeout must be positive",
 					"Example: "+codeStyle.Render("--timeout 10s"),
 				)
+			}
+
+			if cfg.DB.URL == "" {
+				return errDBRequired()
 			}
 
 			ctx := cmd.Context()

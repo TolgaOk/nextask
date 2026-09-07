@@ -37,6 +37,9 @@ func newLogsCommand(cfg *config.Config) *cobra.Command {
 		Short: "View task output",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := opts.validate(); err != nil {
+				return err
+			}
 			if cfg.DB.URL == "" {
 				return errDBRequired()
 			}
@@ -56,30 +59,6 @@ func newLogsCommand(cfg *config.Config) *cobra.Command {
 			if task == nil {
 				return errWithHints(fmt.Sprintf("task not found: %s", args[0]),
 					"Run "+codeStyle.Render("nextask list")+" to see available tasks",
-				)
-			}
-
-			if opts.head < 0 {
-				return errWithHints("--head must be positive",
-					"Example: "+codeStyle.Render("--head 50"),
-				)
-			}
-			if opts.tail < 0 {
-				return errWithHints("--tail must be positive",
-					"Example: "+codeStyle.Render("--tail 50"),
-				)
-			}
-
-			if opts.head > 0 && opts.tail > 0 {
-				return errWithHints("cannot use both --head and --tail",
-					"Use "+codeStyle.Render("--head N")+" for first N lines",
-					"Use "+codeStyle.Render("--tail N")+" for last N lines",
-				)
-			}
-
-			if opts.attach && opts.head > 0 {
-				return errWithHints("cannot use --attach with --head",
-					"Use "+codeStyle.Render("--tail N --attach")+" to show last N lines then stream",
 				)
 			}
 
@@ -173,4 +152,36 @@ func logsAndAttach(ctx context.Context, cfg config.Config, out commandOutput, po
 		return err
 	}
 	return printAttachedCompletion(out.err, task)
+}
+
+func (opts logsOptions) validate() error {
+	if opts.head < 0 {
+		return errWithHints("--head must not be negative",
+			"Example: "+codeStyle.Render("--head 50"),
+		)
+	}
+	if opts.tail < 0 {
+		return errWithHints("--tail must not be negative",
+			"Example: "+codeStyle.Render("--tail 50"),
+		)
+	}
+
+	if opts.head > 0 && opts.tail > 0 {
+		return errWithHints("cannot use both --head and --tail",
+			"Use "+codeStyle.Render("--head N")+" for first N lines",
+			"Use "+codeStyle.Render("--tail N")+" for last N lines",
+		)
+	}
+
+	if opts.attach && opts.head > 0 {
+		return errWithHints("cannot use --attach with --head",
+			"Use "+codeStyle.Render("--tail N --attach")+" to show last N lines then stream",
+		)
+	}
+	switch opts.stream {
+	case "", "stdout", "stderr", "nextask":
+	default:
+		return errWithHints(fmt.Sprintf("unknown stream: %s", opts.stream), "Valid: stdout, stderr, nextask")
+	}
+	return nil
 }

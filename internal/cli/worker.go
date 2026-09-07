@@ -31,14 +31,14 @@ func newWorkerCommand(cfg *config.Config) *cobra.Command {
 		Short: "Start a worker to process tasks",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if cfg.DB.URL == "" {
-				return errDBRequired()
-			}
-
 			resolved, timeout, err := opts.resolve(*cfg)
 			if err != nil {
 				return err
 			}
+			if cfg.DB.URL == "" {
+				return errDBRequired()
+			}
+
 			out := outputFor(cmd)
 			resolved.Stdout, resolved.Stderr = out.out, out.err
 			ctx, stop := interruptContext(cmd.Context())
