@@ -40,6 +40,8 @@ func (S3) Options() Schema {
 		"symlinks":       {Kind: String, Default: "skip"},
 	}
 }
+func (s S3) RuntimeOptions() Schema { return s.Options() }
+
 func (S3) Validate(options Options) error { _, err := s3Config(options); return err }
 func (S3) Prepare(_ context.Context, task Task, options Options) (Task, error) {
 	cfg, err := s3Config(options)

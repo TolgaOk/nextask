@@ -45,7 +45,7 @@ workdir = "/tmp/nextask"
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Integrations["git"]["remote"] != "canonical-env" || cfg.SourceFor("integrations.git.remote") != "env:NEXTASK_GIT_REMOTE" {
+	if cfg.Integrations["git"]["remote"] != "${NEXTASK_GIT_REMOTE}" || cfg.SourceFor("integrations.git.remote") != "env:NEXTASK_GIT_REMOTE" {
 		t.Fatal("environment override failed")
 	}
 }

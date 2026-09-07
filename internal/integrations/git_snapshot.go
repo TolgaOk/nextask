@@ -13,6 +13,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/TolgaOk/nextask/internal/endpoint"
 )
 
 // gitCommand isolates inherited repository routing. Read commands use the source
@@ -40,7 +42,7 @@ func gitCommand(ctx context.Context, dir string, env []string, input io.Reader, 
 		if ctx.Err() != nil {
 			return "", ctx.Err()
 		}
-		return "", fmt.Errorf("git %s: %w: %s", args[0], err, strings.TrimSpace(stderr.String()))
+		return "", fmt.Errorf("git %s: %w: %s", args[0], err, redactGitError(strings.TrimSpace(stderr.String()), env))
 	}
 	return string(output), nil
 }
@@ -58,6 +60,14 @@ func publishSnapshot(ctx context.Context, repo, taskID, remote string) (GitSnaps
 	fetchURL, pushURL, err := resolveRemote(ctx, repo, remote)
 	if err != nil {
 		return GitSnapshot{}, err
+	}
+	fetchConnection, err := resolveGitConnection(fetchURL)
+	if err != nil {
+		return GitSnapshot{}, fmt.Errorf("fetch endpoint: %w", err)
+	}
+	pushConnection, err := resolveGitConnection(pushURL)
+	if err != nil {
+		return GitSnapshot{}, fmt.Errorf("push endpoint: %w", err)
 	}
 	ref := "refs/heads/" + filepath.Base(root) + "/" + taskID
 	if _, err := read("check-ref-format", ref); err != nil {
@@ -98,7 +108,7 @@ func publishSnapshot(ctx context.Context, repo, taskID, remote string) (GitSnaps
 	write := func(input io.Reader, args ...string) (string, error) {
 		return gitCommand(ctx, temporary, env, input, args...)
 	}
-	existing, err := write(nil, "ls-remote", "--", pushURL, ref)
+	existing, err := gitCommand(ctx, temporary, append(append([]string{}, env...), pushConnection.env...), nil, "ls-remote", "--", pushConnection.remote, ref)
 	if err != nil {
 		return GitSnapshot{}, fmt.Errorf("inspect snapshot remote: %w", err)
 	}
@@ -175,13 +185,28 @@ func publishSnapshot(ctx context.Context, repo, taskID, remote string) (GitSnaps
 	}
 	commit = strings.TrimSpace(commit)
 	// An empty expected old value makes this a create-only remote ref update.
-	if _, err := write(nil, "push", "--no-verify", "--no-follow-tags", "--recurse-submodules=no", "--force-with-lease="+ref+":", "--", pushURL, commit+":"+ref); err != nil {
+	if _, err := gitCommand(ctx, temporary, append(append([]string{}, env...), pushConnection.env...), nil, "push", "--no-verify", "--no-follow-tags", "--recurse-submodules=no", "--force-with-lease="+ref+":", "--", pushConnection.remote, commit+":"+ref); err != nil {
 		return GitSnapshot{}, fmt.Errorf("publish snapshot: %w", err)
 	}
-	return GitSnapshot{Remote: fetchURL, Ref: ref, Commit: commit}, nil
+	snapshot := GitSnapshot{Remote: fetchConnection.remote, Ref: ref, Commit: commit}
+	if endpoint.HasReferences(fetchURL) {
+		snapshot.Endpoint = fetchURL
+	}
+	return snapshot, nil
 }
 
 func resolveRemote(ctx context.Context, repo, remote string) (fetch, push string, err error) {
+	if endpoint.HasReferences(remote) {
+		resolved, err := endpoint.Resolve(remote, endpoint.Git)
+		if err != nil {
+			return "", "", err
+		}
+		// Preserve endpoint references for the worker. A reference to a local
+		// remote name is resolved here to its configured fetch/push URLs.
+		if !strings.ContainsAny(resolved, "/:") && !strings.HasPrefix(resolved, ".") {
+			remote = resolved
+		}
+	}
 	fetch, err = gitCommand(ctx, repo, nil, nil, "remote", "get-url", "--", remote)
 	if err == nil {
 		push, err = gitCommand(ctx, repo, nil, nil, "remote", "get-url", "--push", "--", remote)
@@ -190,8 +215,8 @@ func resolveRemote(ctx context.Context, repo, remote string) (fetch, push string
 		}
 		fetch, push = strings.TrimSpace(fetch), strings.TrimSpace(push)
 	} else {
-		if !strings.ContainsAny(remote, "/:") && !strings.HasPrefix(remote, ".") && !filepath.IsAbs(remote) {
-			return "", "", fmt.Errorf("unknown Git remote %q; use an existing remote name or URL/path", remote)
+		if !endpoint.HasReferences(remote) && !strings.ContainsAny(remote, "/:") && !strings.HasPrefix(remote, ".") && !filepath.IsAbs(remote) {
+			return "", "", fmt.Errorf("unknown Git remote; use an existing remote name or URL/path")
 		}
 		fetch, push = remote, remote
 	}
@@ -199,7 +224,7 @@ func resolveRemote(ctx context.Context, repo, remote string) (fetch, push string
 		if err := checkGitRemote(value); err != nil {
 			return "", err
 		}
-		if strings.Contains(value, ":") {
+		if endpoint.HasReferences(value) || strings.Contains(value, ":") {
 			return value, nil
 		}
 		if strings.HasPrefix(value, "~/") {

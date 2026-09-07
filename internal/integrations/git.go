@@ -31,32 +31,56 @@ func (g Git) Prepare(ctx context.Context, task Task, options Options) (Task, err
 	if err != nil {
 		return Task{}, err
 	}
-	task.Command, err = snapshot.Wrap(task.Command)
+	task.Command, err = snapshot.wrap(task)
 	return task, err
 }
 
 // GitSnapshot describes published content. The commit, rather than the branch
 // tip at execution time, determines the files the task receives.
 type GitSnapshot struct {
-	Remote string `json:"remote"`
-	Ref    string `json:"ref"`
-	Commit string `json:"commit"`
+	Remote   string `json:"remote"`
+	Endpoint string `json:"endpoint,omitempty"`
+	Ref      string `json:"ref"`
+	Commit   string `json:"commit"`
 }
 
 var commitPattern = regexp.MustCompile(`^(?:[0-9a-f]{40}|[0-9a-f]{64})$`)
 
-func (s GitSnapshot) Wrap(command string) (string, error) {
+const gitRoutingReset = "unset GIT_DIR GIT_COMMON_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES"
+
+func (s GitSnapshot) validate() error {
 	if err := checkGitRemote(s.Remote); err != nil {
-		return "", err
+		return err
+	}
+	if err := checkGitRemote(s.Endpoint); err != nil {
+		return err
 	}
 	if s.Remote == "" || s.Ref == "" {
-		return "", fmt.Errorf("git snapshot requires a remote and ref")
+		return fmt.Errorf("git snapshot requires a remote and ref")
 	}
 	if !commitPattern.MatchString(s.Commit) {
-		return "", fmt.Errorf("git snapshot requires an exact commit hash; re-enqueue legacy tasks that have no recorded commit")
+		return fmt.Errorf("git snapshot requires an exact commit hash; re-enqueue legacy tasks that have no recorded commit")
 	}
-	if strings.ContainsRune(s.Remote+s.Ref+command, 0) {
-		return "", fmt.Errorf("git snapshot contains a NUL byte")
+	if strings.ContainsRune(s.Remote+s.Ref, 0) {
+		return fmt.Errorf("git snapshot contains a NUL byte")
+	}
+	return nil
+}
+
+func (s GitSnapshot) Wrap(command string) (string, error) {
+	return s.wrap(Task{Command: command})
+}
+
+func (s GitSnapshot) wrap(task Task) (string, error) {
+	if err := s.validate(); err != nil {
+		return "", err
+	}
+	command := task.Command
+	if strings.ContainsRune(command, 0) {
+		return "", fmt.Errorf("git command contains a NUL byte")
+	}
+	if s.Endpoint != "" {
+		return runtimeCommand("git", task, Options{"remote": s.Remote, "endpoint": s.Endpoint, "ref": s.Ref, "commit": s.Commit})
 	}
 	// All operations happen in the task directory. Clear inherited repository
 	// routing, scope setup options to a subshell, then exec the original command.
@@ -64,7 +88,7 @@ func (s GitSnapshot) Wrap(command string) (string, error) {
 	if len(s.Commit) == 64 {
 		format = "sha256"
 	}
-	setup := `unset GIT_DIR GIT_COMMON_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES
+	setup := gitRoutingReset + `
 (
 set -eu
 export GIT_TERMINAL_PROMPT=0

@@ -76,7 +76,7 @@ workdir = "/file/workdir"
 	if cfg.DB.URL != "postgres://env@localhost/envdb" {
 		t.Errorf("expected DB.URL = %q, got %q", "postgres://env@localhost/envdb", cfg.DB.URL)
 	}
-	if cfg.Source.Remote != "/env/remote.git" {
+	if cfg.Source.Remote != "${NEXTASK_SOURCE_REMOTE}" {
 		t.Errorf("expected Source.Remote = %q, got %q", "/env/remote.git", cfg.Source.Remote)
 	}
 	if cfg.Worker.Workdir != "/env/workdir" {
@@ -310,8 +310,8 @@ func TestEnvOverridesLocal(t *testing.T) {
 	}
 	applyEnv(cfg)
 
-	if cfg.DB.URL != "postgres://env@localhost/envdb" {
-		t.Errorf("expected env DB.URL, got %q", cfg.DB.URL)
+	if cfg.DB.Endpoint != "${NEXTASK_DB_URL}" {
+		t.Errorf("expected environment reference, got %q", cfg.DB.Endpoint)
 	}
 }
 

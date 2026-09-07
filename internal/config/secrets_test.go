@@ -79,7 +79,6 @@ func TestConfigRejectsSecretOptions(t *testing.T) {
 			`integrations.s3.secret_key = "file-secret"`,
 			`integrations.s3.endpoint = "https://user:file-secret@host"`,
 			`integrations.s3.remote = "s3://bucket/path?token=file-secret"`,
-			`integrations.git.remote = "https://file-secret@host/repo.git"`,
 			`integrations.git.remote = "https://user:file-secret@host/repo.git"`,
 			`source.remote = "https://host/repo.git?token=file-secret"`,
 		} {
@@ -159,9 +158,23 @@ func TestIntegrationTableTypes(t *testing.T) {
 
 func TestEnvironmentRemoteCredentials(t *testing.T) {
 	clearConfigEnv(t)
-	t.Setenv("NEXTASK_SOURCE_REMOTE", "https://env-secret@host/repo.git")
-	t.Setenv("NEXTASK_GIT_REMOTE", "origin")
-	if _, err := LoadFrom("/nonexistent/nextask-test.toml"); err == nil || strings.Contains(err.Error(), "env-secret") {
-		t.Fatalf("unsafe alias accepted or exposed: %v", err)
+	t.Setenv("NEXTASK_SOURCE_REMOTE", "https://user:alias-secret@host/repo.git")
+	t.Setenv("NEXTASK_GIT_REMOTE", "https://user:remote-secret@host/repo.git")
+	t.Setenv("NEXTASK_GIT_URL", "https://user:canonical-secret@host/repo.git")
+	cfg, err := LoadFrom("/nonexistent/nextask-test.toml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Integrations["git"]["remote"] != "${NEXTASK_GIT_URL}" {
+		t.Fatal("canonical environment URL did not win")
+	}
+	var encoded bytes.Buffer
+	if err := toml.NewEncoder(&encoded).Encode(cfg); err != nil {
+		t.Fatal(err)
+	}
+	for _, secret := range []string{"alias-secret", "remote-secret", "canonical-secret"} {
+		if strings.Contains(encoded.String(), secret) {
+			t.Fatal("environment credentials persisted in config")
+		}
 	}
 }

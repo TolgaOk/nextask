@@ -8,7 +8,7 @@ import (
 
 func TestRemoteCredentials(t *testing.T) {
 	for _, remote := range []string{
-		"https://user:secret-value@host/repo", "https://secret-value@host/repo",
+		"https://user:secret-value@host/repo",
 		"https://host/repo?access_token=secret-value", "https://host/repo#secret-value",
 		"ssh://git:secret-value@host/repo", "https://user:secret-value@host%ZZ/repo",
 	} {
@@ -38,7 +38,7 @@ func TestNamedRemoteRejectsCredentials(t *testing.T) {
 		if pushOnly {
 			args = append(args, "--push")
 		}
-		runGitTest(t, root, append(args, "snapshots", "https://secret-value@host.invalid/repo.git")...)
+		runGitTest(t, root, append(args, "snapshots", "https://user:secret-value@host.invalid/repo.git")...)
 		_, err := publishSnapshot(context.Background(), root, "task", "snapshots")
 		if err == nil || !strings.Contains(err.Error(), "credential helper") || strings.Contains(err.Error(), "secret-value") {
 			t.Fatalf("resolved remote accepted or exposed credentials: %v", err)

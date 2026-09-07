@@ -12,8 +12,8 @@ import (
 // worker environment or Git's SSH/credential helpers, so these values must be
 // usable in shared configuration without carrying passwords or tokens.
 func checkGitRemote(value any) error {
-	if err := checkURLCredentials(value.(string), true); err != nil {
-		return fmt.Errorf("%w; use SSH or a Git credential helper on the submitter and worker", err)
+	if err := endpoint.Validate(value.(string), endpoint.Git); err != nil {
+		return fmt.Errorf("%w; use environment references or a Git credential helper", err)
 	}
 	return nil
 }

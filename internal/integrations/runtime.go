@@ -12,6 +12,7 @@ import (
 // Runtime is implemented by integrations whose prepared command uses this binary.
 // Credentials are resolved inside Run, on the worker, and never serialized here.
 type Runtime interface {
+	RuntimeOptions() Schema
 	Run(context.Context, Task, Options, IO) *taskexec.Result
 }
 type IO struct {

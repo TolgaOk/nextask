@@ -41,11 +41,8 @@ func newRuntimeCommand() *cobra.Command {
 			if err := decoder.Decode(new(any)); err != io.EOF {
 				return fmt.Errorf("invalid runtime options")
 			}
-			options, err := module.Options().Resolve(raw)
+			options, err := runtime.RuntimeOptions().Resolve(raw)
 			if err != nil {
-				return err
-			}
-			if err := module.Validate(options); err != nil {
 				return err
 			}
 			cleanupMS, err := strconv.ParseInt(args[3], 10, 64)

@@ -171,12 +171,15 @@ func applyEnv(cfg *Config) {
 		cfg.setSource("db.url", "env:NEXTASK_DB_URL")
 	}
 	if v := os.Getenv("NEXTASK_SOURCE_REMOTE"); v != "" {
-		cfg.Source.Remote = v
+		cfg.Source.Remote = endpoint.Reference("NEXTASK_SOURCE_REMOTE")
 		cfg.setSource("source.remote", "env:NEXTASK_SOURCE_REMOTE")
-		cfg.setGitRemote(v, "env:NEXTASK_SOURCE_REMOTE")
+		cfg.setGitRemote(endpoint.Reference("NEXTASK_SOURCE_REMOTE"), "env:NEXTASK_SOURCE_REMOTE")
 	}
 	if v := os.Getenv("NEXTASK_GIT_REMOTE"); v != "" {
-		cfg.setGitRemote(v, "env:NEXTASK_GIT_REMOTE")
+		cfg.setGitRemote(endpoint.Reference("NEXTASK_GIT_REMOTE"), "env:NEXTASK_GIT_REMOTE")
+	}
+	if v := os.Getenv("NEXTASK_GIT_URL"); v != "" {
+		cfg.setGitRemote(endpoint.Reference("NEXTASK_GIT_URL"), "env:NEXTASK_GIT_URL")
 	}
 	if v := os.Getenv("NEXTASK_S3_ENDPOINT"); v != "" {
 		cfg.setIntegrationOption("s3", "endpoint", endpoint.Reference("NEXTASK_S3_ENDPOINT"), "env:NEXTASK_S3_ENDPOINT")
