@@ -27,10 +27,10 @@ func Reference(name string) string { return "${" + name + "}" }
 func HasReferences(value string) bool { return reference.MatchString(value) }
 
 type template struct {
-	raw, whole string
-	url        *url.URL
-	local      string
-	refs       []envReference
+	whole string
+	url   *url.URL
+	local string
+	refs  []envReference
 }
 
 type envReference struct{ marker, name string }
@@ -126,7 +126,7 @@ func environment(name string) (string, error) {
 }
 
 func parse(value string, kind Kind) (*template, error) {
-	t := &template{raw: value}
+	t := &template{}
 	if value == "" {
 		return t, nil
 	}
