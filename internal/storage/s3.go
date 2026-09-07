@@ -9,6 +9,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/TolgaOk/nextask/internal/buildinfo"
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 )
@@ -55,7 +56,7 @@ func NewS3(c Config) (Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	client.SetAppInfo("nextask", "0.2.0")
+	client.SetAppInfo("nextask", buildinfo.Version)
 	return &s3Store{client: client, bucket: c.Bucket}, nil
 }
 func (s *s3Store) Stat(ctx context.Context, key string) (Object, error) {

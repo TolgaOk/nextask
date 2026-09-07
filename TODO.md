@@ -1,4 +1,4 @@
-# 0.2.0 TODO
+# 0.2.0-alpha TODO
 
 Nextask runs commands. Built-in integrations prepare tasks and compose runtime wrappers. Standalone tools remain independent.
 

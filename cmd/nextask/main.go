@@ -1,9 +1,10 @@
 package main
 
-import "github.com/TolgaOk/nextask/internal/cli"
-
-var version = "0.1.1"
+import (
+	"github.com/TolgaOk/nextask/internal/buildinfo"
+	"github.com/TolgaOk/nextask/internal/cli"
+)
 
 func main() {
-	cli.Execute(version)
+	cli.Execute(buildinfo.Version)
 }

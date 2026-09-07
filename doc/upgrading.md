@@ -1,4 +1,4 @@
-# Upgrading to 0.2.0
+# Upgrading to 0.2.0-alpha
 
 Move database connections to `NEXTASK_DB_URL` and remove DB URL entries from all
 Nextask/shared config files, including empty entries. Replace `--db-url` usage with
