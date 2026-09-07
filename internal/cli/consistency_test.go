@@ -20,6 +20,7 @@ func TestDurationFlags(t *testing.T) {
 		flag string
 	}{
 		{[]string{"wait"}, "timeout"},
+		{[]string{"s3", "fetch"}, "timeout"},
 		{[]string{"cancel"}, "timeout"},
 		{[]string{"worker"}, "timeout"},
 		{[]string{"worker"}, "exit-if-idle"},

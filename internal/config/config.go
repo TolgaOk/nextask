@@ -124,17 +124,53 @@ type configFile struct {
 	shared bool
 }
 
-// Load layers shared and standalone user/project files, then environment values.
+// Load reads settings and resolves the database connection for DB consumers.
 func Load() (*Config, error) {
+	cfg, err := LoadSettings()
+	if err != nil {
+		return nil, err
+	}
+	if err := cfg.ResolveDatabase(); err != nil {
+		return nil, err
+	}
+	return cfg, nil
+}
+
+// LoadSettings layers shared and standalone settings without reading DB secrets.
+func LoadSettings() (*Config, error) {
 	global, _ := GlobalPath()
 	shared, _ := SharedGlobalPath()
-	return loadFiles([]configFile{
+	return loadSettingsFiles([]configFile{
 		{shared, true}, {global, false},
 		{SharedLocalFileName, true}, {LocalPath(), false},
 	})
 }
 
 func loadFiles(files []configFile) (*Config, error) {
+	cfg, err := loadSettingsFiles(files)
+	if err != nil {
+		return nil, err
+	}
+	if err := cfg.ResolveDatabase(); err != nil {
+		return nil, err
+	}
+	return cfg, nil
+}
+
+// ResolveDatabase reads only the credentials required by database commands.
+func (cfg *Config) ResolveDatabase() error {
+	if cfg.DB.Endpoint == "" {
+		return nil
+	}
+	value, err := db.ResolveURL(cfg.DB.Endpoint)
+	if err != nil {
+		return fmt.Errorf("%s: db.url: %w", cfg.SourceFor("db.url"), err)
+	}
+	cfg.DB.URL = value
+	return nil
+}
+
+func loadSettingsFiles(files []configFile) (*Config, error) {
 	cfg := &Config{}
 	for _, file := range files {
 		if file.path == "" {
@@ -150,8 +186,7 @@ func loadFiles(files []configFile) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	cfg.DB.URL, err = db.ResolveURL(cfg.DB.Endpoint)
-	if err != nil {
+	if err := db.ValidateURL(cfg.DB.Endpoint); err != nil {
 		return nil, fmt.Errorf("%s: db.url: %w", cfg.SourceFor("db.url"), err)
 	}
 	if err := cfg.validate(); err != nil {

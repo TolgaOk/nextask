@@ -4,16 +4,13 @@ import (
 	"context"
 	"fmt"
 	"math"
-	"net/url"
 	"path"
 	"strings"
 	"time"
 
 	"github.com/TolgaOk/nextask/internal/storage"
 	"github.com/TolgaOk/nextask/internal/taskexec"
-	"github.com/bmatcuk/doublestar/v4"
 	"github.com/dustin/go-humanize"
-	"github.com/minio/minio-go/v7/pkg/s3utils"
 )
 
 // S3 prepares a runtime wrapper backed by an S3-compatible Go client.
@@ -74,29 +71,15 @@ func s3Config(raw Options) (storage.Config, error) {
 	if err != nil {
 		return storage.Config{}, err
 	}
-	c := storage.Config{
-		Endpoint: o.String("endpoint"), Region: o.String("region"), Root: o.String("root"),
-		Include: o["include"].([]string), Exclude: o["exclude"].([]string), FinalInclude: o["final_include"].([]string),
-		FinalSync: o["final_sync"].(bool), OnFinalError: o.String("on_final_error"), Symlinks: o.String("symlinks"),
+	c, err := s3ConnectionConfig(o)
+	if err != nil {
+		return c, err
 	}
-	if c.Endpoint == "" {
-		return c, fmt.Errorf("endpoint is required")
-	}
-	remote, err := url.Parse(o.String("remote"))
-	if err != nil || remote.Scheme != "s3" || remote.Hostname() == "" || remote.Port() != "" || remote.User != nil || remote.RawQuery != "" || remote.Fragment != "" {
-		return c, fmt.Errorf("remote must be s3://bucket/base-prefix")
-	}
-	c.Bucket, c.Prefix = remote.Host, strings.Trim(remote.Path, "/")
-	if err := s3utils.CheckValidBucketNameStrict(c.Bucket); err != nil {
-		return c, fmt.Errorf("invalid destination bucket: %w", err)
-	}
-	for _, segment := range strings.Split(c.Prefix, "/") {
-		if segment == "." || segment == ".." {
-			return c, fmt.Errorf("remote prefix cannot contain . or .. segments")
-		}
-	}
-	if strings.ContainsAny(c.Prefix+c.Region+c.Root, "\x00\r\n") {
-		return c, fmt.Errorf("storage paths and region cannot contain control characters")
+	c.Root = o.String("root")
+	c.Include, c.Exclude, c.FinalInclude = o["include"].([]string), o["exclude"].([]string), o["final_include"].([]string)
+	c.FinalSync, c.OnFinalError, c.Symlinks = o["final_sync"].(bool), o.String("on_final_error"), o.String("symlinks")
+	if strings.ContainsAny(c.Root, "\x00\r\n") {
+		return c, fmt.Errorf("storage paths cannot contain control characters")
 	}
 	if c.Root == "" || path.IsAbs(c.Root) || strings.Contains(c.Root, "\\") {
 		return c, fmt.Errorf("root must be relative to the task directory")
@@ -107,17 +90,8 @@ func s3Config(raw Options) (storage.Config, error) {
 		}
 	}
 	c.Root = path.Clean(c.Root)
-	for _, patterns := range [][]string{c.Include, c.Exclude, c.FinalInclude} {
-		for _, pattern := range patterns {
-			if pattern == "" || path.IsAbs(pattern) || strings.ContainsRune(pattern, 0) || !doublestar.ValidatePattern(pattern) {
-				return c, fmt.Errorf("invalid relative file pattern %q", pattern)
-			}
-			for _, part := range strings.Split(pattern, "/") {
-				if part == ".." {
-					return c, fmt.Errorf("file patterns cannot traverse parent directories")
-				}
-			}
-		}
+	if err := storage.ValidatePatterns(c.Include, c.Exclude, c.FinalInclude); err != nil {
+		return c, err
 	}
 	if len(c.Include)+len(c.FinalInclude) == 0 {
 		return c, fmt.Errorf("include or final_include must select files explicitly")
@@ -138,14 +112,11 @@ func s3Config(raw Options) (storage.Config, error) {
 	if !c.FinalSync && (c.Interval == 0 || len(c.Include) == 0) {
 		return c, fmt.Errorf("at least one upload pass must be enabled with selected files")
 	}
-	concurrency, retries := o["concurrency"].(int64), o["retries"].(int64)
+	concurrency := o["concurrency"].(int64)
 	if concurrency < 1 || concurrency > 256 {
 		return c, fmt.Errorf("concurrency must be between 1 and 256")
 	}
-	if retries < 0 || retries > 100 {
-		return c, fmt.Errorf("retries must be between 0 and 100")
-	}
-	c.Concurrency, c.Retries = int(concurrency), int(retries)
+	c.Concurrency = int(concurrency)
 	if value := o.String("max_file_size"); value != "unlimited" {
 		size, err := humanize.ParseBytes(value)
 		if err != nil || size == 0 || size > math.MaxInt64 {

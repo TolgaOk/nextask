@@ -57,12 +57,24 @@ func errDBRequired() error {
 // NewRootCommand constructs an independent command tree. Create a fresh tree
 // for each execution; Cobra command instances themselves are not concurrent.
 func NewRootCommand(version string) *cobra.Command {
-	return newRootCommand(version, config.Load)
+	return newRootCommand(version, config.LoadSettings)
 }
 
 func newRootCommand(version string, loadConfig func() (*config.Config, error)) *cobra.Command {
 	// Commands read this tree's configuration. Per-command overrides use copies.
 	cfg := new(config.Config)
+	load := func(cmd *cobra.Command, args []string) error {
+		loaded, err := loadConfig()
+		if err != nil {
+			return withHints(err,
+				"Check TOML syntax and values in your config files",
+				"Shared: "+codeStyle.Render("~/.config/tasktools/config.toml or .tasktools.toml"),
+				"Global: "+codeStyle.Render("~/.config/nextask/global.toml"),
+				"Local:  "+codeStyle.Render(".nextask.toml"))
+		}
+		*cfg = *loaded
+		return nil
+	}
 	root := &cobra.Command{
 		Use:           "nextask",
 		Short:         "Distributed task queue with optional integrations and full log capture",
@@ -70,18 +82,15 @@ func newRootCommand(version string, loadConfig func() (*config.Config, error)) *
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-			loaded, err := loadConfig()
-			if err != nil {
-				return withHints(err,
-					"Check TOML syntax and values in your config files",
-					"Shared: "+codeStyle.Render("~/.config/tasktools/config.toml or .tasktools.toml"),
-					"Global: "+codeStyle.Render("~/.config/nextask/global.toml"),
-					"Local:  "+codeStyle.Render(".nextask.toml"))
+			if err := load(cmd, args); err != nil {
+				return err
 			}
-			*cfg = *loaded
-			return nil
+			return cfg.ResolveDatabase()
 		},
 	}
+	s3 := newS3Command(cfg)
+	s3.PersistentPreRunE = load
+	root.AddCommand(s3)
 	root.CompletionOptions.HiddenDefaultCmd = true
 	root.AddCommand(newEnqueueCommand(cfg), newWaitCommand(cfg), newLogsCommand(cfg),
 		newCancelCommand(cfg), newListCommand(cfg), newShowCommand(cfg), newRemoveCommand(cfg),
