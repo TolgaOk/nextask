@@ -28,7 +28,7 @@ Nextask runs commands. Built-in integrations prepare tasks and compose runtime w
 - [x] Recover completion/cancellation; report log-write failures; honor retry settings; close failed DB pools.
 
 - [x] Add caller IDs, task environment, shared config, and redacted config diagnostics.
-- [x] Require `NEXTASK_DB_URL`; reject secret config/URLs and name missing DB/S3 variables.
+- [x] Resolve connection credentials from environment references; name missing variables.
 - [x] Add `--with`, `--set`, options-only config, and a common integration registry/prepare operation.
 - [x] Keep execution generic, compose cleanup deadlines, and make external deletion explicit.
 - [x] Test selection, config precedence, quoting, composition, cancellation, and failures.
@@ -37,10 +37,11 @@ Nextask runs commands. Built-in integrations prepare tasks and compose runtime w
 ## Connection URLs
 
 - [x] Share URL validation and environment-reference resolution; reject literal credentials in config.
+- [x] Use Gitleaks for repository secret scanning; keep explicit credential-reference validation.
 - [x] Accept DB URL templates and complete URLs from the environment.
-- [ ] Authenticate Git with URL credentials resolved separately on submitters and workers.
+- [x] Authenticate Git with URL credentials resolved separately on submitters and workers.
 - [x] Read S3 credentials from its endpoint URL; remove fixed credential-variable requirements.
-- [ ] Test missing variables, escaping, redaction, persisted tasks, and authenticated transfers; update focused docs.
+- [x] Test missing variables, escaping, redaction, persisted tasks, and authenticated transfers; update focused docs.
 
 ## Worker failure and retry
 
@@ -65,7 +66,7 @@ Agreed CLI, config, and defaults: [S3 design](doc/s3.md).
 
 - [x] Add opt-in `--with s3` using `minio-go/v7` for S3-compatible providers, including Hetzner.
 - [x] Support typed integration options and JSON-array `--set` overrides; config never enables integrations.
-- [x] Read worker credentials from `S3_ACCESS_KEY` / `S3_SECRET_KEY`; require endpoint and destination.
+- [x] Resolve worker credentials from S3 endpoint references; require endpoint and destination.
 - [x] Add explicit file filters, final-only inclusions, and uploads under `<remote>/<TASK_ID>/`.
 - [x] Implement periodic uploads, final sync, transfer limits/retries, and configurable final-error handling.
 - [x] Allow bounded final sync on cancellation; preserve task errors and stored objects.

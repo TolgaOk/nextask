@@ -13,24 +13,42 @@ Priority is CLI flags, environment variables, project files, user files, then
 built-in defaults. Within each scope, the Nextask file overrides the shared
 `[nextask]` section. Project files are read from the current directory. Missing files are optional.
 
-Supply the database connection through the environment on the CLI host and each
-worker:
+Connection settings accept `${VARIABLE}` references with names you choose. Use a
+complete URL from the environment, or reference credentials inside a URL template:
 
-```sh
-export NEXTASK_DB_URL='postgres://USER:PASSWORD@HOST:5432/DB?sslmode=require'
-nextask init db
+```toml
+[db]
+url = "postgresql://nextask:${DB_PASSWORD}@db.example:5432/nextask?sslmode=require"
+
+[integrations.git]
+remote = "https://nextask:${GIT_TOKEN}@git.example/nextask/source.git"
+
+[integrations.s3]
+endpoint = "https://${STORAGE_ACCESS}:${STORAGE_SECRET}@fsn1.your-objectstorage.com"
 ```
 
-Nextask config files hold non-secret settings. Database URL settings are rejected,
-including `db.url`, `nextask.db.url`, and `defaults.db_url`. `--db-url` has been
-removed. Unknown Nextask config keys are also rejected. Each file is checked before
-later files or environment overrides can replace its values.
+Alternatively, set `db.url = "${MY_DATABASE_URL}"`. `NEXTASK_DB_URL` overrides
+`db.url`; `NEXTASK_GIT_URL` overrides `integrations.git.remote`;
+`NEXTASK_S3_ENDPOINT` overrides `integrations.s3.endpoint`. These environment
+variables contain complete connection values. Nextask stores references to them.
+
+Passwords and S3 access keys in config must be environment references. Usernames,
+hosts, ports, and paths can be literal. Each file is checked before later overrides.
+Missing or blank referenced variables are named in errors. References are expanded
+once, with URL escaping applied to each component. Complete URL environment values
+must already use URL escaping. Database keyword connection strings are supported
+through a complete environment value.
+
+The CLI resolves its DB connection when loading configuration. Workers resolve Git
+and S3 credentials at execution time; the submitter also resolves Git credentials
+when publishing a snapshot. Set the referenced variables on the relevant machines.
+`--db-url` and `defaults.db_url` are unsupported. Unknown config keys are rejected.
 
 Example config:
 
 ```toml
 [integrations.git]
-remote = "snapshots"                            # existing Git remote name, URL, or path; or NEXTASK_GIT_REMOTE
+remote = "snapshots"                            # existing Git remote name, URL, or path; or NEXTASK_GIT_URL
 
 [worker]
 workdir = "/tmp/nextask"                         # or NEXTASK_WORKER_WORKDIR
@@ -64,7 +82,7 @@ nextask config show --sources
 This prints effective values and their origins. `nextask config` also shows
 effective values. Credentials, URL query values, and fragments are redacted;
 keyword-style database connection strings are hidden entirely. The displayed `db.url`
-entry is a diagnostic view of `NEXTASK_DB_URL`. It is not a config-file setting.
+entry shows the resolved DB connection with credentials hidden.
 
 Tools may use the worker's `NEXTASK_TASK_ID` as their own caller-supplied ID and
 `NEXTASK_DB_URL` as their database connection. They own their tables and migrations.

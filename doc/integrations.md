@@ -4,10 +4,17 @@ All integrations are disabled by default. Git and S3 ship with Nextask; select
 each with `--with TOOL`. Config only supplies integration options.
 Plain tasks work without Git. Install Git on the submitter and workers for Git tasks,
 and configure a remote both machines can reach using their own Git credentials.
-Git remotes must be credential-free, including the fetch and push URLs behind a
-remote name. Use SSH authentication or Git credential helpers on the submitter and
-worker. SSH usernames such as `git@host` are allowed. Embedded passwords, HTTP
-userinfo, query strings, and fragments are rejected before publication.
+Use SSH keys, Git credential helpers, or an HTTP(S) URL with credential references,
+such as `https://nextask:${GIT_TOKEN}@git.example/repo.git`. A complete URL can also
+come from `NEXTASK_GIT_URL` or a custom reference. Remote names remain supported;
+their fetch and push URLs follow the same rules. Literal passwords, URL queries,
+and fragments are rejected. HTTP and SSH usernames can be literal.
+
+Git resolves credentials independently on the submitter and worker. The queued
+snapshot contains the credential reference and the resolved repository URL with
+credentials removed. The worker can use a different token for that same repository;
+a changed destination fails before checkout. Credentials reach Git through a
+process-scoped credential helper and are not written into `.git/config`.
 
 ```sh
 nextask enqueue --with git --set git.remote=snapshots './job.sh'
@@ -55,7 +62,7 @@ Configure a destination and explicit file selection in `.nextask.toml`:
 
 ```toml
 [integrations.s3]
-endpoint = "https://fsn1.your-objectstorage.com"
+endpoint = "https://${STORAGE_ACCESS}:${STORAGE_SECRET}@fsn1.your-objectstorage.com"
 region = "fsn1"
 remote = "s3://my-bucket/my-project"
 include = ["outputs/**"]
@@ -64,12 +71,13 @@ final_include = ["reports/**"]
 interval = "60s"
 ```
 
-Set `S3_ACCESS_KEY` and `S3_SECRET_KEY` on the worker. Use the provider's
-object-storage access/secret key pair. No separate storage CLI is needed.
+Set the referenced variables on the worker using the provider's object-storage
+access/secret key pair. Variable names are your choice; there are no implicit
+`S3_ACCESS_KEY` or `S3_SECRET_KEY` lookups. A complete authenticated endpoint can
+also come from `NEXTASK_S3_ENDPOINT`. No separate storage CLI is needed.
 The bucket must already exist. Shared config uses `[nextask.integrations.s3]`.
-S3 credentials are required only for S3 tasks. Missing keys are named in the error,
-and the task command does not start. Credential fields and authenticated URLs are
-rejected in S3 config even when the integration is disabled.
+Missing credentials are named before the command starts. Config rejects literal
+credentials even when the integration is disabled.
 
 ```sh
 nextask enqueue --with s3 './job.sh'
