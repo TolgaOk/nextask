@@ -135,6 +135,36 @@ func TestWatchingCLI(t *testing.T) {
 			t.Fatal(out)
 		}
 	})
+	t.Run("worker-stop-interrupt", func(t *testing.T) {
+		id := "interrupt-stop"
+		if err := db.RegisterWorker(ctx, pool, id, 1234, "test", "/tmp"); err != nil {
+			t.Fatal(err)
+		}
+		listener, err := db.Listen(ctx, getTestDBURL(t), nil, db.ToWorkerChannel(id))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() {
+			closeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := listener.Close(closeCtx); err != nil {
+				t.Error(err)
+			}
+		}()
+		p := startWatchCLI(t, binary, "worker", "stop", id)
+		select {
+		case <-listener.C:
+		case <-time.After(5 * time.Second):
+			t.Fatal("stop signal not received")
+		}
+		if err := p.cmd.Process.Signal(os.Interrupt); err != nil {
+			t.Fatal(err)
+		}
+		out := p.result(t, 0)
+		if !strings.Contains(out, "stop signal already sent") || strings.Contains(out, "Worker "+id+" stopped") {
+			t.Fatal(out)
+		}
+	})
 	t.Run("worker-stop-timeout", func(t *testing.T) {
 		if err := db.RegisterWorker(ctx, pool, "unresponsive", 1234, "test", "/tmp"); err != nil {
 			t.Fatal(err)

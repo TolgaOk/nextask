@@ -18,14 +18,14 @@ import (
 
 type waitOptions struct {
 	tags    []string
-	timeout time.Duration
+	timeout durationFlag
 	any     bool
 }
 
 func newWaitCommand(cfg *config.Config) *cobra.Command {
 	var opts waitOptions
 	cmd := &cobra.Command{
-		Use:   "wait TASK_ID [TASK_ID...]",
+		Use:   "wait [TASK_ID...]",
 		Short: "Block until tasks complete",
 		Args: func(cmd *cobra.Command, args []string) error {
 			if len(opts.tags) > 0 && len(args) > 0 {
@@ -45,31 +45,35 @@ func newWaitCommand(cfg *config.Config) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error { return runWait(cmd, args, *cfg, opts) },
 	}
 
-	cmd.Flags().StringSliceVar(&opts.tags, "tag", nil, "Wait for all tasks matching tag (key=value)")
-	cmd.Flags().DurationVar(&opts.timeout, "timeout", 0, "Exit 124 if tasks not done within duration")
-	cmd.Flags().BoolVar(&opts.any, "any", false, "Return when any task completes (not all)")
+	cmd.Flags().StringSliceVar(&opts.tags, "tag", nil, "Select tasks matching tag key=value (repeatable)")
+	opts.timeout.addFlag(cmd, "timeout", 0, "Exit 124 after duration; 0s disables the deadline")
+	cmd.Flags().BoolVar(&opts.any, "any", false, "Return after the first observed terminal result")
 	return cmd
 }
 
 func runWait(cmd *cobra.Command, args []string, cfg config.Config, opts waitOptions) error {
+	if opts.timeout.Duration < 0 {
+		return errWithHints("timeout must not be negative", "Use 0s to disable the deadline")
+	}
+	parsedTags, err := parseTags(opts.tags)
+	if err != nil {
+		return err
+	}
 	if cfg.DB.URL == "" {
 		return errDBRequired()
 	}
-	if opts.timeout < 0 {
-		return errWithHints("timeout must not be negative", "Example: "+codeStyle.Render("--timeout 30s"))
-	}
 	ctx, stop := interruptContext(cmd.Context())
 	defer stop()
-	if opts.timeout > 0 {
+	if opts.timeout.Duration > 0 {
 		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, opts.timeout)
+		ctx, cancel = context.WithTimeout(ctx, opts.timeout.Duration)
 		defer cancel()
 	}
 	remaining := make(map[string]bool)
 	for _, id := range args {
 		remaining[id] = true
 	}
-	err := runTaskWait(ctx, cfg, outputFor(cmd).err, opts, args, remaining)
+	err = runTaskWait(ctx, cfg, outputFor(cmd).err, opts, parsedTags, args, remaining)
 	if errors.Is(err, context.DeadlineExceeded) && ctx.Err() != nil {
 		return handleTimeout(cmd.ErrOrStderr(), remaining)
 	}
@@ -79,11 +83,7 @@ func runWait(cmd *cobra.Command, args []string, cfg config.Config, opts waitOpti
 	return err
 }
 
-func runTaskWait(ctx context.Context, cfg config.Config, stderr io.Writer, opts waitOptions, ids []string, remaining map[string]bool) error {
-	parsedTags, err := parseTags(opts.tags)
-	if err != nil {
-		return err
-	}
+func runTaskWait(ctx context.Context, cfg config.Config, stderr io.Writer, opts waitOptions, parsedTags map[string]string, ids []string, remaining map[string]bool) error {
 	pool, err := db.Connect(ctx, cfg.DB.URL)
 	if err != nil {
 		return err
@@ -246,24 +246,4 @@ func exitOrNil(code int) error {
 		return &exitCodeError{code: code}
 	}
 	return nil
-}
-
-func parseTags(tags []string) (map[string]string, error) {
-	parsed := make(map[string]string, len(tags))
-	for _, tag := range tags {
-		parts := strings.SplitN(tag, "=", 2)
-		if len(parts) != 2 {
-			return nil, errWithHints(fmt.Sprintf("invalid tag format: %s", tag),
-				"Expected format: "+codeStyle.Render("key=value"),
-			)
-		}
-		if parts[0] == "" || parts[1] == "" {
-			return nil, errWithHints(fmt.Sprintf("invalid tag format: %s", tag),
-				"Tag key and value must not be empty",
-				"Expected format: "+codeStyle.Render("key=value"),
-			)
-		}
-		parsed[parts[0]] = parts[1]
-	}
-	return parsed, nil
 }

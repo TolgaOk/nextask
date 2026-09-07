@@ -11,7 +11,7 @@ import (
 
 type workerListOptions struct {
 	listingOptions
-	status string
+	statuses []string
 }
 
 func newWorkerListCommand(cfg *config.Config) *cobra.Command {
@@ -45,17 +45,6 @@ func newWorkerListCommand(cfg *config.Config) *cobra.Command {
 				return err
 			}
 
-			if len(workers) == 0 {
-				if opts.json {
-					_, err = fmt.Fprintln(cmd.OutOrStdout(), "[]")
-				} else if opts.csv {
-					_, err = fmt.Fprintln(cmd.OutOrStdout(), "ID,PID,HOSTNAME,STATUS,STARTED")
-				} else {
-					_, err = fmt.Fprintln(cmd.ErrOrStderr(), "No workers found")
-				}
-				return err
-			}
-
 			plain := opts.json || opts.csv
 
 			rows := [][]string{}
@@ -70,22 +59,23 @@ func newWorkerListCommand(cfg *config.Config) *cobra.Command {
 					fmt.Sprintf("%d", w.PID),
 					w.Hostname,
 					displayStatus,
-					w.StartedAt.Format("2006-01-02 15:04"),
+					w.StartedAt.Local().Format("2006-01-02 15:04"),
 				})
 			}
 
 			return PrintTable(outputFor(cmd), TableConfig{
-				Headers: []string{"ID", "PID", "HOSTNAME", "STATUS", "STARTED"},
-				Rows:    rows,
-				Count:   total,
-				Offset:  opts.offset,
-				JSON:    opts.json,
-				CSV:     opts.csv,
-				Wrap:    opts.wrap,
+				EmptyMessage: "No workers found",
+				Headers:      []string{"ID", "PID", "HOSTNAME", "STATUS", "STARTED"},
+				Rows:         rows,
+				Count:        total,
+				Offset:       opts.offset,
+				JSON:         opts.json,
+				CSV:          opts.csv,
+				Wrap:         opts.wrap,
 			})
 		},
 	}
-	cmd.Flags().StringVar(&opts.status, "status", "", "Filter by status (running, stopped, stale)")
+	cmd.Flags().StringSliceVar(&opts.statuses, "status", nil, "Filter by status: running, stopped, stale (comma-separated)")
 	opts.listingOptions.addFlags(cmd, "Workers started within the past duration")
 	return cmd
 }
@@ -95,17 +85,17 @@ func (opts workerListOptions) filter(stale time.Duration, now time.Time) (db.Wor
 	if err != nil {
 		return db.WorkerListFilter{}, err
 	}
-	var status *db.WorkerStatus
-	if opts.status != "" {
-		value := db.WorkerStatus(opts.status)
+	statuses := make([]db.WorkerStatus, 0, len(opts.statuses))
+	for _, status := range opts.statuses {
+		value := db.WorkerStatus(status)
 		switch value {
 		case db.WorkerStatusRunning, db.WorkerStatusStopped, db.WorkerStatusStale:
 		default:
-			return db.WorkerListFilter{}, errWithHints(fmt.Sprintf("unknown status: %s", opts.status),
+			return db.WorkerListFilter{}, errWithHints(fmt.Sprintf("unknown status: %s", status),
 				"Valid: running, stopped, stale")
 		}
-		status = &value
+		statuses = append(statuses, value)
 	}
-	return db.WorkerListFilter{Status: status, Since: since, Limit: uint64(opts.limit),
+	return db.WorkerListFilter{Statuses: statuses, Since: since, Limit: uint64(opts.limit),
 		Offset: uint64(opts.offset), StaleThreshold: stale}, nil
 }

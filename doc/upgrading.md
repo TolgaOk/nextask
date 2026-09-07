@@ -20,3 +20,13 @@ are accepted. The canonical setting wins over its alias in the same file;
 
 `nextask remove` deletes the task and its logs. Snapshot retention is explicit;
 remove a remote snapshot with `git push snapshots --delete <project>/<TASK_ID>`.
+
+Workers accept `--tag key=value`; `--filter` remains an alias. Both list commands
+accept repeated or comma-separated `--status` values. Duration flags share units
+such as `30s`, `1h`, and `7d`. Help describes where zero disables a deadline or
+requests immediate idle exit.
+
+Worker diagnostics now go to stderr. List and show timestamps use local time,
+and tag displays are sorted. Empty JSON lists return `[]`; empty CSV lists retain
+headers. `--json` and `--csv` are mutually exclusive, and `--wrap` applies only to
+table output.

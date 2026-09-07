@@ -9,7 +9,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -61,11 +60,7 @@ func daemonize(ctx context.Context, cfg worker.Config, timeout time.Duration) er
 		args = append(args, "--exit-if-idle", cfg.ExitIfIdle.String())
 	}
 	if len(cfg.TagFilter) > 0 {
-		filters := make([]string, 0, len(cfg.TagFilter))
-		for key, value := range cfg.TagFilter {
-			filters = append(filters, key+"="+value)
-		}
-		slices.Sort(filters)
+		filters := sortedTags(cfg.TagFilter)
 		var encoded strings.Builder
 		writer := csv.NewWriter(&encoded)
 		if err := writer.Write(filters); err != nil {
@@ -75,7 +70,7 @@ func daemonize(ctx context.Context, cfg worker.Config, timeout time.Duration) er
 		if err := writer.Error(); err != nil {
 			return err
 		}
-		args = append(args, "--filter", strings.TrimSuffix(encoded.String(), "\n"))
+		args = append(args, "--tag", strings.TrimSuffix(encoded.String(), "\n"))
 	}
 
 	cmd := exec.Command(exe, args...)

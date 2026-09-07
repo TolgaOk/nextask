@@ -38,11 +38,11 @@ func UpdateHeartbeat(ctx context.Context, pool *pgxpool.Pool, id string) error {
 
 // WorkerListFilter specifies criteria for filtering workers.
 type WorkerListFilter struct {
-	ID     string
-	Status *WorkerStatus
-	Since  time.Time
-	Limit  uint64
-	Offset uint64
+	ID       string
+	Statuses []WorkerStatus
+	Since    time.Time
+	Limit    uint64
+	Offset   uint64
 	// StaleThreshold enables heartbeat-based status when positive.
 	// Zero leaves the stored status intact for registry operations.
 	StaleThreshold time.Duration
@@ -64,8 +64,8 @@ func workerListQuery(filter WorkerListFilter) sq.SelectBuilder {
 	if filter.ID != "" {
 		query = query.Where(sq.Eq{"id": filter.ID})
 	}
-	if filter.Status != nil {
-		query = query.Where(sq.Eq{"status": *filter.Status})
+	if len(filter.Statuses) > 0 {
+		query = query.Where(sq.Eq{"status": filter.Statuses})
 	}
 	if !filter.Since.IsZero() {
 		query = query.Where(sq.GtOrEq{"started_at": filter.Since})

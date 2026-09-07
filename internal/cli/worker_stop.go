@@ -14,7 +14,7 @@ import (
 )
 
 type workerStopOptions struct {
-	timeout time.Duration
+	timeout durationFlag
 }
 
 func newWorkerStopCommand(cfg *config.Config) *cobra.Command {
@@ -24,7 +24,7 @@ func newWorkerStopCommand(cfg *config.Config) *cobra.Command {
 		Short: "Stop a running worker",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if opts.timeout <= 0 {
+			if opts.timeout.Duration <= 0 {
 				return errWithHints("timeout must be positive",
 					"Example: "+codeStyle.Render("--timeout 10s"),
 				)
@@ -36,7 +36,7 @@ func newWorkerStopCommand(cfg *config.Config) *cobra.Command {
 
 			ctx, stop := interruptContext(cmd.Context())
 			defer stop()
-			ctx, cancel := context.WithTimeout(ctx, opts.timeout)
+			ctx, cancel := context.WithTimeout(ctx, opts.timeout.Duration)
 			defer cancel()
 			pool, err := db.Connect(ctx, cfg.DB.URL)
 			if err != nil {
@@ -46,7 +46,7 @@ func newWorkerStopCommand(cfg *config.Config) *cobra.Command {
 			return stopWorker(ctx, *cfg, outputFor(cmd).err, pool, args[0])
 		},
 	}
-	cmd.Flags().DurationVar(&opts.timeout, "timeout", 10*time.Second, "Timeout waiting for stop confirmation")
+	opts.timeout.addFlag(cmd, "timeout", 10*time.Second, "Wait for stop confirmation; must be positive")
 	return cmd
 }
 
@@ -73,6 +73,10 @@ func stopWorker(ctx context.Context, cfg config.Config, stderr io.Writer, pool *
 		status, err := workerStatus(ctx, pool, id)
 		return status == db.WorkerStatusStopped, err
 	})
+	if errors.Is(err, context.Canceled) && ctx.Err() != nil {
+		_, err := fmt.Fprintf(stderr, "\nInterrupted - stop signal already sent\nCheck worker status with %s\n", codeStyle.Render("nextask worker list"))
+		return err
+	}
 	if errors.Is(err, context.DeadlineExceeded) && ctx.Err() != nil {
 		return errWithHints("stop signal sent but worker did not confirm",
 			"Worker may be unresponsive or processing a task",

@@ -50,10 +50,6 @@ func newEnqueueCommand(cfg *config.Config) *cobra.Command {
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if cfg.DB.URL == "" {
-				return errDBRequired()
-			}
-
 			command := args[0]
 
 			parsedTags, err := parseTags(opts.tags)
@@ -80,6 +76,9 @@ func newEnqueueCommand(cfg *config.Config) *cobra.Command {
 			plan, err := enqueueIntegrations(cmd, *cfg, opts)
 			if err != nil {
 				return err
+			}
+			if cfg.DB.URL == "" {
+				return errDBRequired()
 			}
 			baseCtx := cmd.Context()
 			ctx, stopSignals := interruptContext(baseCtx)
@@ -133,7 +132,7 @@ func newEnqueueCommand(cfg *config.Config) *cobra.Command {
 	cmd.Flags().StringArray("with", nil, "Enable integration (repeatable)")
 	cmd.Flags().StringArray("set", nil, "Override TOOL.KEY=VALUE (repeatable)")
 	cmd.Flags().String("id", "", "Task ID (1–53 letters, digits, underscores or hyphens; starts with a letter or digit)")
-	cmd.Flags().StringSliceVar(&opts.tags, "tag", nil, "Tags (key=value, can specify multiple)")
+	cmd.Flags().StringSliceVar(&opts.tags, "tag", nil, "Set task tag key=value (repeatable)")
 	cmd.Flags().BoolVar(&opts.snapshot, "snapshot", false, "Create and push source snapshot")
 	cmd.Flags().StringVar(&opts.remote, "remote", "", "Git remote name or path for snapshot (required if --snapshot)")
 	cmd.Flags().BoolVarP(&opts.attach, "attach", "a", false, "Watch task output and wait for completion")

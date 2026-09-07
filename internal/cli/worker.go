@@ -9,7 +9,6 @@ import (
 	"github.com/TolgaOk/nextask/internal/config"
 	"github.com/TolgaOk/nextask/internal/worker"
 	"github.com/spf13/cobra"
-	str2duration "github.com/xhit/go-str2duration/v2"
 )
 
 type workerOptions struct {
@@ -17,9 +16,9 @@ type workerOptions struct {
 	once       bool
 	daemon     bool
 	rm         bool
-	exitIfIdle string
+	exitIfIdle durationFlag
 	id         string
-	timeout    string
+	timeout    durationFlag
 	readyFD    int
 	filters    []string
 }
@@ -40,7 +39,7 @@ func newWorkerCommand(cfg *config.Config) *cobra.Command {
 			}
 
 			out := outputFor(cmd)
-			resolved.Stdout, resolved.Stderr = out.out, out.err
+			resolved.Stderr = out.err
 			ctx, stop := interruptContext(cmd.Context())
 			defer stop()
 			if opts.daemon {
@@ -69,13 +68,16 @@ func newWorkerCommand(cfg *config.Config) *cobra.Command {
 			return w.Run(ctx)
 		},
 	}
-	cmd.Flags().StringVar(&opts.workdir, "workdir", "", "Base directory for task execution (default /tmp/nextask)")
-	cmd.Flags().BoolVar(&opts.once, "once", false, "Run single task and exit")
+	cmd.Flags().StringVar(&opts.workdir, "workdir", "", "Override the configured base directory for task execution")
+	cmd.Flags().BoolVar(&opts.once, "once", false, "Run at most one task and exit")
 	cmd.Flags().BoolVar(&opts.rm, "rm", false, "Remove task workdir after completion")
-	cmd.Flags().BoolVar(&opts.daemon, "daemon", false, "Run as background daemon")
-	cmd.Flags().StringVar(&opts.timeout, "timeout", "", "Stop worker after duration (e.g., 1h, 24h, 7d)")
-	cmd.Flags().StringVar(&opts.exitIfIdle, "exit-if-idle", "", "Exit if no tasks claimed within duration (e.g., 0s, 1m, 5m)")
-	cmd.Flags().StringSliceVar(&opts.filters, "filter", nil, "Only claim tasks with tag (key=value, repeatable)")
+	cmd.Flags().BoolVar(&opts.daemon, "daemon", false, "Start in background; wait up to 30s for readiness")
+	opts.timeout.addFlag(cmd, "timeout", 0, "Stop worker after duration; omit to disable")
+	opts.exitIfIdle.addFlag(cmd, "exit-if-idle", 0, "Exit after duration without a claim; omit to disable, 0s exits when idle")
+	cmd.Flags().StringSliceVar(&opts.filters, "tag", nil, "Only claim tasks matching tag key=value (repeatable)")
+	// Both names share one slice value, so mixing aliases preserves all tags.
+	cmd.Flags().Var(cmd.Flags().Lookup("tag").Value, "filter", "Alias for --tag")
+	cmd.Flags().MarkHidden("filter")
 	cmd.Flags().StringVar(&opts.id, "_id", "", "Worker ID (internal use)")
 	cmd.Flags().MarkHidden("_id")
 	cmd.Flags().IntVar(&opts.readyFD, "_ready-fd", -1, "Daemon startup pipe (internal use)")
@@ -100,35 +102,19 @@ func (opts workerOptions) resolve(cfg config.Config) (worker.Config, time.Durati
 	if opts.workdir != "" {
 		resolved.Workdir = opts.workdir
 	}
-	var timeout time.Duration
-	if opts.timeout != "" {
-		var err error
-		timeout, err = str2duration.ParseDuration(opts.timeout)
-		if err != nil {
-			return worker.Config{}, 0, errWithHints(fmt.Sprintf("invalid timeout: %s", opts.timeout),
-				"Examples: "+codeStyle.Render("1h")+", "+codeStyle.Render("24h")+", "+codeStyle.Render("7d"))
-		}
-		if timeout <= 0 {
-			return worker.Config{}, 0, errWithHints("timeout must be positive",
-				"Examples: "+codeStyle.Render("1h")+", "+codeStyle.Render("24h")+", "+codeStyle.Render("7d"))
-		}
+	if opts.timeout.set && opts.timeout.Duration <= 0 {
+		return worker.Config{}, 0, errWithHints("timeout must be positive", "Omit --timeout to disable the worker deadline")
 	}
-	if opts.exitIfIdle != "" {
-		duration, err := str2duration.ParseDuration(opts.exitIfIdle)
-		if err != nil {
-			return worker.Config{}, 0, errWithHints(fmt.Sprintf("invalid exit-if-idle: %s", opts.exitIfIdle),
-				"Examples: "+codeStyle.Render("0s")+", "+codeStyle.Render("1m")+", "+codeStyle.Render("5m"))
+	if opts.exitIfIdle.set {
+		if opts.exitIfIdle.Duration < 0 {
+			return worker.Config{}, 0, errWithHints("exit-if-idle must not be negative", "Use 0s to exit immediately when idle")
 		}
-		if duration < 0 {
-			return worker.Config{}, 0, errWithHints("exit-if-idle must not be negative",
-				"Examples: "+codeStyle.Render("0s")+", "+codeStyle.Render("1m")+", "+codeStyle.Render("5m"))
-		}
-		resolved.ExitIfIdle = &duration
+		resolved.ExitIfIdle = &opts.exitIfIdle.Duration
 	}
 	var err error
 	resolved.TagFilter, err = parseTags(opts.filters)
 	if err != nil {
 		return worker.Config{}, 0, err
 	}
-	return resolved, timeout, nil
+	return resolved, opts.timeout.Duration, nil
 }

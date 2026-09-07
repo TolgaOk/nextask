@@ -48,25 +48,10 @@ func newListCommand(cfg *config.Config) *cobra.Command {
 				return err
 			}
 
-			if len(tasks) == 0 {
-				if opts.json {
-					_, err = fmt.Fprintln(cmd.OutOrStdout(), "[]")
-				} else if opts.csv {
-					_, err = fmt.Fprintln(cmd.OutOrStdout(), "ID,STATUS,COMMAND,TAGS,CREATED")
-				} else {
-					_, err = fmt.Fprintln(cmd.ErrOrStderr(), "No tasks found")
-				}
-				return err
-			}
-
 			plain := opts.json || opts.csv
 			rows := [][]string{}
 			for _, t := range tasks {
-				var tagParts []string
-				for k, v := range t.Tags {
-					tagParts = append(tagParts, fmt.Sprintf("%s=%s", k, v))
-				}
-				tagsStr := strings.Join(tagParts, " ")
+				tagsStr := strings.Join(sortedTags(t.Tags), " ")
 
 				status := string(t.Status)
 				if !plain {
@@ -78,23 +63,24 @@ func newListCommand(cfg *config.Config) *cobra.Command {
 					status,
 					t.Command,
 					tagsStr,
-					t.CreatedAt.Format("2006-01-02 15:04"),
+					t.CreatedAt.Local().Format("2006-01-02 15:04"),
 				})
 			}
 
 			return PrintTable(outputFor(cmd), TableConfig{
-				Headers: []string{"ID", "STATUS", "COMMAND", "TAGS", "CREATED"},
-				Rows:    rows,
-				Count:   total,
-				Offset:  opts.offset,
-				JSON:    opts.json,
-				CSV:     opts.csv,
-				Wrap:    opts.wrap,
+				EmptyMessage: "No tasks found",
+				Headers:      []string{"ID", "STATUS", "COMMAND", "TAGS", "CREATED"},
+				Rows:         rows,
+				Count:        total,
+				Offset:       opts.offset,
+				JSON:         opts.json,
+				CSV:          opts.csv,
+				Wrap:         opts.wrap,
 			})
 		},
 	}
 
-	cmd.Flags().StringSliceVar(&opts.statuses, "status", nil, "Filter by status (comma-separated)")
+	cmd.Flags().StringSliceVar(&opts.statuses, "status", nil, "Filter by status: pending, running, completed, failed, cancelled, stale (comma-separated)")
 	cmd.Flags().StringSliceVar(&opts.tags, "tag", nil, "Filter by tag key=value (repeatable)")
 	cmd.Flags().StringSliceVar(&opts.commands, "command", nil, "Substring match in command (repeatable)")
 	opts.listingOptions.addFlags(cmd, "Tasks created within the past duration")

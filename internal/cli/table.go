@@ -16,13 +16,14 @@ const minTermWidth = 80
 
 // TableConfig holds configuration for rendering a table.
 type TableConfig struct {
-	Headers []string
-	Rows    [][]string
-	Count   int  // total matching rows (for summary line)
-	Offset  int  // current offset (for summary line)
-	JSON    bool // output as JSON array
-	CSV     bool // output as CSV
-	Wrap    bool // wrap long lines instead of truncating
+	EmptyMessage string // human output only; JSON and CSV keep their schemas
+	Headers      []string
+	Rows         [][]string
+	Count        int  // total matching rows (for summary line)
+	Offset       int  // current offset (for summary line)
+	JSON         bool // output as JSON array
+	CSV          bool // output as CSV
+	Wrap         bool // wrap long lines instead of truncating
 }
 
 // PrintTable renders a table according to the config.
@@ -35,6 +36,10 @@ func PrintTable(out commandOutput, tc TableConfig) error {
 	}
 	if tc.CSV {
 		return printCSV(out.out, tc.Headers, tc.Rows)
+	}
+	if len(tc.Rows) == 0 && tc.EmptyMessage != "" {
+		_, err := fmt.Fprintln(out.err, tc.EmptyMessage)
+		return err
 	}
 	return printStyledTable(out, tc)
 }

@@ -15,7 +15,7 @@ import (
 )
 
 type cancelOptions struct {
-	timeout time.Duration
+	timeout durationFlag
 }
 
 func newCancelCommand(cfg *config.Config) *cobra.Command {
@@ -25,7 +25,7 @@ func newCancelCommand(cfg *config.Config) *cobra.Command {
 		Short: "Cancel a pending or running task",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if opts.timeout <= 0 {
+			if opts.timeout.Duration <= 0 {
 				return errWithHints("timeout must be positive",
 					"Example: "+codeStyle.Render("--timeout 10s"),
 				)
@@ -61,7 +61,7 @@ func newCancelCommand(cfg *config.Config) *cobra.Command {
 				return err
 
 			case db.StatusRunning:
-				timeout := opts.timeout
+				timeout := opts.timeout.Duration
 				if !cmd.Flags().Changed("timeout") {
 					task, err := db.GetTask(ctx, pool, taskID, cfg.Worker.StaleDuration())
 					if err != nil {
@@ -82,7 +82,7 @@ func newCancelCommand(cfg *config.Config) *cobra.Command {
 		},
 	}
 
-	cmd.Flags().DurationVar(&opts.timeout, "timeout", 10*time.Second, "Timeout waiting for cancel confirmation (default adds task cleanup time)")
+	opts.timeout.addFlag(cmd, "timeout", 10*time.Second, "Wait for cancel confirmation; adds cleanup time when omitted")
 	return cmd
 }
 

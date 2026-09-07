@@ -80,7 +80,7 @@ func TestWorkerStatusHeartbeatRecovery(t *testing.T) {
 	check := func(want WorkerStatus) {
 		t.Helper()
 		for _, status := range []WorkerStatus{WorkerStatusRunning, WorkerStatusStale, WorkerStatusStopped} {
-			filter := WorkerListFilter{Status: &status, StaleThreshold: time.Minute, Limit: 5}
+			filter := WorkerListFilter{Statuses: []WorkerStatus{status}, StaleThreshold: time.Minute, Limit: 5}
 			rows, err := ListWorkers(ctx, pool, filter)
 			if err != nil {
 				t.Fatal(err)

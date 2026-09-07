@@ -35,6 +35,9 @@ func TestRenderWriteFailures(t *testing.T) {
 		"show": func() error { return printTask(brokenOutput{}, &db.Task{ID: "example"}) },
 		"log":  func() error { return printLog(brokenOutput{}, db.TaskLog{Data: "example"}) },
 		"wait": func() error { return printWaitLine(brokenOutput{}, "example", db.StatusCompleted, 0) },
+		"empty": func() error {
+			return PrintTable(commandOutput{io.Discard, brokenOutput{}}, TableConfig{EmptyMessage: "No results"})
+		},
 		"pagination": func() error {
 			return PrintTable(commandOutput{io.Discard, brokenOutput{}}, TableConfig{Headers: []string{"ID"}, Rows: [][]string{{"example"}}, Count: 2})
 		},

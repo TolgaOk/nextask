@@ -15,9 +15,9 @@ func TestWorkerValidationBeforeStartup(t *testing.T) {
 		for _, tc := range []struct {
 			flag, value, message string
 		}{
-			{"--timeout", "bad", "invalid timeout"},
+			{"--timeout", "bad", "for \"--timeout\" flag"},
 			{"--timeout", "0s", "timeout must be positive"},
-			{"--exit-if-idle", "bad", "invalid exit-if-idle"},
+			{"--exit-if-idle", "bad", "for \"--exit-if-idle\" flag"},
 			{"--exit-if-idle", "-1s", "exit-if-idle must not be negative"},
 			{"--filter", "bad", "invalid tag format"},
 		} {

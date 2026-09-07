@@ -87,11 +87,7 @@ func formatTask(out io.Writer, task *db.Task) {
 	printField(out, showLabelStyle, "Command", task.Command)
 
 	if len(task.Tags) > 0 {
-		var tagParts []string
-		for k, v := range task.Tags {
-			tagParts = append(tagParts, fmt.Sprintf("%s=%s", k, v))
-		}
-		printField(out, showLabelStyle, "Tags", strings.Join(tagParts, ", "))
+		printField(out, showLabelStyle, "Tags", strings.Join(sortedTags(task.Tags), ", "))
 	}
 
 	printField(out, showLabelStyle, "Created", formatTime(task.CreatedAt))

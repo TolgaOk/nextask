@@ -84,6 +84,8 @@ func TestWorkerListStatusCLI(t *testing.T) {
 		want []string
 	}{
 		{"all", nil, allIDs},
+		{"multiple", []string{"--status", "running,stopped"}, allIDs[7:]},
+		{"repeated", []string{"--status", "stale", "--status", "running"}, allIDs[:13]},
 		{"running-limit", []string{"--status", "running", "--limit", "5"}, allIDs[7:12]},
 		{"running-offset", []string{"--status", "running", "--limit", "5", "--offset", "5"}, allIDs[12:13]},
 		{"stale-limit", []string{"--status", "stale", "--limit", "5"}, allIDs[:5]},
@@ -98,6 +100,12 @@ func TestWorkerListStatusCLI(t *testing.T) {
 		out, err := run("--status", "running", "--limit", "5")
 		if err != nil || !strings.Contains(out, "5/6 (") || strings.Contains(out, "stale") {
 			t.Fatalf("wrong filtered table/count: %v\n%s", err, out)
+		}
+	})
+	t.Run("multiple-count", func(t *testing.T) {
+		out, err := run("--status", "running,stopped", "--limit", "5")
+		if err != nil || !strings.Contains(out, "5/8 (") || strings.Contains(out, "stale") {
+			t.Fatalf("wrong combined count: %v\n%s", err, out)
 		}
 	})
 	t.Run("csv", func(t *testing.T) {

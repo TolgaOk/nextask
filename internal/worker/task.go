@@ -11,7 +11,7 @@ import (
 )
 
 func (w *Worker) processTask(ctx context.Context, notifier *db.Notifier, events <-chan *pgconn.Notification, task *db.Task) error {
-	fmt.Fprintf(w.stdout, "Processing %s: %s\n", task.ID, task.Command)
+	fmt.Fprintf(w.stderr, "Processing %s: %s\n", task.ID, task.Command)
 
 	taskCtx, taskCancel := context.WithCancel(ctx)
 	defer taskCancel()

@@ -1304,7 +1304,7 @@ func TestListWorkers_FilterByStatus(t *testing.T) {
 
 	// List running workers only
 	running := WorkerStatusRunning
-	workers, err := ListWorkers(ctx, pool, WorkerListFilter{Status: &running})
+	workers, err := ListWorkers(ctx, pool, WorkerListFilter{Statuses: []WorkerStatus{running}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1317,7 +1317,7 @@ func TestListWorkers_FilterByStatus(t *testing.T) {
 
 	// List stopped workers only
 	stopped := WorkerStatusStopped
-	workers, err = ListWorkers(ctx, pool, WorkerListFilter{Status: &stopped})
+	workers, err = ListWorkers(ctx, pool, WorkerListFilter{Statuses: []WorkerStatus{stopped}})
 	if err != nil {
 		t.Fatal(err)
 	}

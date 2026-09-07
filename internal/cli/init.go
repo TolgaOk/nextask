@@ -21,6 +21,7 @@ func newInitDBCommand(cfg *config.Config) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "db",
 		Short: "Create database tables",
+		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if cfg.DB.URL == "" {
 				return errDBRequired()

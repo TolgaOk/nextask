@@ -16,9 +16,9 @@ type workerControl struct {
 	done   chan struct{}
 }
 
-func watchWorker(ctx context.Context, stop context.CancelFunc, notifications <-chan *pgconn.Notification, stopChannel string, stdout io.Writer) *workerControl {
-	if stdout == nil {
-		stdout = os.Stdout
+func watchWorker(ctx context.Context, stop context.CancelFunc, notifications <-chan *pgconn.Notification, stopChannel string, stderr io.Writer) *workerControl {
+	if stderr == nil {
+		stderr = os.Stderr
 	}
 	control := &workerControl{events: make(chan *pgconn.Notification, 16), done: make(chan struct{})}
 	go func() {
@@ -34,7 +34,7 @@ func watchWorker(ctx context.Context, stop context.CancelFunc, notifications <-c
 					return
 				}
 				if notification.Channel == stopChannel {
-					fmt.Fprintln(stdout, "Received stop signal, shutting down...")
+					fmt.Fprintln(stderr, "Received stop signal, shutting down...")
 					stop()
 					return
 				}

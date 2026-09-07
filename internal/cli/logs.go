@@ -109,8 +109,8 @@ func newLogsCommand(cfg *config.Config) *cobra.Command {
 	}
 
 	cmd.Flags().StringVarP(&opts.stream, "stream", "s", "", "Filter by stream (stdout, stderr, nextask)")
-	cmd.Flags().IntVar(&opts.head, "head", 0, "Show first N lines")
-	cmd.Flags().IntVar(&opts.tail, "tail", 0, "Show last N lines")
+	cmd.Flags().IntVar(&opts.head, "head", 0, "Show first N lines (0 means no limit)")
+	cmd.Flags().IntVar(&opts.tail, "tail", 0, "Show last N lines (0 means no limit)")
 	cmd.Flags().BoolVarP(&opts.attach, "attach", "a", false, "Stream logs until task completes")
 	return cmd
 }

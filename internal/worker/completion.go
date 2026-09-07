@@ -89,7 +89,7 @@ func (w *Worker) notifyCompletion(c db.TaskCompletion) {
 	if err := db.Notify(ctx, w.Pool, db.FromTaskChannel(c.TaskID), event); err != nil {
 		fmt.Fprintf(w.stderr, "failed to notify status: %v\n", err)
 	}
-	fmt.Fprintf(w.stdout, "Task %s %s (exit %d)\n", c.TaskID, c.Status, c.ExitCode)
+	fmt.Fprintf(w.stderr, "Task %s %s (exit %d)\n", c.TaskID, c.Status, c.ExitCode)
 }
 
 func (w *Worker) acknowledgeCompletion(c db.TaskCompletion) error {
@@ -120,7 +120,7 @@ func (w *Worker) recoverCompletions(ctx context.Context) error {
 			return err
 		}
 		if confirmed {
-			fmt.Fprintf(w.stdout, "Recovered result for task %s\n", completion.TaskID)
+			fmt.Fprintf(w.stderr, "Recovered result for task %s\n", completion.TaskID)
 			w.notifyCompletion(completion)
 		}
 		// Recovery updates results only. Old task directories may have been reused.

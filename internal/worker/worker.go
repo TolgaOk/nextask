@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"runtime"
+	"slices"
 	"strings"
 	"time"
 
@@ -32,7 +33,6 @@ type Worker struct {
 	backoffInitial    time.Duration
 	backoffMax        time.Duration
 	journal           completionJournal
-	stdout            io.Writer
 	stderr            io.Writer
 	ready             func() error
 }
@@ -42,9 +42,8 @@ type Config struct {
 	// Ready runs after startup and recovery, before claiming tasks. An error
 	// aborts startup and releases the registration and background goroutines.
 	Ready func() error
-	// Stdout and Stderr receive worker diagnostics; nil uses the process streams.
+	// Stderr receives worker diagnostics; nil uses process stderr.
 	// Writers must support concurrent writes.
-	Stdout            io.Writer
 	Stderr            io.Writer
 	DBURL             string
 	Workdir           string
@@ -63,9 +62,6 @@ type Config struct {
 
 // New creates a worker with the given configuration.
 func New(ctx context.Context, cfg Config) (*Worker, error) {
-	if cfg.Stdout == nil {
-		cfg.Stdout = os.Stdout
-	}
 	if cfg.Stderr == nil {
 		cfg.Stderr = os.Stderr
 	}
@@ -98,7 +94,7 @@ func New(ctx context.Context, cfg Config) (*Worker, error) {
 
 	return &Worker{
 		ID:     workerID,
-		stdout: cfg.Stdout, stderr: cfg.Stderr, ready: cfg.Ready,
+		stderr: cfg.Stderr, ready: cfg.Ready,
 		Info: workerInfo,
 		Pool: pool,
 		Executor: &Executor{
@@ -168,7 +164,7 @@ func (w *Worker) Run(parentCtx context.Context) (runErr error) {
 		}
 	}()
 
-	control := watchWorker(ctx, cancel, notifier.C, toWorkerCh, w.stdout)
+	control := watchWorker(ctx, cancel, notifier.C, toWorkerCh, w.stderr)
 	defer func() {
 		cancel()
 		<-control.done
@@ -195,7 +191,7 @@ func (w *Worker) Run(parentCtx context.Context) (runErr error) {
 			return fmt.Errorf("confirm worker startup: %w", err)
 		}
 	}
-	fmt.Fprintf(w.stdout, "Worker %s started\n", w.ID)
+	fmt.Fprintf(w.stderr, "Worker %s started\n", w.ID)
 
 	var idleTimer *time.Timer
 	var idleCh <-chan time.Time
@@ -237,9 +233,10 @@ func (w *Worker) Run(parentCtx context.Context) (runErr error) {
 				for k, v := range w.tagFilter {
 					filters = append(filters, k+"="+v)
 				}
-				fmt.Fprintf(w.stdout, "No pending tasks matching filter: %s\n", strings.Join(filters, ", "))
+				slices.Sort(filters)
+				fmt.Fprintf(w.stderr, "No pending tasks matching filter: %s\n", strings.Join(filters, ", "))
 			} else {
-				fmt.Fprintln(w.stdout, "No pending tasks")
+				fmt.Fprintln(w.stderr, "No pending tasks")
 			}
 			return nil
 		}
@@ -251,7 +248,7 @@ func (w *Worker) Run(parentCtx context.Context) (runErr error) {
 			}
 			// wake event — loop to claim
 		case <-idleCh:
-			fmt.Fprintln(w.stdout, "No tasks received, exiting (idle timeout)")
+			fmt.Fprintln(w.stderr, "No tasks received, exiting (idle timeout)")
 			return nil
 		case <-ctx.Done():
 			return nil

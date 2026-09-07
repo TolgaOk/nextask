@@ -181,7 +181,7 @@ func TestWorker_StopEndToEnd(t *testing.T) {
 
 	// 2. Verify worker is visible via ListWorkers (like CLI worker list)
 	status := db.WorkerStatusRunning
-	workers, _ := db.ListWorkers(ctx, pool, db.WorkerListFilter{Status: &status})
+	workers, _ := db.ListWorkers(ctx, pool, db.WorkerListFilter{Statuses: []db.WorkerStatus{status}})
 	var found bool
 	for _, wr := range workers {
 		if wr.ID == "e2e-stop-worker" {
@@ -234,7 +234,7 @@ func TestWorker_StopEndToEnd(t *testing.T) {
 	// 7. Verify worker is now stopped in DB
 	time.Sleep(100 * time.Millisecond)
 	stoppedStatus := db.WorkerStatusStopped
-	workers, _ = db.ListWorkers(ctx, pool, db.WorkerListFilter{Status: &stoppedStatus})
+	workers, _ = db.ListWorkers(ctx, pool, db.WorkerListFilter{Statuses: []db.WorkerStatus{stoppedStatus}})
 	found = false
 	var workerPID int
 	for _, wr := range workers {

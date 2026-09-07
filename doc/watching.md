@@ -24,4 +24,5 @@ five-second deadline.
 Ctrl+C detaches from `wait` and `log --attach`. For `enqueue --attach`, it requests
 task cancellation and waits for a running task's final result. A second interrupt
 exits. Viewing logs does not propagate the task's exit code; attached enqueue does.
-Interrupting `cancel` leaves the cancellation request in place.
+Interrupting `cancel` or `worker stop` after sending the request detaches from
+confirmation with exit code zero. The request remains in effect.
