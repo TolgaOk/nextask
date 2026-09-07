@@ -4,6 +4,11 @@ Nextask runs commands. Built-in integrations prepare tasks and compose runtime w
 
 ## Nextask
 
+- [ ] Confirm daemon readiness; bound startup failures and preserve literal filters.
+- [ ] Validate CLI options before DB access; reject conflicting output modes.
+- [ ] Move shared test setup into helpers; check reset errors and own cleanup.
+- [ ] Audit CLI consistency: arguments, flags, help, output, errors, and exit behavior.
+
 - [x] Unify worker validation and daemon options; preserve `--rm` and `--exit-if-idle`.
 - [x] Use typed DB errors; preserve causes and classify network failures correctly.
 - [x] Route CLI output through command writers; report rendering failures.
