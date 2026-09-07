@@ -142,19 +142,19 @@ func TestSharedGlobalPath(t *testing.T) {
 func TestCredentialRedaction(t *testing.T) {
 	for _, tc := range []struct {
 		input   string
-		db      bool
+		redact  func(string) string
 		visible string
 	}{
-		{"postgres://alice:password-secret@localhost/db?password=query-secret&sslmode=require", true, "localhost/db"},
-		{"postgres://alice:p%40ss-secret@localhost/db", true, "localhost/db"},
-		{"host=localhost password='quoted secret' user=alice", true, "[redacted connection string]"},
-		{"postgres://alice:password-secret@localhost/db?bad=%ZZ&token=query-secret", true, "localhost/db"},
-		{"postgres://alice:password-secret@host%ZZ/db", true, "[redacted URL]"},
-		{"https://token-secret@host/repo?access_token=query-secret#fragment-secret", false, "host/repo"},
-		{"git@host:repo.git", false, "git@host:repo.git"},
-		{"/tmp/source.git", false, "/tmp/source.git"},
+		{"postgres://alice:password-secret@localhost/db?password=query-secret&sslmode=require", redactDatabaseURL, "localhost/db"},
+		{"postgres://alice:p%40ss-secret@localhost/db", redactDatabaseURL, "localhost/db"},
+		{"host=localhost password='quoted secret' user=alice", redactDatabaseURL, "[redacted connection string]"},
+		{"postgres://alice:password-secret@localhost/db?bad=%ZZ&token=query-secret", redactDatabaseURL, "localhost/db"},
+		{"postgres://alice:password-secret@host%ZZ/db", redactDatabaseURL, "[redacted URL]"},
+		{"https://token-secret@host/repo?access_token=query-secret#fragment-secret", redactURL, "host/repo"},
+		{"git@host:repo.git", redactURL, "git@host:repo.git"},
+		{"/tmp/source.git", redactURL, "/tmp/source.git"},
 	} {
-		output := redactURL(tc.input, tc.db)
+		output := tc.redact(tc.input)
 		for _, secret := range []string{"alice", "password-secret", "p%40ss-secret", "query-secret", "quoted secret", "token-secret", "fragment-secret"} {
 			if strings.Contains(output, secret) {
 				t.Errorf("credential %q leaked in %q", secret, output)

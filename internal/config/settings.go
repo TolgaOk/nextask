@@ -20,8 +20,8 @@ type Setting struct {
 // Settings returns effective settings in a stable order, redacting credentials.
 func (c *Config) Settings() []Setting {
 	settings := []Setting{
-		{Key: "db.url", Value: redactURL(c.DB.URL, true)},
-		{Key: "source.remote", Value: redactURL(c.Source.Remote, false)},
+		{Key: "db.url", Value: redactDatabaseURL(c.DB.URL)},
+		{Key: "source.remote", Value: redactURL(c.Source.Remote)},
 		{Key: "worker.workdir", Value: c.Worker.Workdir},
 		{Key: "worker.heartbeat_interval", Value: c.Worker.HeartbeatInterval.String()},
 		{Key: "worker.stale_threshold", Value: c.Worker.StaleThreshold},
@@ -45,7 +45,7 @@ func (c *Config) Settings() []Setting {
 		for _, key := range keys {
 			value := c.Integrations[name][key]
 			if text, ok := value.(string); ok {
-				value = redactURL(text, false)
+				value = redactURL(text)
 			}
 			lower := strings.ToLower(key)
 			if strings.Contains(lower, "password") || strings.Contains(lower, "token") || strings.Contains(lower, "secret") {
@@ -116,16 +116,16 @@ func (c *Config) validate() error {
 	return nil
 }
 
-func redactURL(raw string, database bool) string {
-	if raw == "" {
-		return ""
+func redactDatabaseURL(raw string) string {
+	// pgx also accepts keyword connection strings. Hide those in their entirety.
+	if raw != "" && !strings.Contains(raw, "://") {
+		return "[redacted connection string]"
 	}
+	return redactURL(raw)
+}
+
+func redactURL(raw string) string {
 	if !strings.Contains(raw, "://") {
-		// Keyword PostgreSQL DSNs can contain quoted/escaped secrets. Hide the whole
-		// string rather than attempting to recognize every credential parameter.
-		if database {
-			return "[redacted connection string]"
-		}
 		return raw
 	}
 	parsed, err := url.Parse(raw)
