@@ -2,12 +2,15 @@ package db
 
 import (
 	"context"
+	_ "embed"
 	"fmt"
 	"time"
 
-	"github.com/TolgaOk/nextask/internal/db/migrations"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+//go:embed queries/complete_claim.sql
+var completeClaimSQL string
 
 // TaskCompletion records a terminal outcome for one particular task claim.
 // The claim timestamps come from the database; FinishedAt is fixed before retrying.
@@ -50,12 +53,8 @@ func CompleteClaim(ctx context.Context, pool *pgxpool.Pool, c TaskCompletion) (b
 	if err := c.Validate(); err != nil {
 		return false, err
 	}
-	sql, err := migrations.FS.ReadFile("complete_claim.sql")
-	if err != nil {
-		return false, err
-	}
 	var confirmed bool
-	err = pool.QueryRow(ctx, string(sql), c.TaskID, c.WorkerID, c.CreatedAt, c.StartedAt,
+	err := pool.QueryRow(ctx, completeClaimSQL, c.TaskID, c.WorkerID, c.CreatedAt, c.StartedAt,
 		c.Status, c.ExitCode, c.FinishedAt).Scan(&confirmed)
 	return confirmed, err
 }

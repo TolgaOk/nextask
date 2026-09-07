@@ -8,7 +8,7 @@ Nextask runs commands. Built-in integrations prepare tasks and compose runtime w
 - [x] Use typed DB errors; preserve causes and classify network failures correctly.
 - [x] Route CLI output through command writers; report rendering failures.
 - [x] Move enqueue SQL into a named DB operation; preserve transaction ordering.
-- [ ] Split worker commands and DB queries by responsibility; separate queries from migrations.
+- [x] Split worker commands and DB queries by responsibility; separate queries from migrations.
 
 - [x] Share Listener/Notifier recovery; test reconnects, channel quoting, and shutdown.
 - [x] Serialize tag filters as JSON; preserve literal keys and values in list/count/claim.
