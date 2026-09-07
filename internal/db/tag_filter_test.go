@@ -9,7 +9,6 @@ import (
 
 func TestTagFiltersPreserveJSONValues(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	ctx := context.Background()
 	cases := []map[string]string{
 		{`quoted"key`: `a"b`},

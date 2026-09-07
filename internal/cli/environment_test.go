@@ -77,7 +77,6 @@ func TestCredentialErrorsCLI(t *testing.T) {
 
 func TestDaemonDatabaseEnvironment(t *testing.T) {
 	pool := setupTestDB(t)
-	t.Cleanup(pool.Close)
 	binary := buildTestCLI(t)
 	dir, workdir := t.TempDir(), t.TempDir()
 	connection := getTestDBURL(t)

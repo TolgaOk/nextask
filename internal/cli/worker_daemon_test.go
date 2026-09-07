@@ -19,7 +19,6 @@ func TestDaemonStartupFailure(t *testing.T) {
 	for _, failure := range []string{"connection", "journal"} {
 		t.Run(failure, func(t *testing.T) {
 			pool := setupTestDB(t)
-			defer pool.Close()
 			workdir := t.TempDir()
 			connection := getTestDBURL(t)
 			if failure == "connection" {

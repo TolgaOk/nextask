@@ -11,7 +11,6 @@ import (
 
 func TestWorkerStopsOnPermanentCompletionFailure(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	_, err := pool.Exec(ctx, `CREATE FUNCTION test_completion_denied() RETURNS trigger LANGUAGE plpgsql AS $$
@@ -70,7 +69,6 @@ func TestWorkerStopsOnPermanentCompletionFailure(t *testing.T) {
 
 func TestWorkerStopDuringCompletion(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	_, err := pool.Exec(ctx, `CREATE FUNCTION test_hold_completion() RETURNS trigger LANGUAGE plpgsql AS $$
@@ -158,7 +156,6 @@ func TestWorkerStopDuringCompletion(t *testing.T) {
 
 func TestCompletionShutdownDeadline(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	ctx := context.Background()
 	_, err := pool.Exec(ctx, `CREATE FUNCTION test_completion_unavailable() RETURNS trigger LANGUAGE plpgsql AS $$
 		BEGIN

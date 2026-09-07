@@ -10,7 +10,6 @@ import (
 
 func TestWorkerWaitsForCompletionRecovery(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 55*time.Second)
 	defer cancel()
 	_, err := pool.Exec(ctx, `CREATE TABLE completion_gate (blocked boolean);

@@ -9,7 +9,6 @@ import (
 
 func TestCompleteClaim(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	ctx := context.Background()
 	task := &Task{ID: "journal-result", Command: "exit 17", Status: StatusPending, SourceType: "noop"}
 	if err := CreateTask(ctx, pool, task); err != nil {

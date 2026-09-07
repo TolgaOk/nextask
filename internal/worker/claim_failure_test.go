@@ -17,7 +17,6 @@ func TestWorkerClaimFailures(t *testing.T) {
 	for _, mode := range []string{"permanent", "transient", "stop-backoff"} {
 		t.Run(mode, func(t *testing.T) {
 			pool := setupTestDB(t)
-			defer pool.Close()
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			code, attempts := "08006", 1000
@@ -120,7 +119,6 @@ func TestWorkerClaimFailures(t *testing.T) {
 
 func TestWorkerStopDuringBlockedClaim(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	_, err := pool.Exec(ctx, `CREATE FUNCTION test_block_claim() RETURNS trigger LANGUAGE plpgsql AS $$

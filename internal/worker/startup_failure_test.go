@@ -16,7 +16,6 @@ func TestWorkerStartupCleanup(t *testing.T) {
 	for _, mode := range []string{"notifier-failure", "cleanup-denied", "cleanup-timeout"} {
 		t.Run(mode, func(t *testing.T) {
 			pool := setupTestDB(t)
-			defer pool.Close()
 			ctx := context.Background()
 			if mode != "notifier-failure" {
 				body := "RAISE EXCEPTION 'cleanup denied' USING ERRCODE = '42501';"
@@ -110,7 +109,6 @@ func TestWorkerStartupCleanup(t *testing.T) {
 
 func TestWorkerStartupCancellationCleansRegistration(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	// Accept the listener's TCP connection but withhold the PostgreSQL handshake.

@@ -16,7 +16,6 @@ import (
 
 func TestEnqueueGitIntegration(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	root := filepath.Join(t.TempDir(), "project")
 	if err := os.MkdirAll(root, 0755); err != nil {
 		t.Fatal(err)

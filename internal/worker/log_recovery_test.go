@@ -16,7 +16,6 @@ import (
 
 func TestExecutorLogsCancellationCleanup(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	ctx := context.Background()
 	task := &db.Task{ID: "cleanup-logs", Command: `trap 'echo cleanup-out; echo cleanup-err >&2; exit 0' INT; echo ready > ready; while :; do sleep 1; done`, Status: db.StatusPending, SourceType: "noop"}
 	if err := db.CreateTask(ctx, pool, task); err != nil {
@@ -72,7 +71,6 @@ func TestExecutorLogsCancellationCleanup(t *testing.T) {
 
 func TestExecutorLogsInvalidUTF8(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	ctx := context.Background()
 	task := &db.Task{ID: "binary-logs", Command: `printf 'bad\377\000\n'; printf 'valid-after-binary\n'`, Status: db.StatusPending, SourceType: "noop"}
 	if err := db.CreateTask(ctx, pool, task); err != nil {
@@ -104,7 +102,6 @@ func TestExecutorLogsInvalidUTF8(t *testing.T) {
 
 func TestLoggerCloseRecoversDatabaseConnection(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	ctx := context.Background()
 	task := &db.Task{ID: "outage-logs", Command: "echo final", Status: db.StatusPending, SourceType: "noop"}
 	if err := db.CreateTask(ctx, pool, task); err != nil {

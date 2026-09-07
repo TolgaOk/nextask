@@ -13,7 +13,6 @@ import (
 // when it's idle (not processing a task).
 func TestWorker_StopWhileIdle(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	ctx := context.Background()
 
 	w, err := New(ctx, Config{
@@ -84,7 +83,6 @@ func TestWorker_StopWhileIdle(t *testing.T) {
 // execution cancels the running task first, then exits gracefully.
 func TestWorker_StopDuringTaskExecution(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	ctx := context.Background()
 
 	// Create a long-running task
@@ -160,7 +158,6 @@ func TestWorker_StopDuringTaskExecution(t *testing.T) {
 // TestWorker_StopEndToEnd tests the full stop flow as it would be used by CLI.
 func TestWorker_StopEndToEnd(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	ctx := context.Background()
 
 	// 1. Start a worker

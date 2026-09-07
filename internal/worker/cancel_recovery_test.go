@@ -12,7 +12,6 @@ import (
 
 func TestWorkerRecoversMissedCancellation(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	task := &db.Task{ID: "missed-cancel", Command: "echo ready; sleep 60", Status: db.StatusPending, SourceType: "noop"}
@@ -49,7 +48,6 @@ func TestWorkerRecoversMissedCancellation(t *testing.T) {
 
 func TestWorkerChecksCancellationBeforeExecution(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	task := &db.Task{ID: "cancel-before-exec", Command: "touch payload-started", Status: db.StatusPending, SourceType: "noop"}

@@ -9,7 +9,6 @@ import (
 
 func TestWorkerStatusBoundary(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	ctx := context.Background()
 	tx, err := pool.Begin(ctx)
 	if err != nil {
@@ -71,7 +70,6 @@ func TestWorkerStatusBoundary(t *testing.T) {
 
 func TestWorkerStatusHeartbeatRecovery(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	ctx := context.Background()
 	if err := RegisterWorker(ctx, pool, "revived", 1, "host", "/tmp"); err != nil {
 		t.Fatal(err)

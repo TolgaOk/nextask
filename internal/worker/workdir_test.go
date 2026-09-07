@@ -14,7 +14,6 @@ import (
 
 func TestExecutorPreservesExistingWorkdir(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	ctx := context.Background()
 	for _, directory := range []bool{true, false} {
 		for _, remove := range []bool{false, true} {
@@ -58,7 +57,6 @@ func TestExecutorPreservesExistingWorkdir(t *testing.T) {
 
 func TestExecutorRemovesOwnedWorkdir(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	ctx := context.Background()
 	task := &db.Task{ID: "owned-dir", Command: "echo result > output; echo done", Status: db.StatusPending, SourceType: "noop"}
 	if err := db.CreateTask(ctx, pool, task); err != nil {

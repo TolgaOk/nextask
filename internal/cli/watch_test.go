@@ -16,7 +16,6 @@ import (
 
 func TestWatchingCLI(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	binary := buildTestCLI(t)
 	ctx := context.Background()
 	for _, mode := range []string{"wait", "log", "enqueue-pending", "enqueue-running"} {
@@ -172,7 +171,6 @@ func TestWatchingCLI(t *testing.T) {
 
 func TestStateWatcherLifecycle(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	cfg := testConfig(t)
 	cfg.Retry.InitialInterval = 10 * time.Millisecond
 	cfg.Retry.MaxInterval = 20 * time.Millisecond

@@ -4,41 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
-
-func getTestDBURL(t *testing.T) string {
-	url := os.Getenv("TEST_DB_URL")
-	if url == "" {
-		t.Skip("TEST_DB_URL not set, skipping database tests")
-	}
-	return url
-}
-
-func setupTestDB(t *testing.T) *pgxpool.Pool {
-	ctx := context.Background()
-	pool, err := Connect(ctx, getTestDBURL(t))
-	if err != nil {
-		t.Fatalf("failed to connect: %v", err)
-	}
-
-	// Drop tables to ensure fresh schema
-	pool.Exec(ctx, "DROP TABLE IF EXISTS task_logs")
-	pool.Exec(ctx, "DROP TABLE IF EXISTS tasks")
-	pool.Exec(ctx, "DROP TABLE IF EXISTS workers")
-
-	if err := Migrate(ctx, pool); err != nil {
-		pool.Close()
-		t.Fatalf("failed to migrate: %v", err)
-	}
-
-	return pool
-}
 
 func TestConnect(t *testing.T) {
 	ctx := context.Background()
@@ -60,7 +30,6 @@ func TestConnect(t *testing.T) {
 
 func TestCreateTask(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	ctx := context.Background()
 
 	task := &Task{
@@ -96,7 +65,6 @@ func TestCreateTask(t *testing.T) {
 
 func TestCreateTask_WithSourceConfig(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	ctx := context.Background()
 
 	task := &Task{
@@ -136,7 +104,6 @@ func TestCreateTask_WithSourceConfig(t *testing.T) {
 
 func TestListTasks(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	ctx := context.Background()
 
 	// Create test tasks
@@ -163,7 +130,6 @@ func TestListTasks(t *testing.T) {
 
 func TestListTasks_FilterByStatus(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	ctx := context.Background()
 
 	tasks := []*Task{
@@ -188,7 +154,6 @@ func TestListTasks_FilterByStatus(t *testing.T) {
 
 func TestListTasks_FilterByTags(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	ctx := context.Background()
 
 	tasks := []*Task{
@@ -213,7 +178,6 @@ func TestListTasks_FilterByTags(t *testing.T) {
 
 func TestListTasks_Limit(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	ctx := context.Background()
 
 	tasks := []*Task{
@@ -238,7 +202,6 @@ func TestListTasks_Limit(t *testing.T) {
 
 func TestListTasks_FilterByCommand(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	ctx := context.Background()
 
 	tasks := []*Task{
@@ -263,7 +226,6 @@ func TestListTasks_FilterByCommand(t *testing.T) {
 
 func TestListTasks_FilterBySince(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	ctx := context.Background()
 
 	// Create a task
@@ -300,7 +262,6 @@ func TestListTasks_FilterBySince(t *testing.T) {
 
 func TestClaimTask_Basic(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	ctx := context.Background()
 
 	task := &Task{ID: "claim001", Command: "echo hello", Status: StatusPending, Tags: map[string]string{"env": "test"}}
@@ -329,7 +290,6 @@ func TestClaimTask_Basic(t *testing.T) {
 
 func TestClaimTask_WithSourceConfig(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	ctx := context.Background()
 
 	task := &Task{
@@ -365,7 +325,6 @@ func TestClaimTask_WithSourceConfig(t *testing.T) {
 
 func TestClaimTask_NoTasks(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	ctx := context.Background()
 
 	claimed, err := ClaimTask(ctx, pool, "worker-1", &WorkerInfo{Hostname: "test"}, nil)
@@ -379,7 +338,6 @@ func TestClaimTask_NoTasks(t *testing.T) {
 
 func TestClaimTask_SkipsNonPending(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	ctx := context.Background()
 
 	for _, s := range []TaskStatus{StatusRunning, StatusCompleted, StatusFailed} {
@@ -400,7 +358,6 @@ func TestClaimTask_SkipsNonPending(t *testing.T) {
 
 func TestClaimTask_FIFO(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	ctx := context.Background()
 
 	if err := CreateTask(ctx, pool, &Task{ID: "fifo01", Command: "first", Status: StatusPending, Tags: map[string]string{}}); err != nil {
@@ -425,7 +382,6 @@ func TestClaimTask_FIFO(t *testing.T) {
 
 func TestClaimTask_Concurrent(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	ctx := context.Background()
 
 	// Create single task
@@ -476,7 +432,6 @@ func TestClaimTask_Concurrent(t *testing.T) {
 
 func TestClaimTask_TagFilter(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	ctx := context.Background()
 
 	// Create tasks with different tags
@@ -531,7 +486,6 @@ func TestClaimTask_TagFilter(t *testing.T) {
 
 func TestCompleteTask(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	ctx := context.Background()
 
 	if err := CreateTask(ctx, pool, &Task{ID: "comp01", Command: "test", Status: StatusPending, Tags: map[string]string{}}); err != nil {
@@ -552,7 +506,6 @@ func TestCompleteTask(t *testing.T) {
 
 func TestInsertLog(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	ctx := context.Background()
 
 	if err := CreateTask(ctx, pool, &Task{ID: "log001", Command: "test", Status: StatusRunning, Tags: map[string]string{}}); err != nil {
@@ -575,7 +528,6 @@ func TestInsertLog(t *testing.T) {
 
 func TestNotifyNewTask(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	ctx := context.Background()
 
 	// Separate connection for LISTEN
@@ -610,7 +562,6 @@ func TestNotifyNewTask(t *testing.T) {
 
 func TestNotifyMultipleListeners(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	ctx := context.Background()
 
 	// Create two listener connections
@@ -655,7 +606,6 @@ func TestNotifyMultipleListeners(t *testing.T) {
 
 func TestGetLogs_All(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	ctx := context.Background()
 
 	if err := CreateTask(ctx, pool, &Task{ID: "getlog01", Command: "test", Status: StatusRunning, Tags: map[string]string{}}); err != nil {
@@ -680,7 +630,6 @@ func TestGetLogs_All(t *testing.T) {
 
 func TestGetLogs_FilterByStream(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	ctx := context.Background()
 
 	if err := CreateTask(ctx, pool, &Task{ID: "getlog02", Command: "test", Status: StatusRunning, Tags: map[string]string{}}); err != nil {
@@ -707,7 +656,6 @@ func TestGetLogs_FilterByStream(t *testing.T) {
 
 func TestGetLogs_NonExistentStream(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	ctx := context.Background()
 
 	if err := CreateTask(ctx, pool, &Task{ID: "getlog03", Command: "test", Status: StatusRunning, Tags: map[string]string{}}); err != nil {
@@ -727,7 +675,6 @@ func TestGetLogs_NonExistentStream(t *testing.T) {
 
 func TestGetLogs_Head(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	ctx := context.Background()
 
 	if err := CreateTask(ctx, pool, &Task{ID: "getlog04", Command: "test", Status: StatusRunning, Tags: map[string]string{}}); err != nil {
@@ -752,7 +699,6 @@ func TestGetLogs_Head(t *testing.T) {
 
 func TestGetLogs_Tail(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	ctx := context.Background()
 
 	if err := CreateTask(ctx, pool, &Task{ID: "getlog05", Command: "test", Status: StatusRunning, Tags: map[string]string{}}); err != nil {
@@ -777,7 +723,6 @@ func TestGetLogs_Tail(t *testing.T) {
 
 func TestGetLogs_StreamWithHead(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	ctx := context.Background()
 
 	if err := CreateTask(ctx, pool, &Task{ID: "getlog06", Command: "test", Status: StatusRunning, Tags: map[string]string{}}); err != nil {
@@ -803,7 +748,6 @@ func TestGetLogs_StreamWithHead(t *testing.T) {
 
 func TestGetLogs_StreamWithTail(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	ctx := context.Background()
 
 	if err := CreateTask(ctx, pool, &Task{ID: "getlog07", Command: "test", Status: StatusRunning, Tags: map[string]string{}}); err != nil {
@@ -829,7 +773,6 @@ func TestGetLogs_StreamWithTail(t *testing.T) {
 
 func TestGetLogs_NonExistentTask(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	ctx := context.Background()
 
 	logs, err := GetLogs(ctx, pool, "nonexistent", "", 0, false)
@@ -843,7 +786,6 @@ func TestGetLogs_NonExistentTask(t *testing.T) {
 
 func TestGetLogs_EmptyLogs(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	ctx := context.Background()
 
 	if err := CreateTask(ctx, pool, &Task{ID: "getlog08", Command: "test", Status: StatusRunning, Tags: map[string]string{}}); err != nil {
@@ -863,7 +805,6 @@ func TestGetLogs_EmptyLogs(t *testing.T) {
 
 func TestRequestCancel_NonExistentTask(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	ctx := context.Background()
 
 	status, err := RequestCancel(ctx, pool, "nonexistent")
@@ -877,7 +818,6 @@ func TestRequestCancel_NonExistentTask(t *testing.T) {
 
 func TestRequestCancel_PendingTask(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	ctx := context.Background()
 
 	task := &Task{ID: "cancel01", Command: "echo test", Status: StatusPending, Tags: map[string]string{}}
@@ -910,7 +850,6 @@ func TestRequestCancel_PendingTask(t *testing.T) {
 
 func TestRequestCancel_RunningTask(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	ctx := context.Background()
 
 	task := &Task{ID: "cancel02", Command: "sleep 100", Status: StatusPending, Tags: map[string]string{}}
@@ -947,7 +886,6 @@ func TestRequestCancel_RunningTask(t *testing.T) {
 
 func TestRequestCancel_CompletedTask(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	ctx := context.Background()
 
 	task := &Task{ID: "cancel03", Command: "echo done", Status: StatusPending, Tags: map[string]string{}}
@@ -975,7 +913,6 @@ func TestRequestCancel_CompletedTask(t *testing.T) {
 
 func TestRequestCancel_FailedTask(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	ctx := context.Background()
 
 	task := &Task{ID: "cancel04", Command: "exit 1", Status: StatusPending, Tags: map[string]string{}}
@@ -996,7 +933,6 @@ func TestRequestCancel_FailedTask(t *testing.T) {
 
 func TestRequestCancel_AlreadyCancelledTask(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	ctx := context.Background()
 
 	task := &Task{ID: "cancel05", Command: "echo test", Status: StatusPending, Tags: map[string]string{}}
@@ -1018,7 +954,6 @@ func TestRequestCancel_AlreadyCancelledTask(t *testing.T) {
 
 func TestRequestCancel_RunningTwice(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	ctx := context.Background()
 
 	task := &Task{ID: "cancel06", Command: "sleep 100", Status: StatusPending, Tags: map[string]string{}}
@@ -1059,7 +994,6 @@ func TestRequestCancel_RunningTwice(t *testing.T) {
 // Test 14: Task-specific cancel channel
 func TestCancel_TaskSpecificChannel(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	ctx := context.Background()
 
 	// Create two listener connections for different task channels
@@ -1107,7 +1041,6 @@ func TestCancel_TaskSpecificChannel(t *testing.T) {
 // Test 15: Cancel confirmation sent by worker
 func TestCancel_ConfirmationSent(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	ctx := context.Background()
 
 	taskID := "confirmtest01"
@@ -1141,7 +1074,6 @@ func TestCancel_ConfirmationSent(t *testing.T) {
 // Test 16: Cancel timeout when worker unresponsive
 func TestCancel_Timeout(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	ctx := context.Background()
 
 	taskID := "timeouttest01"
@@ -1178,7 +1110,6 @@ func TestCancel_Timeout(t *testing.T) {
 
 func TestDeleteTask_Exists(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	ctx := context.Background()
 
 	task := &Task{ID: "del001", Command: "echo test", Status: StatusPending, Tags: map[string]string{}}
@@ -1204,7 +1135,6 @@ func TestDeleteTask_Exists(t *testing.T) {
 
 func TestDeleteTask_NotExists(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	ctx := context.Background()
 
 	deleted, err := DeleteTask(ctx, pool, "nonexistent")
@@ -1218,7 +1148,6 @@ func TestDeleteTask_NotExists(t *testing.T) {
 
 func TestDeleteTask_CascadesLogs(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	ctx := context.Background()
 
 	task := &Task{ID: "del002", Command: "echo test", Status: StatusRunning, Tags: map[string]string{}}
@@ -1256,7 +1185,6 @@ func TestDeleteTask_CascadesLogs(t *testing.T) {
 
 func TestDeleteTask_DifferentStatuses(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	ctx := context.Background()
 
 	statuses := []TaskStatus{StatusPending, StatusRunning, StatusCompleted, StatusFailed, StatusCancelled}
@@ -1280,7 +1208,6 @@ func TestDeleteTask_DifferentStatuses(t *testing.T) {
 
 func TestRegisterWorker(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	ctx := context.Background()
 
 	err := RegisterWorker(ctx, pool, "worker01", 1234, "testhost", "/tmp/workdir")
@@ -1312,7 +1239,6 @@ func TestRegisterWorker(t *testing.T) {
 
 func TestUnregisterWorker(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	ctx := context.Background()
 
 	// Register worker
@@ -1343,7 +1269,6 @@ func TestUnregisterWorker(t *testing.T) {
 
 func TestUpdateHeartbeat(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	ctx := context.Background()
 
 	// Register worker
@@ -1370,7 +1295,6 @@ func TestUpdateHeartbeat(t *testing.T) {
 
 func TestListWorkers_FilterByStatus(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	ctx := context.Background()
 
 	// Register two workers, unregister one

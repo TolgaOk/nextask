@@ -12,7 +12,6 @@ import (
 
 func TestCancelConfirmationWithoutNotification(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	cfg := testConfig(t)
 	ctx := context.Background()
 	for _, immediate := range []bool{true, false} {
@@ -45,7 +44,6 @@ func TestCancelConfirmationWithoutNotification(t *testing.T) {
 
 func TestCancelConfirmationTimeout(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	cfg := testConfig(t)
 	ctx := context.Background()
 	if err := db.CreateTask(ctx, pool, &db.Task{ID: "no-confirmation", Command: "sleep 60", Status: db.StatusRunning, SourceType: "noop"}); err != nil {

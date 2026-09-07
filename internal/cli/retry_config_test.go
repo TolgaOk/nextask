@@ -14,7 +14,6 @@ import (
 
 func TestWorkerUsesRetryConfigurationCLI(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	ctx := context.Background()
 	_, err := pool.Exec(ctx, `CREATE FUNCTION test_claim_outage() RETURNS trigger LANGUAGE plpgsql AS $$
 		BEGIN RAISE EXCEPTION 'temporary claim outage' USING ERRCODE = '08006'; END $$;

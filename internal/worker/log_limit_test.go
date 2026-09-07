@@ -24,7 +24,6 @@ func TestExecutorFileLimit(t *testing.T) {
 		return
 	}
 	pool := setupTestDB(t)
-	defer pool.Close()
 	// Limit real file writes in this subprocess. Task stdout uses a pipe, so
 	// the failure occurs in the worker's local log file, not in the payload.
 	var original syscall.Rlimit

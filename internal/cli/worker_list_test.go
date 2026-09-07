@@ -16,7 +16,6 @@ import (
 
 func TestWorkerListStatusCLI(t *testing.T) {
 	pool := setupTestDB(t)
-	t.Cleanup(pool.Close)
 	binary := buildTestCLI(t)
 	dir := t.TempDir()
 	env := append(isolatedCLIEnv(t), "NEXTASK_DB_URL="+getTestDBURL(t), "GORACE=atexit_sleep_ms=0")

@@ -11,7 +11,6 @@ import (
 
 func TestWorkerReadinessFailure(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	task := &db.Task{ID: "not-ready", Command: "true", Status: db.StatusPending, SourceType: "noop"}

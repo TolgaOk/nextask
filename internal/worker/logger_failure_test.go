@@ -11,7 +11,6 @@ import (
 
 func TestLoggerReportsFileFailure(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	ctx := context.Background()
 	task := &db.Task{ID: "broken-log", Command: "echo data", Status: db.StatusRunning, SourceType: "noop"}
 	if err := db.CreateTask(ctx, pool, task); err != nil {

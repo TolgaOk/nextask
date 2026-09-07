@@ -11,7 +11,6 @@ import (
 
 func TestWaitCLI(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	binary := buildTestCLI(t)
 	ctx := context.Background()
 	for _, tc := range []struct {

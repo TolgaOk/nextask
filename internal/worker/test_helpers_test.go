@@ -20,6 +20,7 @@ func TestMain(m *testing.M) {
 }
 
 func getTestDBURL(t *testing.T) string {
+	t.Helper()
 	url := os.Getenv("TEST_DB_URL")
 	if url == "" {
 		t.Skip("TEST_DB_URL not set, skipping database tests")
@@ -28,18 +29,23 @@ func getTestDBURL(t *testing.T) string {
 }
 
 func setupTestDB(t *testing.T) *pgxpool.Pool {
-	ctx := context.Background()
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 	pool, err := db.Connect(ctx, getTestDBURL(t))
 	if err != nil {
 		t.Fatalf("failed to connect: %v", err)
 	}
 
-	_, _ = pool.Exec(ctx, "DROP TABLE IF EXISTS task_logs")
-	_, _ = pool.Exec(ctx, "DROP TABLE IF EXISTS tasks")
-	_, _ = pool.Exec(ctx, "DROP TABLE IF EXISTS workers")
+	t.Cleanup(pool.Close)
+
+	for _, table := range []string{"task_logs", "tasks", "workers"} {
+		if _, err := pool.Exec(ctx, "DROP TABLE IF EXISTS "+table); err != nil {
+			t.Fatalf("reset %s: %v", table, err)
+		}
+	}
 
 	if err := db.Migrate(ctx, pool); err != nil {
-		pool.Close()
 		t.Fatalf("failed to migrate: %v", err)
 	}
 

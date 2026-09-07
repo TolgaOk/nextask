@@ -21,7 +21,6 @@ func TestWorkerJournalSurvivesSIGKILL(t *testing.T) {
 	for _, remove := range []bool{false, true} {
 		t.Run(fmt.Sprintf("remove=%t", remove), func(t *testing.T) {
 			pool := setupTestDB(t)
-			defer pool.Close()
 			ctx := context.Background()
 			_, err := pool.Exec(ctx, `CREATE FUNCTION test_crash_completion() RETURNS trigger LANGUAGE plpgsql AS $$
 				BEGIN

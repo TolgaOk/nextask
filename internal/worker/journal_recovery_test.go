@@ -17,7 +17,6 @@ func TestRecoverCompletionJournal(t *testing.T) {
 	for _, mode := range []string{"pending-write", "committed", "cancelled", "deleted", "reused"} {
 		t.Run(mode, func(t *testing.T) {
 			pool := setupTestDB(t)
-			defer pool.Close()
 			ctx := context.Background()
 			root := t.TempDir()
 			task := &db.Task{ID: "recover-result", Command: "touch must-not-run", Status: db.StatusPending, SourceType: "noop"}
@@ -111,7 +110,6 @@ func TestRecoverCompletionJournal(t *testing.T) {
 
 func TestConcurrentJournalRecovery(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	ctx := context.Background()
 	root := t.TempDir()
 	if err := db.CreateTask(ctx, pool, &db.Task{ID: "shared-result", Command: "exit 99", Status: db.StatusPending, SourceType: "noop"}); err != nil {
@@ -150,7 +148,6 @@ func TestConcurrentJournalRecovery(t *testing.T) {
 
 func TestJournalFailurePreservesTaskFiles(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	ctx := context.Background()
 	root := t.TempDir()
 	journal := newCompletionJournal(root)
@@ -178,7 +175,6 @@ func TestJournalFailurePreservesTaskFiles(t *testing.T) {
 
 func TestBadJournalPreventsClaims(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	ctx := context.Background()
 	root := t.TempDir()
 	journal := newCompletionJournal(root)

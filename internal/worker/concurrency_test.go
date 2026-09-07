@@ -12,7 +12,6 @@ import (
 
 func TestConcurrentWorkersWithHeartbeats(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	claims := t.TempDir()

@@ -17,7 +17,6 @@ import (
 
 func TestExecutor_NoopSource_Integration(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	ctx := context.Background()
 
 	workdir := t.TempDir()
@@ -44,7 +43,6 @@ func TestExecutor_NoopSource_Integration(t *testing.T) {
 
 func TestExecutor_LegacyGitTask(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	ctx := context.Background()
 
 	// Create source repo with a file
@@ -103,7 +101,6 @@ func TestExecutor_LegacyGitTask(t *testing.T) {
 
 func TestExecutor_UnknownSourceType_Integration(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	ctx := context.Background()
 
 	task := &db.Task{

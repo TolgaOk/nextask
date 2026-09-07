@@ -170,7 +170,6 @@ func TestRootConfigLoading(t *testing.T) {
 
 func TestWaitCommandIsolation(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	cfg := testConfig(t)
 	createWatchTask(t, pool, "isolated-finished", nil)
 	createWatchTask(t, pool, "isolated-pending", nil)
@@ -195,7 +194,6 @@ func TestWaitCommandIsolation(t *testing.T) {
 
 func TestWorkerConfigIsolation(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	cfg := testConfig(t)
 	cfg.Worker.Workdir = t.TempDir()
 	override := t.TempDir()

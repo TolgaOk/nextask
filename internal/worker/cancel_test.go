@@ -16,7 +16,6 @@ import (
 // Test 8: Cancel during command execution
 func TestWorker_CancelDuringExecution(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	ctx := context.Background()
 
 	task := &db.Task{
@@ -84,7 +83,6 @@ func TestWorker_CancelDuringExecution(t *testing.T) {
 // Test 9: Cancel during source fetch
 func TestWorker_CancelDuringSourceFetch(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	ctx := context.Background()
 
 	// Use a git source that will take time (clone from a slow/non-existent remote)
@@ -129,7 +127,6 @@ func TestWorker_CancelDuringSourceFetch(t *testing.T) {
 // Test 10: Cancel notification after task completes (should be ignored)
 func TestWorker_CancelAfterComplete(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	ctx := context.Background()
 
 	task := &db.Task{
@@ -177,7 +174,6 @@ func TestWorker_CancelAfterComplete(t *testing.T) {
 // Test 12: Parent context cancelled (SIGINT) - should NOT mark as cancelled
 func TestWorker_ParentContextCancelled(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	ctx := context.Background()
 
 	task := &db.Task{
@@ -234,7 +230,6 @@ func TestWorker_ParentContextCancelled(t *testing.T) {
 // End-to-end test: Full cancel flow mimicking actual usage
 func TestCancel_EndToEnd(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	ctx := context.Background()
 
 	// 1. Create a long-running task (like CLI enqueue)
@@ -350,7 +345,6 @@ func TestCancel_EndToEnd(t *testing.T) {
 // Test 13: Race between cancel and completion
 func TestWorker_CancelRaceWithCompletion(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	ctx := context.Background()
 
 	// Task that completes very quickly
@@ -405,7 +399,6 @@ func TestWorker_CancelRaceWithCompletion(t *testing.T) {
 // fix for orphaned child processes when using exec.CommandContext.
 func TestWorker_CancelKillsChildProcesses(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	ctx := context.Background()
 
 	// Use a unique marker to identify our sleep process
@@ -484,7 +477,6 @@ func TestWorker_CancelKillsChildProcesses(t *testing.T) {
 // it gets forcefully killed with SIGKILL after WaitDelay (5 seconds).
 func TestWorker_CancelFallbackToSIGKILL(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	ctx := context.Background()
 
 	marker := fmt.Sprintf("nextask_sigkill_%d", time.Now().UnixNano())

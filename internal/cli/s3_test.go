@@ -17,7 +17,6 @@ import (
 
 func TestS3CLI(t *testing.T) {
 	pool := setupTestDB(t)
-	t.Cleanup(pool.Close)
 	binary := buildTestCLI(t)
 	server := storagetest.New()
 	t.Cleanup(server.Close)

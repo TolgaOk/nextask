@@ -36,7 +36,6 @@ func TestEnqueueInvalidID(t *testing.T) {
 
 func TestEnqueueIDs(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	cfg := testConfig(t)
 	ctx := context.Background()
 	id := "export-42"
@@ -85,8 +84,7 @@ func TestEnqueueIDs(t *testing.T) {
 }
 
 func TestEnqueueConcurrentID(t *testing.T) {
-	pool := setupTestDB(t)
-	defer pool.Close()
+	setupTestDB(t)
 	cfg := testConfig(t)
 	id := "concurrent-task"
 	start := make(chan struct{})

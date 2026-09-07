@@ -49,7 +49,6 @@ func TestRenderWriteFailures(t *testing.T) {
 
 func TestCommandOutputIsolation(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	cfg := testConfig(t)
 	cfg.Worker.Workdir = t.TempDir()
 	for _, id := range []string{"output-alpha", "output-omega"} {
@@ -97,7 +96,6 @@ func TestCommandOutputIsolation(t *testing.T) {
 
 func TestStreamWriteFailure(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	cfg := testConfig(t)
 	createWatchTask(t, pool, "broken-stream", nil)
 	if _, err := db.InsertLog(context.Background(), pool, "broken-stream", "stdout", "payload"); err != nil {

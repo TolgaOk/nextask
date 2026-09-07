@@ -8,7 +8,6 @@ import (
 
 func TestCleanupMigrationPreservesTasks(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	ctx := context.Background()
 	if err := CreateTask(ctx, pool, &Task{ID: "legacy-task", Command: "echo kept", Status: StatusPending}); err != nil {
 		t.Fatal(err)
