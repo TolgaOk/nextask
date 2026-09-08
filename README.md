@@ -30,7 +30,7 @@ Make experiments easier to reproduce by keeping the exact code used for each tas
 nextask enqueue 'python train.py' --with git --with s3
 ```
 
-Git saves your current code, including uncommitted changes, to the [remote set in your config](doc/configuration.md). Your local Git repository stays untouched, so you can keep editing while the worker runs that saved version.
+Git saves a snapshot of your current code, including uncommitted changes, to the [remote set in your config](doc/configuration.md). Your local Git repository stays untouched, so you can keep editing while the worker runs that saved version.
 
 S3 provides persistent artifact storage at `<remote>/<TASK_ID>/`. Saved artifacts remain available after the worker is gone or the task is removed, ready to revisit or reuse in later experiments.
 
