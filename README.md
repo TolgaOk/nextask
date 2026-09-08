@@ -40,7 +40,5 @@ Set `NEXTASK_DB_URL` on the submitter and workers. Configure Git/S3 in `.nextask
 - [Git snapshots](doc/integrations.md)
 - [S3 artifacts](doc/s3.md)
 - [Logs and waiting](doc/watching.md)
-- [Upgrading from 0.1](doc/upgrading.md)
-- [Agent skills](skills/)
 
 Use `nextask --help` for all commands.
