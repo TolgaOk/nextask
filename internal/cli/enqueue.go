@@ -2,288 +2,224 @@ package cli
 
 import (
 	"context"
-	"encoding/json"
+	"errors"
 	"fmt"
-	"os"
-	"os/signal"
-	"syscall"
+	"io"
 	"time"
 
+	"github.com/TolgaOk/nextask/internal/config"
+	"github.com/TolgaOk/nextask/internal/db"
+	"github.com/TolgaOk/nextask/internal/integrations"
 	"github.com/jackc/pgx/v5/pgxpool"
 	gonanoid "github.com/matoous/go-nanoid/v2"
 	"github.com/spf13/cobra"
-	"github.com/TolgaOk/nextask/internal/config"
-	"github.com/TolgaOk/nextask/internal/db"
-	"github.com/TolgaOk/nextask/internal/source"
-	"github.com/TolgaOk/nextask/internal/worker"
 )
 
-var tags []string
-var snapshot bool
-var remote string
-var attach bool
-
-var enqueueCmd = &cobra.Command{
-	Use:   "enqueue COMMAND",
-	Short: "Add a task to the queue",
-	Args: func(cmd *cobra.Command, args []string) error {
-		if len(args) == 0 {
-			return errWithHints("command is required",
-				"Example: "+codeStyle.Render("nextask enqueue \"python train.py\""),
-			)
-		}
-		if len(args) > 1 {
-			return errWithHints("too many arguments",
-				"Wrap command in quotes: "+codeStyle.Render("nextask enqueue \"python train.py --epochs 10\""),
-			)
-		}
-		if args[0] == "" {
-			return errWithHints("command cannot be empty",
-				"Example: "+codeStyle.Render("nextask enqueue \"python train.py\""),
-			)
-		}
-		return nil
-	},
-	RunE: func(cmd *cobra.Command, args []string) error {
-		if cfg.DB.URL == "" {
-			return errDBRequired()
-		}
-
-		// Apply command-specific flag
-		if remote != "" {
-			cfg.Source.Remote = config.NormalizeRemote(remote)
-		}
-
-		command := args[0]
-
-		parsedTags, err := parseTags(tags)
-		if err != nil {
-			return err
-		}
-
-		id, err := gonanoid.Generate("0123456789abcdefghijklmnopqrstuvwxyz", 8)
-		if err != nil {
-			return fmt.Errorf("failed to generate ID: %w", err)
-		}
-
-		if snapshot && cfg.Source.Remote == "" {
-			return errWithHints("remote is required when using --snapshot",
-				"Provide: "+codeStyle.Render("--remote ~/.nextask/source.git"),
-				"Or set "+codeStyle.Render("source.remote")+" in config file",
-				"Create with: "+codeStyle.Render("nextask init source"),
-			)
-		}
-
-		task := &db.Task{
-			ID:         id,
-			Command:    command,
-			Status:     db.StatusPending,
-			Tags:       parsedTags,
-			SourceType: "noop",
-		}
-
-		if snapshot {
-			result, err := source.CreateSnapshot(".", id)
-			if err != nil {
-				return withHints(fmt.Errorf("failed to create snapshot: %w", err),
-					"Ensure you are in a git repository",
-				)
-			}
-
-			if err := source.PushSnapshot(".", cfg.Source.Remote, result); err != nil {
-				return withHints(fmt.Errorf("failed to push snapshot: %w", err),
-					"Check that remote exists: "+codeStyle.Render(cfg.Source.Remote),
-				)
-			}
-
-			// Resolve remote name (e.g. "origin") to URL for storage
-			resolvedRemote, err := source.ResolveRemote(".", cfg.Source.Remote)
-			if err != nil {
-				resolvedRemote = cfg.Source.Remote
-			}
-
-			task.SourceType = "git"
-			task.SourceConfig, _ = json.Marshal(worker.GitSourceConfig{
-				Remote: resolvedRemote,
-				Ref:    result.Ref,
-				Commit: result.Commit,
-			})
-		}
-
-		ctx := context.Background()
-
-		pool, err := db.Connect(ctx, cfg.DB.URL)
-		if err != nil {
-			return err
-		}
-		defer pool.Close()
-
-		if err := db.CreateTask(ctx, pool, task); err != nil {
-			return err
-		}
-
-		if attach {
-			return enqueueAndAttach(ctx, pool, id)
-		}
-
-		if err := db.Notify(ctx, pool, db.ToWorkersChannel, db.WorkerWakeEvent{}); err != nil {
-			fmt.Fprintf(os.Stderr, "warning: notify failed: %v\n", err)
-		}
-
-		fmt.Fprintf(os.Stderr, "Task enqueued: %s\n", id)
-		return nil
-	},
+type enqueueOptions struct {
+	tags     []string
+	snapshot bool
+	remote   string
+	attach   bool
 }
 
-func init() {
-	enqueueCmd.Flags().StringSliceVar(&tags, "tag", nil, "Tags (key=value, can specify multiple)")
-	enqueueCmd.Flags().BoolVar(&snapshot, "snapshot", false, "Create and push source snapshot")
-	enqueueCmd.Flags().StringVar(&remote, "remote", "", "Git remote name or path for snapshot (required if --snapshot)")
-	enqueueCmd.Flags().BoolVarP(&attach, "attach", "a", false, "Watch task output and wait for completion")
-	RootCmd.AddCommand(enqueueCmd)
-}
-
-func enqueueAndAttach(ctx context.Context, pool *pgxpool.Pool, taskID string) error {
-	// Create listener with auto-reconnect before notifying workers
-	fromChannel := db.FromTaskChannel(taskID)
-	backoff := db.NewBackOff(cfg.Retry.InitialInterval, cfg.Retry.MaxInterval)
-	listener, err := db.Listen(ctx, cfg.DB.URL, backoff, fromChannel)
-	if err != nil {
-		return fmt.Errorf("listen failed: %w", err)
-	}
-	defer listener.Close(context.Background())
-
-	// Notify workers
-	if err := db.Notify(ctx, pool, db.ToWorkersChannel, db.WorkerWakeEvent{}); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: notify failed: %v\n", err)
-	}
-
-	fmt.Fprintf(os.Stderr, "Task enqueued: %s\n", taskID)
-	fmt.Fprintf(os.Stderr, "Watching output (Ctrl+C to cancel)...\n")
-
-	// Signal handler: Ctrl+C cancels the task
-	cancelCtx, cancelFunc := context.WithCancel(ctx)
-	defer cancelFunc()
-
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-	go func() {
-		select {
-		case <-sigCh:
-			fmt.Fprintf(os.Stderr, "\nCancelling task...\n")
-
-			originalStatus, err := db.RequestCancel(ctx, pool, taskID)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "failed to request cancel: %v\n", err)
-				cancelFunc()
-				return
+func newEnqueueCommand(cfg *config.Config) *cobra.Command {
+	var opts enqueueOptions
+	cmd := &cobra.Command{
+		Use:   "enqueue COMMAND",
+		Short: "Add a task to the queue",
+		Args: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 0 {
+				return errWithHints("command is required",
+					"Example: "+codeStyle.Render("nextask enqueue \"python train.py\""),
+				)
 			}
-
-			if originalStatus != nil && *originalStatus == db.StatusPending {
-				fmt.Fprintf(os.Stderr, "Task cancelled\n")
-				cancelFunc()
-				return
+			if len(args) > 1 {
+				return errWithHints("too many arguments",
+					"Wrap command in quotes: "+codeStyle.Render("nextask enqueue \"python train.py --epochs 10\""),
+				)
 			}
-
-			// Running task - notify worker
-			toChannel := db.ToTaskChannel(taskID)
-			if err := db.Notify(ctx, pool, toChannel, db.TaskCancelEvent{}); err != nil {
-				fmt.Fprintf(os.Stderr, "failed to send cancel: %v\n", err)
+			if args[0] == "" {
+				return errWithHints("command cannot be empty",
+					"Example: "+codeStyle.Render("nextask enqueue \"python train.py\""),
+				)
 			}
-		case <-cancelCtx.Done():
-			signal.Stop(sigCh)
-		}
-	}()
-
-	// Poll ticker for status check (handles missed events during reconnect)
-	pollTicker := time.NewTicker(5 * time.Second)
-	defer pollTicker.Stop()
-
-	var lastLogID int
-	for {
-		select {
-		case notif, ok := <-listener.C:
-			if !ok {
-				// Listener closed - check final status
-				return enqueueCheckCompletion(ctx, pool, taskID, &lastLogID)
+			if cmd.Flags().Changed("id") {
+				id, _ := cmd.Flags().GetString("id")
+				return db.ValidateTaskID(id)
 			}
-
-			eventType, data, err := db.ParseEvent(notif.Payload)
-			if err != nil {
-				continue
-			}
-
-			switch eventType {
-			case db.EventTypeLog:
-				enqueueFetchLogs(ctx, pool, taskID, &lastLogID)
-
-			case db.EventTypeStatus:
-				var status db.TaskStatusEvent
-				if err := json.Unmarshal(data, &status); err != nil {
-					continue
-				}
-				enqueueFetchLogs(ctx, pool, taskID, &lastLogID)
-				fmt.Fprintf(os.Stderr, "\nTask %s (exit %d)\n", status.Status, status.ExitCode)
-				if status.ExitCode != 0 {
-					return &exitCodeError{code: status.ExitCode}
-				}
-				return nil
-			}
-
-		case <-pollTicker.C:
-			if err := enqueueCheckCompletion(ctx, pool, taskID, &lastLogID); err == nil {
-				return nil
-			}
-
-		case <-cancelCtx.Done():
 			return nil
-		}
+		},
+		RunE: func(cmd *cobra.Command, args []string) error {
+			command := args[0]
+
+			parsedTags, err := parseTags(opts.tags)
+			if err != nil {
+				return err
+			}
+
+			id, _ := cmd.Flags().GetString("id")
+			if !cmd.Flags().Changed("id") {
+				id, err = gonanoid.Generate("0123456789abcdefghijklmnopqrstuvwxyz", 8)
+				if err != nil {
+					return fmt.Errorf("failed to generate ID: %w", err)
+				}
+			}
+
+			task := &db.Task{
+				ID:         id,
+				Command:    command,
+				Status:     db.StatusPending,
+				Tags:       parsedTags,
+				SourceType: "noop",
+			}
+
+			plan, err := enqueueIntegrations(cmd, *cfg, opts)
+			if err != nil {
+				return err
+			}
+			if cfg.DB.URL == "" {
+				return errDBRequired()
+			}
+			baseCtx := cmd.Context()
+			ctx, stopSignals := interruptContext(baseCtx)
+			defer stopSignals()
+			pool, err := db.Connect(ctx, cfg.DB.URL)
+			if err != nil {
+				return err
+			}
+			defer pool.Close()
+
+			tx, err := pool.Begin(ctx)
+			if err != nil {
+				return err
+			}
+			defer tx.Rollback(context.Background())
+			// Reserve the ID before preparation side effects. Workers only see the task
+			// once its execution command is ready and this transaction commits.
+			if err := db.CreateTask(ctx, tx, task); err != nil {
+				return err
+			}
+
+			prepared, err := plan.Prepare(ctx, integrations.Task{ID: task.ID, Command: task.Command})
+			if err != nil {
+				return err
+			}
+			if prepared.Command != task.Command || prepared.CleanupTimeout != 0 {
+				if err := db.SetTaskExecution(ctx, tx, task.ID, prepared.Command, prepared.CleanupTimeout); err != nil {
+					return err
+				}
+			}
+
+			if err := tx.Commit(ctx); err != nil {
+				return err
+			}
+
+			stopSignals()
+			ctx = baseCtx
+			if opts.attach {
+				return enqueueAndAttach(ctx, *cfg, outputFor(cmd), pool, id)
+			}
+
+			if err := db.Notify(ctx, pool, db.ToWorkersChannel, db.WorkerWakeEvent{}); err != nil {
+				fmt.Fprintf(cmd.ErrOrStderr(), "warning: notify failed: %v\n", err)
+			}
+
+			_, err = fmt.Fprintf(cmd.ErrOrStderr(), "Task enqueued: %s\n", id)
+			return err
+		},
 	}
+
+	cmd.Flags().StringArray("with", nil, "Enable integration (repeatable)")
+	cmd.Flags().StringArray("set", nil, "Override TOOL.KEY=VALUE (repeatable)")
+	cmd.Flags().String("id", "", "Task ID (1–53 letters, digits, underscores or hyphens; starts with a letter or digit)")
+	cmd.Flags().StringSliceVar(&opts.tags, "tag", nil, "Set task tag key=value (repeatable)")
+	cmd.Flags().BoolVar(&opts.snapshot, "snapshot", false, "Create and push source snapshot")
+	cmd.Flags().StringVar(&opts.remote, "remote", "", "Git remote name or path for snapshot (required if --snapshot)")
+	cmd.Flags().BoolVarP(&opts.attach, "attach", "a", false, "Watch task output and wait for completion")
+	cmd.Flags().MarkDeprecated("snapshot", "use --with git")
+	cmd.Flags().MarkDeprecated("remote", "use --set git.remote=REMOTE")
+	return cmd
 }
 
-func enqueueFetchLogs(ctx context.Context, pool *pgxpool.Pool, taskID string, lastLogID *int) {
-	logs, err := db.GetLogsSince(ctx, pool, taskID, *lastLogID)
+func enqueueAndAttach(ctx context.Context, cfg config.Config, out commandOutput, pool *pgxpool.Pool, taskID string) error {
+	sigCtx, stop := interruptContext(ctx)
+	defer stop()
+	if err := db.Notify(sigCtx, pool, db.ToWorkersChannel, db.WorkerWakeEvent{}); err != nil {
+		fmt.Fprintf(out.err, "warning: notify failed: %v\n", err)
+	}
+	if _, err := fmt.Fprintf(out.err, "Task enqueued: %s\nWatching output (Ctrl+C to cancel)...\n", taskID); err != nil {
+		return err
+	}
+
+	print := func(log db.TaskLog) error { return printLogLine(out, log) }
+	var lastLogID int
+	task, err := streamTask(sigCtx, cfg, out.err, pool, taskID, &lastLogID, print)
+	if errors.Is(err, context.Canceled) && ctx.Err() == nil {
+		// The signal interrupts reads first. Persist cancellation using a fresh,
+		// bounded context, then keep watching the worker's final outcome.
+		stop()
+		pending, cancelErr := cancelAttachedTask(ctx, out.err, pool, taskID)
+		if cancelErr != nil || pending {
+			return cancelErr
+		}
+		task, err = streamTask(ctx, cfg, out.err, pool, taskID, &lastLogID, print)
+	}
 	if err != nil {
-		return
+		return err
 	}
-	for _, log := range logs {
-		printLogLine(log)
-		if log.ID > *lastLogID {
-			*lastLogID = log.ID
-		}
-	}
+	return errors.Join(exitOrNil(taskExitCode(task)), printAttachedCompletion(out.err, task))
 }
 
-func enqueueCheckCompletion(ctx context.Context, pool *pgxpool.Pool, taskID string, lastLogID *int) error {
-	task, err := db.GetTask(ctx, pool, taskID, cfg.Worker.StaleDuration())
-	if err != nil || task == nil {
-		return fmt.Errorf("not done")
+func cancelAttachedTask(ctx context.Context, stderr io.Writer, pool *pgxpool.Pool, taskID string) (bool, error) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	fmt.Fprintln(stderr, "\nCancelling task...")
+	status, err := db.RequestCancel(ctx, pool, taskID)
+	if err != nil {
+		return false, fmt.Errorf("failed to request cancel: %w", err)
 	}
-
-	enqueueFetchLogs(ctx, pool, taskID, lastLogID)
-
-	if task.Status == db.StatusCompleted || task.Status == db.StatusFailed || task.Status == db.StatusCancelled {
-		exitCode := 0
-		if task.ExitCode != nil {
-			exitCode = *task.ExitCode
+	if status == nil {
+		return false, fmt.Errorf("task not found: %s", taskID)
+	}
+	if *status == db.StatusPending {
+		_, err := fmt.Fprintln(stderr, "Task cancelled")
+		return true, err
+	}
+	if *status == db.StatusRunning {
+		if err := db.Notify(ctx, pool, db.ToTaskChannel(taskID), db.TaskCancelEvent{}); err != nil {
+			fmt.Fprintf(stderr, "warning: cancel requested but notification failed: %v\n", err)
 		}
-		fmt.Fprintf(os.Stderr, "\nTask %s (exit %d)\n", task.Status, exitCode)
-		if exitCode != 0 {
-			return &exitCodeError{code: exitCode}
-		}
-		return nil
 	}
-	if task.Status == db.StatusStale {
-		fmt.Fprintf(os.Stderr, "\nTask %s (worker heartbeat expired)\n", task.Status)
-		return &exitCodeError{code: 1}
-	}
-	return fmt.Errorf("not done")
+	return false, nil
 }
 
-func printLogLine(log db.TaskLog) {
+func printLogLine(out commandOutput, log db.TaskLog) error {
 	if log.Stream == "nextask" {
-		fmt.Fprintf(os.Stderr, "%s %s\n", hintStyle.Render("[nextask]"), log.Data)
-	} else {
-		fmt.Println(log.Data)
+		_, err := fmt.Fprintf(out.err, "%s %s\n", hintStyle.Render("[nextask]"), log.Data)
+		return err
 	}
+	_, err := fmt.Fprintln(out.out, log.Data)
+	return err
+}
+
+func enqueueIntegrations(cmd *cobra.Command, cfg config.Config, opts enqueueOptions) (*integrations.Plan, error) {
+	with, _ := cmd.Flags().GetStringArray("with")
+	overrides, _ := cmd.Flags().GetStringArray("set")
+	if opts.snapshot {
+		with = append(with, "git")
+	}
+	values := make(map[string]map[string]any)
+	for name, options := range cfg.Integrations {
+		values[name] = make(map[string]any)
+		for key, value := range options {
+			values[name][key] = value
+		}
+	}
+	if values["git"] == nil && cfg.Source.Remote != "" {
+		values["git"] = map[string]any{"remote": cfg.Source.Remote}
+	}
+	if opts.remote != "" {
+		overrides = append([]string{"git.remote=" + config.NormalizeRemote(opts.remote)}, overrides...)
+	}
+	return integrations.Builtins().Resolve(with, values, overrides)
 }

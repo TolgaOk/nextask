@@ -12,12 +12,14 @@ Use it to run commands on remote worker machines.
 
 ### Enqueue a task
 ```bash
-nextask enqueue "python train.py --lr 0.001" --snapshot --tag model=resnet,lr=0.001
+nextask enqueue "python train.py --lr 0.001" --with git --tag model=resnet,lr=0.001
 ```
-- `--snapshot` captures the current working tree (including uncommitted changes) and pushes to a git remote
-- `--remote <url|path>` override source remote for this snapshot
+- `--with git` captures the current working tree (including uncommitted changes) and pushes to a git remote
+- `--set git.remote=<name|url|path>` overrides the remote for `--with git`
 - `--tag key=value` adds metadata for filtering (repeatable, both key and value required)
 - `--attach` / `-a` streams live output after enqueuing
+
+Integrations are disabled by default. Config supplies options; select each integration explicitly with `--with TOOL`. Git tasks require Git on both the submitter and worker.
 
 ### Monitor tasks
 ```bash
@@ -43,7 +45,7 @@ nextask wait <id1> <id2> --any            # wait for first to finish
 ### Cancel / remove
 ```bash
 nextask cancel <id>
-nextask remove <id>                # deletes task, logs, and snapshot
+nextask remove <id>                # deletes the task and logs; keeps snapshots and stored artifacts
 ```
 
 ### Workers
@@ -66,7 +68,7 @@ nextask worker stop <id>           # stop a worker
 ### Hyperparameter sweep
 ```bash
 for lr in 0.1 0.01 0.001; do
-  nextask enqueue "python train.py --lr $lr" --snapshot --tag sweep=lr,lr=$lr
+  nextask enqueue "python train.py --lr $lr" --with git --tag sweep=lr,lr=$lr
 done
 nextask wait --tag sweep=lr        # block until all finish
 nextask list --tag sweep=lr        # compare results
@@ -74,7 +76,7 @@ nextask list --tag sweep=lr        # compare results
 
 ### Run and watch
 ```bash
-nextask enqueue "python train.py" --snapshot --attach
+nextask enqueue "python train.py" --with git --attach
 # Ctrl+C cancels the task
 ```
 
@@ -95,7 +97,7 @@ nextask enqueue "nvidia-smi" --attach
 ### Route to specific workers
 ```bash
 # Enqueue with tags
-nextask enqueue "python train.py" --snapshot --tag gpu=a100
+nextask enqueue "python train.py" --with git --tag gpu=a100
 
 # Worker only claims matching tasks
 nextask worker --filter gpu=a100
@@ -103,13 +105,18 @@ nextask worker --filter gpu=a100
 
 ### Saving results from tasks
 
-Tasks run in a cloned workdir on the worker. To persist results (CSVs, models, logs), have the task commit and push them back:
+Configure `[integrations.s3]` with an endpoint, remote bucket/prefix, and explicit
+`include` patterns. Set `S3_ACCESS_KEY` and `S3_SECRET_KEY` on the worker.
 
 ```bash
-nextask enqueue 'python train.py --output results.csv && git add results.csv && git commit -m "results" && git push origin HEAD' --snapshot
+nextask enqueue --with git --with s3 './export.sh'
+nextask enqueue --with s3 --set s3.interval=0s --set 's3.include=["results/**"]' './export.sh'
 ```
 
-Or write results to a shared filesystem / object store that both the enqueue machine and worker can access.
+S3 uploads selected files periodically and after command completion, including
+failure and graceful cancellation. Objects use `<remote>/<TASK_ID>/<relative-path>`;
+removing a task preserves them. See the [S3 guide](../../doc/s3.md) for all options.
+Integrations are opt-in; configuration alone never enables uploads.
 
 ### Tagging and querying
 
@@ -141,10 +148,14 @@ nextask config                     # show configuration
 
 ## Configuration
 
-Priority: CLI flags > ENV vars > `.nextask.toml` > `~/.config/nextask/global.toml`.
+Priority: CLI flags > environment > project config > user config. Within each scope, Nextask config overrides the optional shared tasktools config. Run `nextask config show --sources` to inspect effective values.
 
-Set `db.url` via `--db-url`, `NEXTASK_DB_URL`, or in config files.
-Set `source.remote` for snapshot storage.
+Set the database connection through `NEXTASK_DB_URL` on the CLI host and workers.
+DB URL config settings and `--db-url` are rejected. Use SSH or Git credential
+helpers; never put tokens or passwords in Git remote URLs. S3 tasks require
+`S3_ACCESS_KEY` and `S3_SECRET_KEY` on the worker, with missing variables named in
+the error. Keep Nextask TOML files limited to non-secret options.
+Set `integrations.git.remote` for snapshot storage.
 
 ## Key concepts
 - Tasks go through: `pending` → `running` → `completed` | `failed` | `cancelled` | `stale`
@@ -159,6 +170,6 @@ Set `source.remote` for snapshot storage.
 |---------|-----|
 | Tasks stuck `pending` | Check `nextask worker list`, ensure `--filter` tags match `--tag` |
 | Tasks go `stale` | Worker crashed, check logs and restart |
-| Worker can't reach DB | Verify URL, check firewall, test with `nextask list --db-url "..."` from worker host |
+| Worker can't reach DB | Verify URL, check firewall, set `NEXTASK_DB_URL` and test with `nextask list` from the worker host |
 | `git clone` fails in worker | Wrong source remote or token expired, verify with `git ls-remote` |
-| `nextask list` shows nothing | Check `--db-url` or config, try `nextask config` to see loaded values |
+| `nextask list` shows nothing | Check `NEXTASK_DB_URL`; use `nextask config show --sources` for redacted diagnostics |

@@ -1,0 +1,57 @@
+package cli
+
+import (
+	"context"
+	"fmt"
+	"io"
+
+	"github.com/TolgaOk/nextask/internal/config"
+	"github.com/TolgaOk/nextask/internal/db"
+	"github.com/cenkalti/backoff/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+// streamTask drains stored logs and returns the stored terminal task. The caller
+// chooses how interrupts and the task's exit code affect its command.
+func streamTask(ctx context.Context, cfg config.Config, stderr io.Writer, pool *pgxpool.Pool, taskID string, lastLogID *int, print func(db.TaskLog) error) (*db.Task, error) {
+	watch, err := newStateWatcher(ctx, cfg, stderr, db.FromTaskChannel(taskID))
+	if err != nil {
+		return nil, err
+	}
+	defer watch.Close()
+	var finished *db.Task
+	err = watch.Run(ctx, func(ctx context.Context) (bool, error) {
+		task, err := db.GetTask(ctx, pool, taskID, cfg.Worker.StaleDuration())
+		if err != nil {
+			return false, err
+		}
+		if task == nil {
+			return false, fmt.Errorf("task not found: %s", taskID)
+		}
+		logs, err := db.GetLogsSince(ctx, pool, taskID, *lastLogID)
+		if err != nil {
+			return false, err
+		}
+		for _, log := range logs {
+			if err := print(log); err != nil {
+				return false, backoff.Permanent(err)
+			}
+			*lastLogID = log.ID
+		}
+		if isTerminal(task.Status) {
+			finished = task
+			return true, nil
+		}
+		return false, nil
+	})
+	return finished, err
+}
+
+func printAttachedCompletion(out io.Writer, task *db.Task) error {
+	if task.Status == db.StatusStale {
+		_, err := fmt.Fprintln(out, "\nTask stale (worker heartbeat expired)")
+		return err
+	}
+	_, err := fmt.Fprintf(out, "\nTask %s (exit %d)\n", task.Status, taskExitCode(task))
+	return err
+}

@@ -29,7 +29,7 @@ If `AskUserQuestion` is available, use it to present choices as structured optio
 5. Git remote? → Gitea / bare repo / GitHub / git daemon
 6. Gitea admin? → auto / custom
 7. DB password? → auto / custom
-8. Agent runs: ports, compose, init db, write config, verify, list secrets
+8. Agent runs: ports, compose, export environment, init db, write non-secret config, verify
 ```
 
 ### 0. Check nextask
@@ -43,15 +43,13 @@ curl -fsSL https://raw.githubusercontent.com/TolgaOk/nextask/main/install | bash
 
 Check for existing configuration:
 ```bash
-cat ~/.config/nextask/global.toml 2>/dev/null
-cat .nextask.toml 2>/dev/null
-echo "NEXTASK_DB_URL=$NEXTASK_DB_URL"
-echo "NEXTASK_SOURCE_REMOTE=$NEXTASK_SOURCE_REMOTE"
+nextask config show --sources
+if [ -n "$NEXTASK_DB_URL" ]; then echo "NEXTASK_DB_URL is set"; else echo "NEXTASK_DB_URL is missing"; fi
 ```
 
 If a config exists, tell the user what was found and ask: "You already have a nextask config. Do you want to use it, or start fresh?"
 
-- **Use existing** → test the connection: `nextask list` and (if source.remote is set) `git ls-remote <remote>`.
+- **Use existing** → test the connection: `nextask list` and (if integrations.git.remote is set) `git ls-remote <remote>`.
   - Both work → setup is done, skip all remaining steps.
   - DB works but no source remote → ask if they want snapshots (jump to step 4).
   - DB fails → ask if they want to fix it or start fresh (jump to step 2).
@@ -75,7 +73,7 @@ Check `docker compose version` (locally, or via SSH if remote). If not installed
 
 Continue once `docker compose version` succeeds.
 
-### 4. "Do you want source snapshots (`--snapshot`)?"
+### 4. "Do you want source snapshots (`--with git`)?"
 
 Explain: snapshots capture your exact working tree (including uncommitted changes) so every task is reproducible. Requires a git remote to store them.
 
@@ -96,7 +94,7 @@ Explain: snapshots capture your exact working tree (including uncommitted change
 
 ### 7. "For the database password — should I generate one or do you want to set your own?"
 
-- **Auto** → generate with `openssl rand -hex 24`, show to user
+- **Auto** → generate with `openssl rand -hex 24` and store through the chosen secret mechanism
 - **Custom** → user provides
 
 ### 8. Agent actions (no more questions)
@@ -104,15 +102,11 @@ Explain: snapshots capture your exact working tree (including uncommitted change
 1. Check ports 5432 and 3000: `lsof -i :5432`, `lsof -i :3000`. If occupied, set `NEXTASK_PG_PORT` / `NEXTASK_GITEA_PORT` in `.env`. Tell user which ports will be used.
 2. Copy compose file, write `.env`, run `docker compose up -d`.
 3. If full stack: wait for `gitea-init` to complete, extract token from `docker compose logs gitea-init`.
-4. Run `nextask init db`.
-5. Write `db.url` and `source.remote` to `~/.config/nextask/global.toml` (create directory if missing). Set `chmod 600 ~/.config/nextask/global.toml` so only the owner can read it. Do NOT write a project `.env` unless the user explicitly asks (risk of committing secrets).
-6. Verify: `nextask list` (expect "No tasks found"), `git ls-remote <remote>` (expect refs listed).
-7. Tell the user where their secrets are stored. Include all that apply:
-   - Any auto-generated passwords — repeat them here so the user can save them.
-   - `~/.config/nextask/global.toml` (chmod 600) — DB URL and source remote with embedded credentials.
-   - Compose `.env` file — `DB_PASSWORD`, used by Docker services.
-   - If Gitea with auto setup: Gitea web login is username `nextask` with `DB_PASSWORD`. Token is in the source remote URL and in `docker compose logs gitea-init`.
-   - Docker named volumes (`pgdata`, `gitea`) hold all persistent data. Survives restarts. Only deleted with `docker compose down -v`.
+4. Set `NEXTASK_DB_URL` in the CLI process environment, then run `nextask init db`.
+5. Write only non-secret options, such as a credential-free `integrations.git.remote`, to `~/.config/nextask/global.toml`. DB URLs are rejected in Nextask/shared TOML and through `--db-url`.
+6. Configure the database environment independently for each worker. Use the shell or service's secret mechanism; keep any persistent environment file outside the repository with mode 600. Configure Git SSH authentication or a credential helper separately on each host.
+7. Verify `nextask list` and, if Git is used, `git ls-remote <credential-free-remote>`.
+8. Tell the user where credentials are stored without repeating their values. Compose environment files supply service passwords; Nextask TOML contains only shareable options. Docker named volumes (`pgdata`, `gitea`) hold persistent service data.
 
 ## SSH tips (for remote deployment)
 
@@ -176,14 +170,18 @@ The output shows:
 Remote: http://nextask:<TOKEN>@<HOST>:3000/nextask/source.git
 ```
 
-Replace `<HOST>` with the server's IP or hostname. If running locally, use `localhost`.
+Capture the token into a Git credential helper or secret store on the submitter
+and workers. Remove userinfo from the URL before configuring Nextask:
+`http://<HOST>:3000/nextask/source.git`. Nextask rejects credential-bearing URLs.
+Replace `<HOST>` with the server's IP or hostname; use `localhost` for local services.
 
 If using a non-default Gitea port, adjust the URL accordingly (e.g., `:3001` instead of `:3000`).
 
 ### Step 4: Initialize nextask tables
 
 ```bash
-nextask init db --db-url "postgres://nextask:<password>@<host>:5432/nextask"
+export NEXTASK_DB_URL='postgres://nextask:<password>@<host>:5432/nextask'
+nextask init db
 ```
 
 Use the port from `NEXTASK_PG_PORT` if overridden.
@@ -192,11 +190,11 @@ Use the port from `NEXTASK_PG_PORT` if overridden.
 
 ```bash
 # Database works
-nextask list --db-url "postgres://nextask:<password>@<host>:5432/nextask"
+nextask list
 # Expected: "No tasks found"
 
 # Git remote works
-git ls-remote "http://nextask:<token>@<host>:3000/nextask/source.git"
+git ls-remote "http://<host>:3000/nextask/source.git"
 # Expected: HEAD and refs/heads/main listed
 ```
 
@@ -213,7 +211,7 @@ git ls-remote "http://nextask:<token>@<host>:3000/nextask/source.git"
 
 ## PostgreSQL only (no Gitea)
 
-Use this if you won't use `--snapshot` or already have a git remote.
+Use this if you won't use `--with git` or already have a git remote.
 
 Copy `scripts/postgres-only.docker-compose.yml` as `docker-compose.yml`. Create `.env`:
 ```
@@ -234,14 +232,15 @@ Alternatives (no compose needed):
 
 Initialize tables:
 ```bash
-nextask init db --db-url "postgres://nextask:<password>@<host>:5432/nextask"
+export NEXTASK_DB_URL='postgres://nextask:<password>@<host>:5432/nextask'
+nextask init db
 ```
 
-**Verify:** `nextask list --db-url "..."` returns "No tasks found".
+**Verify:** `nextask list` with `NEXTASK_DB_URL` set returns "No tasks found".
 
 ## Git remote (standalone, without full stack)
 
-Skip if using the full-stack compose (Gitea is included) or if user won't use `--snapshot`.
+Skip if using the full-stack compose (Gitea is included) or if user won't use `--with git`.
 
 Options:
 - **Standalone Gitea** (SQLite, no shared Postgres): use `${CLAUDE_SKILL_DIR}/scripts/gitea-only.docker-compose.yml`. Admin user must be created manually via the web UI at `http://<host>:3000`.
@@ -273,22 +272,33 @@ ssh root@<host> "cd /opt/nextask && docker compose logs gitea-init"
 
 ## Configuration
 
-**Keep secrets out of version control.** Use a `.env` file (add to `.gitignore`).
+Supply `NEXTASK_DB_URL` through the shell or service environment. For persistent
+local setup, use a private environment file outside the repository, such as
+`~/.local/share/nextask/secrets.env`, with mode 600. Its content is:
 
-After setup, configure the nextask client. Create `.env` in the project root:
+```sh
+NEXTASK_DB_URL='postgres://nextask:<password>@<host>:5432/nextask'
 ```
-NEXTASK_DB_URL="postgres://nextask:<password>@<host>:5432/nextask"
-NEXTASK_SOURCE_REMOTE="http://nextask:<token>@<host>:3000/nextask/source.git"
+
+Load it into the process environment before running Nextask:
+
+```sh
+set -a
+. ~/.local/share/nextask/secrets.env
+set +a
 ```
 
-Source before running nextask: `source .env`
+Nextask does not load environment files automatically. Non-secret settings go in
+`.nextask.toml` or `~/.config/nextask/global.toml`:
 
-Non-secret config goes in `.nextask.toml`:
 ```toml
-[source]
-remote = "origin"
+[integrations.git]
+remote = "http://<host>:3000/nextask/source.git"
 ```
 
-For global config: `~/.config/nextask/global.toml` (same format).
+Use SSH authentication or Git credential helpers for Git access. For S3 tasks,
+set `S3_ACCESS_KEY` and `S3_SECRET_KEY` independently on the worker. Never write
+credentials into Nextask/shared TOML or commit private environment files.
 
-**Verify:** `nextask config` shows loaded files, `nextask list` works without flags.
+**Verify:** `nextask config show --sources` shows redacted effective settings and
+`nextask list` connects using `NEXTASK_DB_URL`.

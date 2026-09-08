@@ -2,14 +2,15 @@
 //
 // Configuration is loaded with the following precedence (highest wins):
 //
-//	CLI flags > env vars > .nextask.toml (project-local) > ~/.config/nextask/global.toml > defaults
+//	CLI flags > env vars > project files > user files > defaults
+//
+// Within each scope, the Nextask file overrides [nextask] in the shared tasktools
+// file. Other tools' sections are ignored. Connection URLs may reference
+// environment variables for credentials.
 //
 // Config file format (same for both global and local):
 //
-//	[db]
-//	url = "postgres://user@localhost:5432/nextask"
-//
-//	[source]
+//	[integrations.git]
 //	remote = "~/.nextask/source.git"
 //
 //	[worker]
@@ -17,12 +18,11 @@
 //
 // Environment variables:
 //   - NEXTASK_DB_URL
-//   - NEXTASK_SOURCE_REMOTE
+//   - NEXTASK_GIT_REMOTE (NEXTASK_SOURCE_REMOTE remains an alias)
 //   - NEXTASK_WORKER_WORKDIR
 package config
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -30,11 +30,14 @@ import (
 	"time"
 
 	"github.com/BurntSushi/toml"
+	"github.com/TolgaOk/nextask/internal/db"
+	"github.com/TolgaOk/nextask/internal/urltemplate"
 )
 
-// DBConfig holds database configuration.
+// DBConfig keeps the shareable template separate from the resolved connection.
 type DBConfig struct {
-	URL string `toml:"url"`
+	Endpoint string `toml:"url"`
+	URL      string `toml:"-"`
 }
 
 // SourceConfig holds source snapshotting configuration.
@@ -64,6 +67,7 @@ const DefaultHeartbeatInterval = 1 * time.Minute
 // DefaultStaleThreshold is the number of missed heartbeats before a task is marked stale.
 const DefaultStaleThreshold = 3
 
+const DefaultWorkdir = "/tmp/nextask"
 const DefaultLogFlushLines = 100
 const DefaultLogFlushInterval = 500 * time.Millisecond
 const DefaultLogBufferSize = 10000
@@ -75,13 +79,15 @@ func (w WorkerConfig) StaleDuration() time.Duration {
 
 // Config holds the complete nextask configuration.
 type Config struct {
-	DB     DBConfig     `toml:"db"`
-	Source SourceConfig `toml:"source"`
-	Worker WorkerConfig `toml:"worker"`
-	Retry  RetryConfig  `toml:"retry"`
+	DB           DBConfig                  `toml:"db"`
+	Source       SourceConfig              `toml:"source"`
+	Worker       WorkerConfig              `toml:"worker"`
+	Retry        RetryConfig               `toml:"retry"`
+	Integrations map[string]map[string]any `toml:"integrations"`
 
 	// LoadedFiles tracks which config files were loaded (not serialized to TOML).
 	LoadedFiles []string `toml:"-"`
+	sources     map[string]string
 }
 
 // LocalFileName is the name of the per-project config file.
@@ -101,94 +107,168 @@ func LocalPath() string {
 	return LocalFileName
 }
 
-// Load reads configuration from the global and local config files, then applies
-// env var overrides. Local config values override global values.
-// Returns an empty Config if neither file exists.
-func Load() (*Config, error) {
-	cfg := &Config{}
+// SharedLocalFileName is the optional shared project config file.
+const SharedLocalFileName = ".tasktools.toml"
 
-	// Layer 1: global config
-	globalPath, err := GlobalPath()
-	if err == nil {
-		if err := decodeIfExists(globalPath, cfg); err != nil {
+// SharedGlobalPath returns the optional shared user config path.
+func SharedGlobalPath() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".config", "tasktools", "config.toml"), nil
+}
+
+type configFile struct {
+	path   string
+	shared bool
+}
+
+// Load reads settings and resolves the database connection for DB consumers.
+func Load() (*Config, error) {
+	cfg, err := LoadSettings()
+	if err != nil {
+		return nil, err
+	}
+	if err := cfg.ResolveDatabase(); err != nil {
+		return nil, err
+	}
+	return cfg, nil
+}
+
+// LoadSettings layers shared and standalone settings without reading DB secrets.
+func LoadSettings() (*Config, error) {
+	global, _ := GlobalPath()
+	shared, _ := SharedGlobalPath()
+	return loadSettingsFiles([]configFile{
+		{shared, true}, {global, false},
+		{SharedLocalFileName, true}, {LocalPath(), false},
+	})
+}
+
+func loadFiles(files []configFile) (*Config, error) {
+	cfg, err := loadSettingsFiles(files)
+	if err != nil {
+		return nil, err
+	}
+	if err := cfg.ResolveDatabase(); err != nil {
+		return nil, err
+	}
+	return cfg, nil
+}
+
+// ResolveDatabase reads only the credentials required by database commands.
+func (cfg *Config) ResolveDatabase() error {
+	if cfg.DB.Endpoint == "" {
+		return nil
+	}
+	value, err := db.ResolveURL(cfg.DB.Endpoint)
+	if err != nil {
+		return fmt.Errorf("%s: db.url: %w", cfg.SourceFor("db.url"), err)
+	}
+	cfg.DB.URL = value
+	return nil
+}
+
+func loadSettingsFiles(files []configFile) (*Config, error) {
+	cfg := &Config{}
+	for _, file := range files {
+		if file.path == "" {
+			continue
+		}
+		if err := decodeFile(file, cfg); err != nil {
 			return nil, err
 		}
 	}
-
-	// Layer 2: local config (overrides global)
-	if err := decodeIfExists(LocalPath(), cfg); err != nil {
+	applyEnv(cfg)
+	var err error
+	cfg.Integrations, err = cfg.resolveIntegrations()
+	if err != nil {
 		return nil, err
 	}
-
-	// Layer 3: env vars (override both)
-	applyEnv(cfg)
+	if err := db.ValidateURL(cfg.DB.Endpoint); err != nil {
+		return nil, fmt.Errorf("%s: db.url: %w", cfg.SourceFor("db.url"), err)
+	}
+	if err := cfg.validate(); err != nil {
+		return nil, err
+	}
 	return cfg, nil
 }
 
-// LoadFrom reads configuration from a specific file path and applies env var overrides.
-// Returns an empty Config if the file doesn't exist.
+// LoadFrom reads one standalone Nextask file, then applies environment and defaults.
 func LoadFrom(path string) (*Config, error) {
-	cfg := &Config{}
-
-	if err := decodeIfExists(path, cfg); err != nil {
-		return nil, err
-	}
-
-	applyEnv(cfg)
-	return cfg, nil
-}
-
-// decodeIfExists decodes a TOML file into cfg if the file exists.
-// It appends to cfg.LoadedFiles on success.
-func decodeIfExists(path string, cfg *Config) error {
-	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
-		return nil
-	}
-	if _, err := toml.DecodeFile(path, cfg); err != nil {
-		return fmt.Errorf("%s: %w", path, err)
-	}
-	cfg.LoadedFiles = append(cfg.LoadedFiles, path)
-	return nil
+	return loadFiles([]configFile{{path, false}})
 }
 
 // applyEnv overrides config values with environment variables if set.
 func applyEnv(cfg *Config) {
-	if v := os.Getenv("NEXTASK_DB_URL"); v != "" {
-		cfg.DB.URL = v
+	if v := os.Getenv("NEXTASK_DB_URL"); strings.TrimSpace(v) != "" {
+		cfg.DB.Endpoint = urltemplate.Reference("NEXTASK_DB_URL")
+		cfg.setSource("db.url", "env:NEXTASK_DB_URL")
 	}
 	if v := os.Getenv("NEXTASK_SOURCE_REMOTE"); v != "" {
-		cfg.Source.Remote = v
+		cfg.Source.Remote = urltemplate.Reference("NEXTASK_SOURCE_REMOTE")
+		cfg.setSource("source.remote", "env:NEXTASK_SOURCE_REMOTE")
+		cfg.setGitRemote(urltemplate.Reference("NEXTASK_SOURCE_REMOTE"), "env:NEXTASK_SOURCE_REMOTE")
+	}
+	if v := os.Getenv("NEXTASK_GIT_REMOTE"); v != "" {
+		cfg.setGitRemote(urltemplate.Reference("NEXTASK_GIT_REMOTE"), "env:NEXTASK_GIT_REMOTE")
+	}
+	if v := os.Getenv("NEXTASK_GIT_URL"); v != "" {
+		cfg.setGitRemote(urltemplate.Reference("NEXTASK_GIT_URL"), "env:NEXTASK_GIT_URL")
+	}
+	if v := os.Getenv("NEXTASK_S3_ENDPOINT"); v != "" {
+		cfg.setIntegrationOption("s3", "endpoint", urltemplate.Reference("NEXTASK_S3_ENDPOINT"), "env:NEXTASK_S3_ENDPOINT")
 	}
 	if v := os.Getenv("NEXTASK_WORKER_WORKDIR"); v != "" {
 		cfg.Worker.Workdir = v
+		cfg.setSource("worker.workdir", "env:NEXTASK_WORKER_WORKDIR")
 	}
-	// Apply defaults
+	// Preserve the existing convention that zero values select defaults.
+	if cfg.Worker.Workdir == "" {
+		cfg.Worker.Workdir = DefaultWorkdir
+		cfg.setSource("worker.workdir", "default")
+	}
 	if cfg.Worker.HeartbeatInterval == 0 {
 		cfg.Worker.HeartbeatInterval = DefaultHeartbeatInterval
+		cfg.setSource("worker.heartbeat_interval", "default")
 	}
 	if cfg.Worker.StaleThreshold == 0 {
 		cfg.Worker.StaleThreshold = DefaultStaleThreshold
+		cfg.setSource("worker.stale_threshold", "default")
 	}
 	if cfg.Worker.LogFlushLines == 0 {
 		cfg.Worker.LogFlushLines = DefaultLogFlushLines
+		cfg.setSource("worker.log_flush_lines", "default")
 	}
 	if cfg.Worker.LogFlushInterval == 0 {
 		cfg.Worker.LogFlushInterval = DefaultLogFlushInterval
+		cfg.setSource("worker.log_flush_interval", "default")
 	}
 	if cfg.Worker.LogBufferSize == 0 {
 		cfg.Worker.LogBufferSize = DefaultLogBufferSize
+		cfg.setSource("worker.log_buffer_size", "default")
 	}
 	if cfg.Retry.InitialInterval == 0 {
 		cfg.Retry.InitialInterval = 500 * time.Millisecond
+		cfg.setSource("retry.initial_interval", "default")
 	}
 	if cfg.Retry.MaxInterval == 0 {
 		cfg.Retry.MaxInterval = 30 * time.Second
+		cfg.setSource("retry.max_interval", "default")
 	}
 	normalizePaths(cfg)
 }
 
 func normalizePaths(cfg *Config) {
 	cfg.Source.Remote = NormalizeRemote(cfg.Source.Remote)
+	if git := cfg.Integrations["git"]; git != nil {
+		if remote, ok := git["remote"]; ok {
+			if value, ok := remote.(string); ok {
+				git["remote"] = NormalizeRemote(value)
+			}
+		}
+	}
 	cfg.Worker.Workdir = ToAbsPath(cfg.Worker.Workdir)
 }
 
@@ -238,4 +318,44 @@ func ToAbsPath(path string) string {
 		return abs
 	}
 	return path
+}
+
+func (cfg *Config) setGitRemote(value, source string) {
+	cfg.setIntegrationOption("git", "remote", value, source)
+}
+
+func (cfg *Config) setIntegrationOption(name, key, value, source string) {
+	if cfg.Integrations == nil {
+		cfg.Integrations = make(map[string]map[string]any)
+	}
+	if cfg.Integrations[name] == nil {
+		cfg.Integrations[name] = make(map[string]any)
+	}
+	cfg.Integrations[name][key] = value
+	cfg.setSource("integrations."+name+"."+key, source)
+}
+
+// Apply deprecated source.remote at its original layer, unless the same file
+// supplies the canonical integration setting.
+func (cfg *Config) applySourceAlias(meta toml.MetaData, path string, prefix []string) {
+	oldKey := append(append([]string{}, prefix...), "source", "remote")
+	newKey := append(append([]string{}, prefix...), "integrations", "git", "remote")
+	if meta.IsDefined(oldKey...) && !meta.IsDefined(newKey...) {
+		cfg.setGitRemote(cfg.Source.Remote, path+" ["+strings.Join(oldKey, ".")+"]")
+	}
+}
+
+func mergeIntegrationOptions(base, overlay map[string]map[string]any) map[string]map[string]any {
+	if base == nil {
+		base = make(map[string]map[string]any)
+	}
+	for name, options := range overlay {
+		if base[name] == nil {
+			base[name] = make(map[string]any)
+		}
+		for key, value := range options {
+			base[name][key] = value
+		}
+	}
+	return base
 }

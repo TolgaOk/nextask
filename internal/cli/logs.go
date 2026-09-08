@@ -2,25 +2,23 @@ package cli
 
 import (
 	"context"
-	"encoding/json"
+	"errors"
 	"fmt"
-	"os"
-	"os/signal"
-	"syscall"
-	"time"
+	"io"
 
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/TolgaOk/nextask/internal/config"
 	"github.com/TolgaOk/nextask/internal/db"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/spf13/cobra"
 )
 
-var (
-	logsStream string
-	logsHead   int
-	logsTail   int
-	logsAttach bool
-)
+type logsOptions struct {
+	stream string
+	head   int
+	tail   int
+	attach bool
+}
 
 var (
 	defaultLogStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
@@ -32,99 +30,92 @@ var (
 	}
 )
 
-var logsCmd = &cobra.Command{
-	Use:   "log TASK_ID",
-	Short: "View task output",
-	Args:  cobra.ExactArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		if cfg.DB.URL == "" {
-			return errDBRequired()
-		}
-
-		ctx := context.Background()
-
-		pool, err := db.Connect(ctx, cfg.DB.URL)
-		if err != nil {
-			return err
-		}
-		defer pool.Close()
-
-		task, err := db.GetTask(ctx, pool, args[0], cfg.Worker.StaleDuration())
-		if err != nil {
-			return err
-		}
-		if task == nil {
-			return errWithHints(fmt.Sprintf("task not found: %s", args[0]),
-				"Run "+codeStyle.Render("nextask list")+" to see available tasks",
-			)
-		}
-
-		if logsHead < 0 {
-			return errWithHints("--head must be positive",
-				"Example: "+codeStyle.Render("--head 50"),
-			)
-		}
-		if logsTail < 0 {
-			return errWithHints("--tail must be positive",
-				"Example: "+codeStyle.Render("--tail 50"),
-			)
-		}
-
-		if logsHead > 0 && logsTail > 0 {
-			return errWithHints("cannot use both --head and --tail",
-				"Use "+codeStyle.Render("--head N")+" for first N lines",
-				"Use "+codeStyle.Render("--tail N")+" for last N lines",
-			)
-		}
-
-		if logsAttach && logsHead > 0 {
-			return errWithHints("cannot use --attach with --head",
-				"Use "+codeStyle.Render("--tail N --attach")+" to show last N lines then stream",
-			)
-		}
-
-		limit := logsHead
-		tail := false
-		if logsTail > 0 {
-			limit = logsTail
-			tail = true
-		}
-
-		logs, err := db.GetLogs(ctx, pool, args[0], logsStream, limit, tail)
-		if err != nil {
-			return err
-		}
-
-		var lastLogID int
-		if len(logs) == 0 {
-			if logsStream != "" {
-				fmt.Fprintln(os.Stderr, hintStyle.Render(fmt.Sprintf("No logs with stream %q", logsStream)))
-			} else if !logsAttach {
-				fmt.Fprintln(os.Stderr, hintStyle.Render("No logs available"))
+func newLogsCommand(cfg *config.Config) *cobra.Command {
+	var opts logsOptions
+	cmd := &cobra.Command{
+		Use:   "log TASK_ID",
+		Short: "View task output",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := opts.validate(); err != nil {
+				return err
 			}
-		} else {
-			for _, log := range logs {
-				printLog(log)
-				if log.ID > lastLogID {
-					lastLogID = log.ID
+			if cfg.DB.URL == "" {
+				return errDBRequired()
+			}
+
+			ctx := cmd.Context()
+
+			pool, err := db.Connect(ctx, cfg.DB.URL)
+			if err != nil {
+				return err
+			}
+			defer pool.Close()
+
+			task, err := db.GetTask(ctx, pool, args[0], cfg.Worker.StaleDuration())
+			if err != nil {
+				return err
+			}
+			if task == nil {
+				return errWithHints(fmt.Sprintf("task not found: %s", args[0]),
+					"Run "+codeStyle.Render("nextask list")+" to see available tasks",
+				)
+			}
+
+			limit := opts.head
+			tail := false
+			if opts.tail > 0 {
+				limit = opts.tail
+				tail = true
+			}
+
+			logs, err := db.GetLogs(ctx, pool, args[0], opts.stream, limit, tail)
+			if err != nil {
+				return err
+			}
+
+			var lastLogID int
+			if len(logs) == 0 {
+				if opts.stream != "" {
+					_, err = fmt.Fprintln(cmd.ErrOrStderr(), hintStyle.Render(fmt.Sprintf("No logs with stream %q", opts.stream)))
+				} else if !opts.attach {
+					_, err = fmt.Fprintln(cmd.ErrOrStderr(), hintStyle.Render("No logs available"))
+				}
+				if err != nil {
+					return err
+				}
+			} else {
+				for _, log := range logs {
+					if err := printLog(cmd.OutOrStdout(), log); err != nil {
+						return err
+					}
+					if log.ID > lastLogID {
+						lastLogID = log.ID
+					}
 				}
 			}
-		}
 
-		if !logsAttach {
-			return nil
-		}
+			if !opts.attach {
+				return nil
+			}
 
-		// Only stream if task is still active
-		if task.Status != db.StatusPending && task.Status != db.StatusRunning {
-			return nil
-		}
+			// Only stream if task is still active
+			if task.Status != db.StatusPending && task.Status != db.StatusRunning {
+				return nil
+			}
 
-		return logsAndAttach(ctx, pool, task.ID, lastLogID)
-	},
+			return logsAndAttach(ctx, *cfg, outputFor(cmd), pool, task.ID, lastLogID, opts.stream)
+		},
+	}
+
+	cmd.Flags().StringVarP(&opts.stream, "stream", "s", "", "Filter by stream (stdout, stderr, nextask)")
+	cmd.Flags().IntVar(&opts.head, "head", 0, "Show first N lines (0 means no limit)")
+	cmd.Flags().IntVar(&opts.tail, "tail", 0, "Show last N lines (0 means no limit)")
+	cmd.Flags().BoolVarP(&opts.attach, "attach", "a", false, "Stream logs until task completes")
+	return cmd
 }
 
-func printLog(log db.TaskLog) {
+func printLog(out io.Writer, log db.TaskLog) error {
 	style, ok := logsStreamStyles[log.Stream]
 	if !ok {
 		style = defaultLogStyle
@@ -137,118 +128,60 @@ func printLog(log db.TaskLog) {
 		prefix = defaultLogPrefixStyle.Bold(true).Render("["+log.Stream+"]") + " "
 	}
 
-	fmt.Println(prefix + style.Render(log.Data))
+	_, err := fmt.Fprintln(out, prefix+style.Render(log.Data))
+	return err
 }
 
-func init() {
-	logsCmd.Flags().StringVarP(&logsStream, "stream", "s", "", "Filter by stream (stdout, stderr, nextask)")
-	logsCmd.Flags().IntVar(&logsHead, "head", 0, "Show first N lines")
-	logsCmd.Flags().IntVar(&logsTail, "tail", 0, "Show last N lines")
-	logsCmd.Flags().BoolVarP(&logsAttach, "attach", "a", false, "Stream logs until task completes")
-	RootCmd.AddCommand(logsCmd)
-}
-
-func logsAndAttach(ctx context.Context, pool *pgxpool.Pool, taskID string, lastLogID int) error {
-	fromChannel := db.FromTaskChannel(taskID)
-	backoff := db.NewBackOff(cfg.Retry.InitialInterval, cfg.Retry.MaxInterval)
-	listener, err := db.Listen(ctx, cfg.DB.URL, backoff, fromChannel)
-	if err != nil {
-		return fmt.Errorf("listen failed: %w", err)
+func logsAndAttach(ctx context.Context, cfg config.Config, out commandOutput, pool *pgxpool.Pool, taskID string, lastLogID int, stream string) error {
+	ctx, stop := interruptContext(ctx)
+	defer stop()
+	if _, err := fmt.Fprintln(out.err, hintStyle.Render("Streaming logs (Ctrl+C to stop watching)...")); err != nil {
+		return err
 	}
-	defer listener.Close(context.Background())
-
-	fmt.Fprintln(os.Stderr, hintStyle.Render("Streaming logs (Ctrl+C to stop watching)..."))
-
-	cancelCtx, cancelFunc := context.WithCancel(ctx)
-	defer cancelFunc()
-
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-	defer signal.Stop(sigCh)
-
-	go func() {
-		select {
-		case <-sigCh:
-			cancelFunc()
-		case <-cancelCtx.Done():
+	task, err := streamTask(ctx, cfg, out.err, pool, taskID, &lastLogID, func(log db.TaskLog) error {
+		if stream == "" || log.Stream == stream {
+			return printLog(out.out, log)
 		}
-	}()
-
-	// Poll ticker for status check (handles missed events during reconnect)
-	pollTicker := time.NewTicker(5 * time.Second)
-	defer pollTicker.Stop()
-
-	for {
-		select {
-		case notif, ok := <-listener.C:
-			if !ok {
-				// Listener closed - check final status
-				return logsCheckCompletion(ctx, pool, taskID, &lastLogID)
-			}
-
-			eventType, data, err := db.ParseEvent(notif.Payload)
-			if err != nil {
-				continue
-			}
-
-			switch eventType {
-			case db.EventTypeLog:
-				logsFetchLogs(ctx, pool, taskID, &lastLogID)
-
-			case db.EventTypeStatus:
-				var status db.TaskStatusEvent
-				if err := json.Unmarshal(data, &status); err != nil {
-					continue
-				}
-				logsFetchLogs(ctx, pool, taskID, &lastLogID)
-				fmt.Fprintf(os.Stderr, "\nTask %s (exit %d)\n", status.Status, status.ExitCode)
-				return nil
-			}
-
-		case <-pollTicker.C:
-			if err := logsCheckCompletion(ctx, pool, taskID, &lastLogID); err == nil {
-				return nil
-			}
-
-		case <-cancelCtx.Done():
-			fmt.Fprintln(os.Stderr) // newline after Ctrl+C
-			return nil
-		}
-	}
-}
-
-func logsFetchLogs(ctx context.Context, pool *pgxpool.Pool, taskID string, lastLogID *int) {
-	logs, err := db.GetLogsSince(ctx, pool, taskID, *lastLogID)
-	if err != nil {
-		return
-	}
-	for _, log := range logs {
-		printLog(log)
-		if log.ID > *lastLogID {
-			*lastLogID = log.ID
-		}
-	}
-}
-
-func logsCheckCompletion(ctx context.Context, pool *pgxpool.Pool, taskID string, lastLogID *int) error {
-	task, err := db.GetTask(ctx, pool, taskID, cfg.Worker.StaleDuration())
-	if err != nil || task == nil {
-		return fmt.Errorf("not done")
-	}
-
-	logsFetchLogs(ctx, pool, taskID, lastLogID)
-
-	if task.Status == db.StatusCompleted || task.Status == db.StatusFailed || task.Status == db.StatusCancelled {
-		exitCode := 0
-		if task.ExitCode != nil {
-			exitCode = *task.ExitCode
-		}
-		fmt.Fprintf(os.Stderr, "\nTask %s (exit %d)\n", task.Status, exitCode)
 		return nil
+	})
+	if errors.Is(err, context.Canceled) && ctx.Err() != nil {
+		_, err := fmt.Fprintln(out.err)
+		return err
 	}
-	if task.Status == db.StatusStale {
-		fmt.Fprintf(os.Stderr, "\nTask %s (worker heartbeat expired)\n", task.Status)
-		return nil
+	if err != nil {
+		return err
 	}
-	return fmt.Errorf("not done")
+	return printAttachedCompletion(out.err, task)
+}
+
+func (opts logsOptions) validate() error {
+	if opts.head < 0 {
+		return errWithHints("--head must not be negative",
+			"Example: "+codeStyle.Render("--head 50"),
+		)
+	}
+	if opts.tail < 0 {
+		return errWithHints("--tail must not be negative",
+			"Example: "+codeStyle.Render("--tail 50"),
+		)
+	}
+
+	if opts.head > 0 && opts.tail > 0 {
+		return errWithHints("cannot use both --head and --tail",
+			"Use "+codeStyle.Render("--head N")+" for first N lines",
+			"Use "+codeStyle.Render("--tail N")+" for last N lines",
+		)
+	}
+
+	if opts.attach && opts.head > 0 {
+		return errWithHints("cannot use --attach with --head",
+			"Use "+codeStyle.Render("--tail N --attach")+" to show last N lines then stream",
+		)
+	}
+	switch opts.stream {
+	case "", "stdout", "stderr", "nextask":
+	default:
+		return errWithHints(fmt.Sprintf("unknown stream: %s", opts.stream), "Valid: stdout, stderr, nextask")
+	}
+	return nil
 }

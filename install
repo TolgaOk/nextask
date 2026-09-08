@@ -17,12 +17,12 @@ Usage: install [options]
 
 Options:
     -h, --help              Display this help message
-    -v, --version <version> Install a specific version (e.g., 0.1.1)
+    -v, --version <version> Install a specific version (e.g., 0.2.0-alpha)
         --no-modify-path    Don't modify shell config files
 
 Examples:
     curl -fsSL https://raw.githubusercontent.com/TolgaOk/nextask/main/install | bash
-    curl -fsSL ... | bash -s -- --version 0.1.1
+    curl -fsSL ... | bash -s -- --version 0.2.0-alpha
 EOF
 }
 
