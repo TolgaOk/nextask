@@ -2,7 +2,7 @@
 
 [![Go 1.25](https://img.shields.io/badge/go-1.25-00ADD8?logo=go&logoColor=white)](https://go.dev) [![v0.2.0-alpha](https://img.shields.io/badge/v0.2.0--alpha-orange)](https://github.com/TolgaOk/nextask/releases/tag/v0.2.0-alpha) [![macOS | Linux](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-lightgrey)](https://github.com/TolgaOk/nextask)
 
-Keep developing on your laptop while your other machines handle training, tests, and data processing. Nextask queues your commands and lets you follow their progress from one terminal.
+Keep developing while workers handle training, tests, and data processing, on your machine or across several. Nextask queues your commands and lets you follow their progress from any terminal.
 
 <img src="doc/nextask-diagram.svg" alt="Nextask connects your machine to a PostgreSQL task queue, workers, Git, and persistent S3 artifact storage" width="100%">
 
@@ -16,15 +16,33 @@ curl -fsSL https://raw.githubusercontent.com/TolgaOk/nextask/main/install | bash
 
 ## Usage
 
-When your training script is ready, send it to a worker with a copy of your code:
+Run a command as if it were local. An available worker picks it up automatically, and its output appears live in your terminal:
+
+```sh
+nextask enqueue 'hostname' --attach
+```
+
+You can also run everything on one machine. Each worker handles one task at a time, so two workers allow at most two queued tasks to run together. Agents can enqueue more work while the rest waits, keeping the number of simultaneous tasks under your control.
+
+Make experiments easier to reproduce by keeping the exact code used for each task:
 
 ```sh
 nextask enqueue 'python train.py' --with git --with s3
 ```
 
-Keep working locally while the worker runs that saved version. S3 provides persistent storage for task artifacts: saved results remain available after the task ends or the worker is gone, ready to revisit or reuse in later tasks.
+Git saves your current code, including uncommitted changes, without changing your local repository. Keep editing while the worker runs that saved version.
 
-Your config supplies the Git remote, artifact storage, and what to keep, so you can reuse those choices across tasks. Passwords and keys stay in environment variables.
+S3 provides persistent artifact storage at `<remote>/<TASK_ID>/`. Saved artifacts remain available after the worker is gone or the task is removed, ready to revisit or reuse in later experiments.
+
+Follow the same task from multiple terminals, or let agents watch alongside you:
+
+```sh
+nextask log TASK_ID --attach
+```
+
+Each viewer can read past logs and follow new output independently. Stopping a log viewer leaves the task running.
+
+Connections and artifact choices come from config. Passwords and keys stay in environment variables.
 
 ## Read more
 
