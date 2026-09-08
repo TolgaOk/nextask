@@ -14,15 +14,14 @@ curl -fsSL https://raw.githubusercontent.com/TolgaOk/nextask/main/install | bash
 
 ## Usage
 
-Run your Python tests on a remote worker, watch progress live, and save the report to S3:
+Train on a remote machine while you keep working locally. Follow progress live and save your results to S3:
 
 ```sh
-nextask enqueue --with git --with s3 --attach \
-  --set 's3.include=["results.xml"]' \
-  'pytest --junitxml=results.xml'
+nextask enqueue 'python train.py' \
+  --with git --with s3 --attach
 ```
 
-Use your own Git and S3 services, with connection settings in config and passwords and keys in environment variables.
+Git, S3, and which files to upload are set in config. Passwords and keys stay in environment variables.
 
 ## Read more
 
