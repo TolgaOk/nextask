@@ -28,7 +28,7 @@ type Syncer struct {
 
 func reserved(name string) bool {
 	for _, part := range strings.Split(name, "/") {
-		if part == ".git" || part == ".nextask" {
+		if strings.EqualFold(part, ".git") || strings.EqualFold(part, ".nextask") {
 			return true
 		}
 	}

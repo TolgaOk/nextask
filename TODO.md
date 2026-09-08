@@ -80,7 +80,7 @@ Agreed CLI, config, and defaults: [S3 design](doc/s3.md).
 - [x] Add `s3 fetch TASK_ID --to DIR`, filters, dry-run, and explicit overwrite.
 - [x] Keep fetching independent of DB credentials and upload filters.
 - [x] Reject unsafe paths; publish complete downloads atomically.
-- [x] Test failures, interruption, conflicts, and live Hetzner fetching.
+- [x] Test failures, interruption, conflicts, filesystem aliases, and live Hetzner fetching.
 
 ## Later
 

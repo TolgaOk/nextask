@@ -87,19 +87,36 @@ func fetchParent(root *os.Root, name string, create bool) (*os.Root, error) {
 	return dir, nil
 }
 
-func checkFetchTarget(dir *os.Root, name string, overwrite bool) error {
+// checkFetchTarget captures the file an explicit overwrite is allowed to replace.
+func checkFetchTarget(dir *os.Root, name string, overwrite bool) (os.FileInfo, error) {
 	info, err := dir.Lstat(name)
 	if errors.Is(err, fs.ErrNotExist) {
-		return nil
+		return nil, nil
 	}
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("destination is not a regular file; symlinks are forbidden")
+	}
+	if !overwrite {
+		return nil, fmt.Errorf("destination already exists; use --overwrite to replace it")
+	}
+	return info, nil
+}
+
+// A path may now refer to another downloaded object on filesystems that fold
+// case or Unicode. It may also have been replaced by a concurrent writer.
+func checkFetchUnchanged(dir *os.Root, name string, original os.FileInfo) error {
+	current, err := checkFetchTarget(dir, name, true)
 	if err != nil {
 		return err
 	}
-	if !info.Mode().IsRegular() {
-		return fmt.Errorf("destination is not a regular file; symlinks are forbidden")
+	if original == nil && current == nil {
+		return nil
 	}
-	if !overwrite {
-		return fmt.Errorf("destination already exists; use --overwrite to replace it")
+	if original != nil && current != nil && os.SameFile(original, current) && original.Size() == current.Size() && original.ModTime().Equal(current.ModTime()) {
+		return nil
 	}
-	return nil
+	return fmt.Errorf("destination changed during fetch or aliases another artifact; refusing to replace it")
 }

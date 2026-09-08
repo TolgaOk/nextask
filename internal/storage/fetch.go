@@ -117,6 +117,7 @@ func Fetch(ctx context.Context, store DownloadStore, prefix, taskID string, o Fe
 			}
 		}
 	}
+	originals := make(map[string]os.FileInfo, len(names))
 	root, err := openFetchRoot(o.Destination, false)
 	if err != nil {
 		return err
@@ -131,7 +132,7 @@ func Fetch(ctx context.Context, store DownloadStore, prefix, taskID string, o Fe
 			if dir == nil {
 				continue
 			}
-			err = checkFetchTarget(dir, path.Base(name), o.Overwrite)
+			originals[name], err = checkFetchTarget(dir, path.Base(name), o.Overwrite)
 			dir.Close()
 			if err != nil {
 				return fmt.Errorf("%q: %w", name, err)
@@ -154,7 +155,7 @@ func Fetch(ctx context.Context, store DownloadStore, prefix, taskID string, o Fe
 		defer root.Close()
 	}
 	for i, name := range names {
-		if err := fetchFile(ctx, store, root, source, name, o); err != nil {
+		if err := fetchFile(ctx, store, root, source, name, originals[name], o); err != nil {
 			return fmt.Errorf("fetch stopped after %d of %d files; %q: %w", i, len(names), name, err)
 		}
 		if _, err := fmt.Fprintln(out, name); err != nil {
@@ -176,7 +177,7 @@ func excluded(patterns []string, name string) bool {
 	}
 }
 
-func fetchFile(parent context.Context, store DownloadStore, root *os.Root, source, name string, o FetchOptions) error {
+func fetchFile(parent context.Context, store DownloadStore, root *os.Root, source, name string, original os.FileInfo, o FetchOptions) error {
 	ctx, cancel := context.WithTimeout(parent, o.Timeout)
 	defer cancel()
 	dir, err := fetchParent(root, name, true)
@@ -185,7 +186,7 @@ func fetchFile(parent context.Context, store DownloadStore, root *os.Root, sourc
 	}
 	defer dir.Close()
 	base := path.Base(name)
-	if err := checkFetchTarget(dir, base, o.Overwrite); err != nil {
+	if err := checkFetchUnchanged(dir, base, original); err != nil {
 		return err
 	}
 	body, meta, err := store.Get(ctx, source+name)
@@ -223,10 +224,10 @@ func fetchFile(parent context.Context, store DownloadStore, root *os.Root, sourc
 	if err := file.Close(); err != nil {
 		return err
 	}
-	if err := checkFetchTarget(dir, base, o.Overwrite); err != nil {
+	if err := checkFetchUnchanged(dir, base, original); err != nil {
 		return err
 	}
-	if o.Overwrite {
+	if original != nil {
 		return dir.Rename(temporary, base)
 	}
 	// A hard link publishes the complete file without replacing a concurrent writer.

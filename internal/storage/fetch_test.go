@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -99,7 +100,7 @@ func TestFetchSelectionAndOverwrite(t *testing.T) {
 	}
 }
 func TestFetchRejectsUnsafePaths(t *testing.T) {
-	for _, key := range []string{"task/../escape", "task//absolute", "task/a/../../escape", "task/a\\b", "task/./dot", "task/a//b", "task/.git/config", "task/sub/.nextask/state", "other/file", "task/bad\x00name"} {
+	for _, key := range []string{"task/../escape", "task//absolute", "task/a/../../escape", "task/a\\b", "task/./dot", "task/a//b", "task/.git/config", "task/.GIT/config", "task/.NEXTASK/state", "task/sub/.nextask/state", "other/file", "task/bad\x00name"} {
 		t.Run(fmt.Sprintf("%q", key), func(t *testing.T) {
 			o := fetchOptions(t)
 			f := &downloadFixture{keys: []string{key}}
@@ -275,5 +276,90 @@ func TestFetchValidation(t *testing.T) {
 	o.Timeout = 0
 	if err := o.Validate(); err == nil {
 		t.Fatal("missing timeout accepted")
+	}
+}
+
+func TestFetchFilesystemAliases(t *testing.T) {
+	for _, pair := range [][2]string{{"Case.txt", "case.txt"}, {"caf\u00e9.txt", "cafe\u0301.txt"}} {
+		for _, existing := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%q/existing=%t", pair, existing), func(t *testing.T) {
+				names := []string{pair[0], pair[1]}
+				sort.Strings(names)
+				probe := t.TempDir()
+				if err := os.WriteFile(filepath.Join(probe, names[0]), []byte("probe"), 0600); err != nil {
+					t.Fatal(err)
+				}
+				_, err := os.Stat(filepath.Join(probe, names[1]))
+				aliased := err == nil
+				o := fetchOptions(t)
+				o.Overwrite = true
+				if err := os.MkdirAll(o.Destination, 0755); err != nil {
+					t.Fatal(err)
+				}
+				if existing {
+					for _, name := range names {
+						if err := os.WriteFile(filepath.Join(o.Destination, name), []byte("original"), 0600); err != nil {
+							t.Fatal(err)
+						}
+					}
+				}
+				f := &downloadFixture{keys: []string{"task/" + names[0], "task/" + names[1]}, data: map[string]string{"task/" + names[0]: "first", "task/" + names[1]: "second"}}
+				err = Fetch(context.Background(), f, "", "task", o, io.Discard)
+				if aliased {
+					if err == nil || !strings.Contains(err.Error(), "aliases another artifact") {
+						t.Fatalf("alias not reported: %v", err)
+					}
+					if readFetch(t, o.Destination, names[0]) != "first" {
+						t.Fatal("second artifact silently replaced the first")
+					}
+				} else {
+					if err != nil {
+						t.Fatal(err)
+					}
+					if readFetch(t, o.Destination, names[0]) != "first" || readFetch(t, o.Destination, names[1]) != "second" {
+						t.Fatal("distinct filenames lost")
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestFetchOverwritePreservesConcurrentChanges(t *testing.T) {
+	for _, existing := range []bool{false, true} {
+		t.Run(fmt.Sprint(existing), func(t *testing.T) {
+			o := fetchOptions(t)
+			o.Overwrite = true
+			if err := os.MkdirAll(o.Destination, 0755); err != nil {
+				t.Fatal(err)
+			}
+			target := filepath.Join(o.Destination, "file")
+			if existing {
+				if err := os.WriteFile(target, []byte("original"), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			f := &downloadFixture{keys: []string{"task/file"}}
+			f.get = func(context.Context, string) (io.ReadCloser, Object, error) {
+				replacement := filepath.Join(o.Destination, "concurrent")
+				if err := os.WriteFile(replacement, []byte("another writer"), 0600); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Rename(replacement, target); err != nil {
+					t.Fatal(err)
+				}
+				return io.NopCloser(strings.NewReader("download")), Object{Size: 8}, nil
+			}
+			if err := Fetch(context.Background(), f, "", "task", o, io.Discard); err == nil || !strings.Contains(err.Error(), "destination changed") {
+				t.Fatalf("concurrent replacement: %v", err)
+			}
+			if readFetch(t, o.Destination, "file") != "another writer" {
+				t.Fatal("concurrent file overwritten")
+			}
+			entries, err := os.ReadDir(o.Destination)
+			if err != nil || len(entries) != 1 {
+				t.Fatalf("staging files leaked: %v %v", entries, err)
+			}
+		})
 	}
 }
