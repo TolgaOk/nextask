@@ -11,7 +11,7 @@ Run a command on your machine or another and follow along from your terminal. An
 Install Nextask on your machine and wherever you want to run workers:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/TolgaOk/nextask/main/install | bash -s -- --version 0.2.0-alpha
+curl -fsSL https://raw.githubusercontent.com/TolgaOk/nextask/main/install | bash
 ```
 
 ## Usage
