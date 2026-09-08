@@ -14,16 +14,7 @@ curl -fsSL https://raw.githubusercontent.com/TolgaOk/nextask/main/install | bash
 
 ## Usage
 
-Set `NEXTASK_DB_URL` to the same PostgreSQL database on your machine and each worker. Put Git and S3 settings in `.nextask.toml` for the project, or `~/.config/nextask/global.toml` for all projects. Keep passwords and keys in environment variables and refer to them as `${VARIABLE_NAME}` in config.
-
-Initialize the database once, then start a worker on the machine that will run your tasks:
-
-```sh
-nextask init db
-nextask worker
-```
-
-Leave the worker running. From another terminal or machine, submit your command:
+Run a task with a copy of your code and upload its output files:
 
 ```sh
 nextask enqueue --with git --with s3 --attach \
@@ -40,6 +31,8 @@ nextask s3 fetch TASK_ID --to downloads
 ```
 
 Uploaded files remain available even after you remove the task from the database.
+
+Settings live in `.nextask.toml` for a project or `~/.config/nextask/global.toml` for user defaults. Passwords and keys come from environment variables.
 
 ## Read more
 
