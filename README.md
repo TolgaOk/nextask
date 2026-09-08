@@ -14,25 +14,17 @@ curl -fsSL https://raw.githubusercontent.com/TolgaOk/nextask/main/install | bash
 
 ## Usage
 
-Run a task with a copy of your code and upload its output files:
+List your project's files and save the list to S3:
 
 ```sh
 nextask enqueue --with git --with s3 --attach \
-  --set 's3.include=["outputs/**"]' './job.sh'
+  --set 's3.include=["files.txt"]' \
+  'git ls-files | tee files.txt'
 ```
 
-Git saves your current project without changing your local repository. The worker runs that saved code and uploads files from `outputs/` every 60 seconds and when the command finishes. `--attach` shows live logs and waits for the result. Git and S3 are optional; leave out the corresponding `--with` flag when you do not need them.
+Git leaves your local files unchanged. `--attach` shows the output.
 
-List tasks or download a task's output files using the ID printed by enqueue:
-
-```sh
-nextask list --limit 10
-nextask s3 fetch TASK_ID --to downloads
-```
-
-Uploaded files remain available even after you remove the task from the database.
-
-Settings live in `.nextask.toml` for a project or `~/.config/nextask/global.toml` for user defaults. Passwords and keys come from environment variables.
+Connection settings go in config; passwords and keys come from environment variables.
 
 ## Read more
 
