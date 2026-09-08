@@ -14,8 +14,6 @@ import (
 	"sync"
 	"syscall"
 	"time"
-
-	"github.com/bmatcuk/doublestar/v4"
 )
 
 // Syncer owns policy and reporting, independently of its storage transport.
@@ -24,23 +22,6 @@ type Syncer struct {
 	Store           Store
 	TaskID, TaskDir string
 	Log             func(string, ...any)
-}
-
-func reserved(name string) bool {
-	for _, part := range strings.Split(name, "/") {
-		if strings.EqualFold(part, ".git") || strings.EqualFold(part, ".nextask") {
-			return true
-		}
-	}
-	return false
-}
-func matches(patterns []string, name string) bool {
-	for _, pattern := range patterns {
-		if ok, _ := doublestar.Match(pattern, name); ok {
-			return true
-		}
-	}
-	return false
 }
 
 // Sync uploads a single pass. Only selected files consume staging space, bounded

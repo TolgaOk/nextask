@@ -14,8 +14,6 @@ import (
 	"sort"
 	"strings"
 	"time"
-
-	"github.com/bmatcuk/doublestar/v4"
 )
 
 // FetchOptions controls local selection and publication, independently of uploads.
@@ -34,23 +32,6 @@ func (o FetchOptions) Validate() error {
 		return fmt.Errorf("timeout must be positive and at most 24h")
 	}
 	return ValidatePatterns(o.Include, o.Exclude)
-}
-
-// ValidatePatterns checks portable, relative doublestar patterns.
-func ValidatePatterns(groups ...[]string) error {
-	for _, patterns := range groups {
-		for _, pattern := range patterns {
-			if pattern == "" || path.IsAbs(pattern) || strings.ContainsAny(pattern, "\x00\\") || !doublestar.ValidatePattern(pattern) {
-				return fmt.Errorf("invalid relative file pattern %q", pattern)
-			}
-			for _, part := range strings.Split(pattern, "/") {
-				if part == ".." {
-					return fmt.Errorf("file patterns cannot traverse parent directories")
-				}
-			}
-		}
-	}
-	return nil
 }
 
 // Fetch lists and validates selected objects before writing. Each file is
@@ -163,18 +144,6 @@ func Fetch(ctx context.Context, store DownloadStore, prefix, taskID string, o Fe
 		}
 	}
 	return nil
-}
-
-func excluded(patterns []string, name string) bool {
-	for {
-		if matches(patterns, name) {
-			return true
-		}
-		name = path.Dir(name)
-		if name == "." {
-			return false
-		}
-	}
 }
 
 func fetchFile(parent context.Context, store DownloadStore, root *os.Root, source, name string, original os.FileInfo, o FetchOptions) error {
