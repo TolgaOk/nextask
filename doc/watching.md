@@ -1,28 +1,21 @@
-# Watching tasks
+# Logs and waiting
 
 ```sh
-nextask wait task-a task-b              # wait for both
-nextask wait task-a task-b --any        # return after one finishes
-nextask wait --tag batch=export --any
-nextask wait task-a --timeout 30s       # exit 124 on timeout
+nextask log TASK_ID --tail 20 --attach  # recent lines, then live output
+nextask wait task-a task-b             # wait for both
+nextask wait task-a task-b --any       # return when either finishes
+nextask wait --tag batch=export        # wait for matching tasks
+nextask wait task-a --timeout 30s      # stop waiting after 30 seconds
 ```
 
-Default `wait` waits for every selected task and retains the first observed nonzero
-exit code. `--any` returns the first observed terminal result, including a task
-already finished successfully. Other tasks keep running. Repeated IDs print once.
-Missing tasks and stale workers produce nonzero results.
+- `wait` returns the first failure code it sees, after all selected tasks finish.
+- `wait --any` returns the first finished task's code, including tasks already finished. Other tasks keep running.
+- Waiting by tag includes matching tasks added while waiting. It ends when all selected tasks finish, or one with `--any`.
+- A timeout returns code `124`. Missing tasks and workers that stop reporting also cause an error.
+- `log --attach` shows output without returning the task's exit code. `enqueue --attach` returns that code.
 
-Tag selection includes tasks discovered while waiting. Waiting ends once its
-completion condition holds; it does not wait for future tasks after that point.
+## Ctrl+C
 
-`wait`, `log --attach`, `enqueue --attach`, `cancel`, and `worker stop` use database
-state to confirm completion. Notifications prompt immediate rechecks; a one-second
-poll covers missed notifications. Temporary read failures retry using configured
-retry intervals. Permanent read errors are reported. Listener cleanup has its own
-five-second deadline.
-
-Ctrl+C detaches from `wait` and `log --attach`. For `enqueue --attach`, it requests
-task cancellation and waits for a running task's final result. A second interrupt
-exits. Viewing logs does not propagate the task's exit code; attached enqueue does.
-Interrupting `cancel` or `worker stop` after sending the request detaches from
-confirmation with exit code zero. The request remains in effect.
+- With `wait` or `log --attach`, it stops watching. The task keeps running.
+- With `enqueue --attach`, it requests cancellation and waits for the result. Press again to exit.
+- After `cancel` or `worker stop` sends its request, Ctrl+C stops waiting for confirmation. The request remains in effect.
