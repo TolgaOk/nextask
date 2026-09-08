@@ -2,7 +2,7 @@
 
 [![Go 1.25](https://img.shields.io/badge/go-1.25-00ADD8?logo=go&logoColor=white)](https://go.dev) [![v0.2.0-alpha](https://img.shields.io/badge/v0.2.0--alpha-orange)](https://github.com/TolgaOk/nextask/releases/tag/v0.2.0-alpha) [![macOS | Linux](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-lightgrey)](https://github.com/TolgaOk/nextask)
 
-Keep developing while workers handle training, tests, and data processing, on your machine or across several. Nextask queues your commands and lets you follow their progress from any terminal.
+Run work on your machine or another, with the feel of a local command. Queue a task, watch its output live, and keep developing while an available worker handles it. Return to its code, logs, and artifacts whenever you need them.
 
 <img src="doc/nextask-diagram.svg" alt="Nextask connects your machine to a PostgreSQL task queue, workers, Git, and persistent S3 artifact storage" width="100%">
 
