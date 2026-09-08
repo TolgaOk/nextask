@@ -16,7 +16,7 @@ curl -fsSL https://raw.githubusercontent.com/TolgaOk/nextask/main/install | bash
 
 ## Usage
 
-Run a command as if it were local. An available worker picks it up automatically, and its output appears live in your terminal:
+Run a command as if it were local. An available worker picks it up, while `--attach` shows live output in your terminal and waits for the result:
 
 ```sh
 nextask enqueue 'hostname' --attach
@@ -30,7 +30,7 @@ Make experiments easier to reproduce by keeping the exact code used for each tas
 nextask enqueue 'python train.py' --with git --with s3
 ```
 
-Git saves a snapshot of your current code, including uncommitted changes, to the [remote set in your config](doc/configuration.md). Your local Git repository stays untouched, so you can keep editing while the worker runs that saved version.
+Nextask takes a snapshot of your current code, including uncommitted changes, and pushes it to the `<project>/<TASK_ID>` branch on the [remote set in your config](doc/configuration.md). Your local Git repository stays untouched, so you can keep editing while the worker runs that saved version.
 
 S3 provides persistent artifact storage at `<remote>/<TASK_ID>/`. Saved artifacts remain available after the worker is gone or the task is removed, ready to revisit or reuse in later experiments.
 
