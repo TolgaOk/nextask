@@ -39,7 +39,8 @@ once, with URL escaping applied to each component. Complete URL environment valu
 must already use URL escaping. Database keyword connection strings are supported
 through a complete environment value.
 
-The CLI resolves its DB connection when loading configuration. Workers resolve Git
+Commands that use the database resolve its connection before running.
+`nextask s3 fetch` only needs the storage settings and credentials. Workers resolve Git
 and S3 credentials at execution time; the submitter also resolves Git credentials
 when publishing a snapshot. Set the referenced variables on the relevant machines.
 `--db-url` and `defaults.db_url` are unsupported. Unknown config keys are rejected.
