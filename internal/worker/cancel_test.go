@@ -429,8 +429,8 @@ func TestWorker_CancelKillsChildProcesses(t *testing.T) {
 		done <- w.Run(ctx)
 	}()
 
-	// Wait for task to start and child process to be spawned
-	time.Sleep(500 * time.Millisecond)
+	// Wait until the worker has subscribed to cancellation and started execution.
+	waitForTaskStart(t, pool, task.ID)
 
 	// Verify the sleep process is running
 	out, _ := exec.Command("pgrep", "-f", marker).Output()
@@ -440,7 +440,9 @@ func TestWorker_CancelKillsChildProcesses(t *testing.T) {
 
 	// Send cancel notification
 	toChannel := db.ToTaskChannel(task.ID)
-	_ = db.Notify(ctx, pool, toChannel, db.TaskCancelEvent{})
+	if err := db.Notify(ctx, pool, toChannel, db.TaskCancelEvent{}); err != nil {
+		t.Fatalf("failed to send cancel: %v", err)
+	}
 
 	// Wait for worker to finish
 	start := time.Now()
