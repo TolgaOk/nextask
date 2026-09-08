@@ -12,17 +12,27 @@ A distributed task queue with live logs, optional Git snapshots, and S3-compatib
 curl -fsSL https://raw.githubusercontent.com/TolgaOk/nextask/main/install | bash -s -- --version 0.2.0-alpha
 ```
 
-## Usage
+## Enqueue with Git and S3
 
-Set `NEXTASK_DB_URL` to the same PostgreSQL database on the submitter and workers.
+With the remotes configured, snapshot your project and sync selected outputs:
 
 ```sh
-nextask init db                      # initialize once
-nextask worker                       # leave running in a worker terminal
-nextask enqueue 'hostname' --attach   # run from another terminal
+nextask enqueue --with git --with s3 --attach \
+  --set 's3.include=["outputs/**"]' './job.sh'
 ```
 
-See `nextask --help` for commands and options.
+## Other commands
+
+```sh
+nextask init db                       # initialize once
+nextask worker                        # leave running in a worker terminal
+nextask list --limit 10                # from another terminal
+nextask s3 fetch TASK_ID --to artifacts
+```
+
+## Configuration
+
+Set `NEXTASK_DB_URL` on the submitter and workers. Configure Git/S3 in `.nextask.toml` (project) or `~/.config/nextask/global.toml` (global). Reference secrets with `${VAR}`; keep their values in the environment.
 
 ## Read more
 
@@ -32,3 +42,5 @@ See `nextask --help` for commands and options.
 - [Logs and waiting](doc/watching.md)
 - [Upgrading from 0.1](doc/upgrading.md)
 - [Agent skills](skills/)
+
+Use `nextask --help` for all commands.
