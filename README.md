@@ -1,68 +1,62 @@
 # `nextask`
 
-[![Go 1.25](https://img.shields.io/badge/go-1.25-00ADD8?logo=go&logoColor=white)](https://go.dev) [![v0.1.1](https://img.shields.io/badge/v0.1.1-green)](https://github.com/TolgaOk/nextask) [![macOS | Linux](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-lightgrey)](https://github.com/TolgaOk/nextask)
+[![Go 1.25](https://img.shields.io/badge/go-1.25-00ADD8?logo=go&logoColor=white)](https://go.dev) [![v0.2.0-alpha](https://img.shields.io/badge/v0.2.0--alpha-orange)](https://github.com/TolgaOk/nextask/releases/tag/v0.2.0-alpha) [![macOS | Linux](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-lightgrey)](https://github.com/TolgaOk/nextask)
 
-Manage your runs from your local machine. `nextask` is a **distributed** task queue with live log streaming and Git-based source snapshotting for full **reproducibility**.
+A distributed task queue for shell commands. Submit tasks from your machine, run them on workers, and stream logs live. Add Git snapshots and S3-compatible artifact storage when needed.
+
+<img src="doc/nextask-diagram.svg" alt="Nextask CLI, PostgreSQL queue, and workers, with optional Git snapshots and S3 artifact storage" width="100%">
 
 ## Install
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/TolgaOk/nextask/main/install | bash
+curl -fsSL https://raw.githubusercontent.com/TolgaOk/nextask/main/install | bash -s -- --version 0.2.0-alpha
 ```
+
+For upgrades from 0.1, follow the [migration guide](doc/upgrading.md).
 
 ## Usage
 
-Enqueue tasks, start workers to process them, monitor their output and status, and organize them with tags.
+Set `NEXTASK_DB_URL` to your PostgreSQL connection URL on the submitter and workers. Initialize the database once:
 
-The example below shows the local CLI in the left pane and a worker running on a remote machine in the right pane.
+```sh
+nextask init db
+```
 
-<img src="doc/demo.gif" alt="nextask demo" width="100%">
+Start a worker on any machine connected to that database:
 
-See `nextask <command> --help` for all options and `nextask --help` for all commands.
+```sh
+nextask worker
+```
 
-## Agent-ready
+From another terminal, submit a command and follow its output:
 
-`nextask` is agent-ready by design. Install the [skills](skills/) to let agents set up services, deploy workers, and manage tasks:
+```sh
+nextask enqueue 'hostname' --attach
+nextask list --status running --limit 10
+```
+
+## Git and artifacts
+
+After [configuring the remotes and credentials](doc/integrations.md), snapshot your project and upload selected outputs:
+
+```sh
+nextask enqueue --with git --with s3 \
+  --set 's3.include=["outputs/**"]' './job.sh'
+nextask s3 fetch TASK_ID --to ./artifacts
+```
+
+Integrations are opt-in per task. Git snapshots leave your local repository unchanged. Workers upload selected files periodically and when commands finish.
+
+## Agent skills
+
+Install the [skills](skills/) to let agents set up services, deploy workers, and manage tasks:
 
 ```sh
 npx skills add https://github.com/TolgaOk/nextask/skills
 ```
 
-**Parallel monitoring.** Monitor logs, check task statuses, and track results without interrupting the agent's workflow.
+## Documentation
 
-**Resource management.** Tasks are serialized through a queue, so agents can enqueue many tasks without overloading workers.
+[Configuration](doc/configuration.md) · [Git integration](doc/integrations.md) · [S3 storage](doc/s3.md) · [Logs and waiting](doc/watching.md)
 
-## How it works
-
-`nextask` has three main components: the **CLI**, the persistent **database and Git remote**, and the potentially distributed **workers**.
-
-<img src="doc/nextask_architecture.svg" alt="nextask architecture" width="80%">
-
-## Configuration
-
-Config files:
-
-```
-~/.config/nextask/global.toml            # global defaults
-.nextask.toml                            # per-project
-```
-
-> **Priority:** CLI flags > environment variables > `.nextask.toml` > `global.toml`.
-
-Example config:
-
-```toml
-[db]
-url = "postgres://user@localhost:5432/nextask"   # or NEXTASK_DB_URL
-
-[source]
-remote = "~/.nextask/source.git"                 # bare repository used as the Git remote
-
-[worker]
-workdir = "/tmp/nextask"                         # or NEXTASK_WORKER_WORKDIR
-heartbeat_interval = "1m"                        # worker heartbeat frequency
-stale_threshold = 3                              # missed heartbeats before marking a worker stale
-log_flush_lines = 100                            # flush after this many lines
-log_flush_interval = "500ms"                     # maximum time between flushes
-log_buffer_size = 10000                          # log-line channel capacity
-```
+Use `nextask --help` or `nextask <command> --help` for commands and options.
