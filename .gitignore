@@ -35,6 +35,7 @@ CLAUDE.md
 # Local config
 nextask.toml
 .env
+TODO.md
 
 # Build
 bin/

@@ -1,175 +1,63 @@
 ---
 name: nextask
-description: Enqueue, monitor, and manage distributed tasks using the nextask CLI. Handles enqueueing commands with source snapshots, streaming live output, filtering and tagging tasks, managing workers, running sweeps, and batch processing. Use when the user mentions nextask, wants to run commands on remote workers, check task status, stream logs, manage a task queue, or organize runs with tags. Triggers even for "run this on the server", "check my training jobs", or "sweep over these parameters".
+description: Submit, monitor, and manage tasks and workers with the nextask CLI. Use when the user asks to use Nextask or work with an existing Nextask queue.
 user-invocable: false
 ---
 
-See the [README](https://github.com/TolgaOk/nextask) for install instructions and full documentation.
+Use `nextask --version` and command-specific `--help` for the installed CLI.
+Use `nextask config show --sources` to inspect settings without printing credentials.
 
-Use it to run commands on remote worker machines.
+## Submit and monitor
 
-## Common workflows
+Use the project's actual command and choose integrations according to the files it needs.
 
-### Enqueue a task
-```bash
-nextask enqueue "python train.py --lr 0.001" --with git --tag model=resnet,lr=0.001
-```
-- `--with git` captures the current working tree (including uncommitted changes) and pushes to a git remote
-- `--set git.remote=<name|url|path>` overrides the remote for `--with git`
-- `--tag key=value` adds metadata for filtering (repeatable, both key and value required)
-- `--attach` / `-a` streams live output after enqueuing
-
-Integrations are disabled by default. Config supplies options; select each integration explicitly with `--with TOOL`. Git tasks require Git on both the submitter and worker.
-
-### Monitor tasks
-```bash
-nextask list                              # all tasks
-nextask list --status running             # filter by status
-nextask list --tag sweep=exp3             # filter by tag
-nextask list --command "train"            # search in command (multiple: OR)
-nextask list --since 1h                   # recent tasks
-nextask list --json                       # JSON output
-
-nextask show <id>                         # task details
-
-nextask log <id>                          # view output
-nextask log <id> --attach                 # stream live output
-nextask log <id> --tail 50 --attach       # last 50 lines + stream
-nextask log <id> --stream stderr          # stderr only
-
-nextask wait <id>                         # block until done
-nextask wait --tag sweep=exp3             # wait for all matching
-nextask wait <id1> <id2> --any            # wait for first to finish
+```sh
+nextask enqueue 'hostname' --attach                        # quick worker check
+nextask enqueue 'python train.py' --with git --tag batch=exp1
+nextask enqueue 'python train.py' --with git --with s3 --set 's3.include=["outputs/**"]'
 ```
 
-### Cancel / remove
-```bash
-nextask cancel <id>
-nextask remove <id>                # deletes the task and logs; keeps snapshots and stored artifacts
+Keep the returned task ID for subsequent commands.
+For a group of tasks, use a shared tag and wait on that tag.
+
+```sh
+nextask list --tag batch=exp1 --limit 20 --json
+nextask show TASK_ID
+nextask log TASK_ID --tail 50 --attach
+nextask wait --tag batch=exp1
+nextask wait TASK_A TASK_B --any
+nextask s3 fetch TASK_ID --to ./artifacts
 ```
 
-### Workers
-```bash
-nextask worker                     # start picking up tasks
-nextask worker --filter gpu=a100   # only matching tasks
-nextask worker --once              # run one task then exit
-nextask worker --once --rm         # run one task, clean up workdir, exit
-nextask worker --daemon            # run as background process
-nextask worker --timeout 24h       # stop after duration
-nextask worker --exit-if-idle 5m   # exit if no tasks for 5 minutes
-nextask worker --workdir /data/nextask  # custom workdir
+Use `nextask cancel TASK_ID` to stop a task and `nextask remove TASK_ID` to delete its record and logs.
+List output defaults to 50 entries; use `--limit` and `--offset` when collecting larger sets.
 
-nextask worker list                # show registered workers
-nextask worker stop <id>           # stop a worker
-```
+## Critical points
 
-> Example usages
+- Quote the command passed to `enqueue`; it runs through `sh` in a fresh worker task directory.
+  Local project files are available only if supplied, such as through `--with git`.
+- Integrations are off by default; select `--with git` and/or `--with s3` explicitly.
+  `--set TOOL.KEY=VALUE` overrides one task's settings; lists replace configured lists.
+- Git snapshots include uncommitted changes and push to `<project>/<TASK_ID>` without changing the local repository.
+  Both machines need Git and access to the remote; the repository needs an initial commit and cannot contain submodules.
+- S3 requires explicit `include` or `final_include` patterns; `exclude` always wins.
+  Abrupt worker loss preserves only artifacts already uploaded.
+  `s3 fetch TASK_ID --to DIR` needs storage settings but no DB record.
+- `wait` waits for all selected tasks; `wait --any` returns the first finished task's exit code.
+  `log --attach` streams output without returning the task's exit code; `enqueue --attach` returns it.
+- Ctrl+C on `log` or `wait` only stops watching; on `enqueue --attach` it requests cancellation.
+- Each worker runs one task at a time.
+  A stale task is not automatically resumed or requeued.
+- `remove` deletes task records and logs but keeps Git snapshots and S3 artifacts.
+- Connection templates use `${VARIABLE}` references; workers need those variables in their own environment.
+  Task commands receive `NEXTASK_TASK_ID` and the worker's resolved `NEXTASK_DB_URL`.
 
-### Hyperparameter sweep
-```bash
-for lr in 0.1 0.01 0.001; do
-  nextask enqueue "python train.py --lr $lr" --with git --tag sweep=lr,lr=$lr
-done
-nextask wait --tag sweep=lr        # block until all finish
-nextask list --tag sweep=lr        # compare results
-```
+## When something fails
 
-### Run and watch
-```bash
-nextask enqueue "python train.py" --with git --attach
-# Ctrl+C cancels the task
-```
+- Pending tasks: check `nextask worker list --status running` and the workers' tag filters.
+- Stale tasks: inspect the worker and its logs before submitting a replacement; the old command may still be running.
+- Git failures: check the task logs, Git installation, and remote access on the worker as well as the submitter.
+- Missing artifacts: check selected paths and upload errors; files lost before an upload cannot be fetched.
+- Connection failures: inspect redacted config on the failing machine, then check its environment and service access.
 
-### Batch processing
-```bash
-for dataset in train val test; do
-  nextask enqueue "python process.py --data $dataset" --tag job=preprocess,data=$dataset
-done
-nextask wait --tag job=preprocess
-```
-
-### One-off remote execution
-```bash
-nextask enqueue "nvidia-smi" --attach
-# runs on whichever worker picks it up, output streamed back
-```
-
-### Route to specific workers
-```bash
-# Enqueue with tags
-nextask enqueue "python train.py" --with git --tag gpu=a100
-
-# Worker only claims matching tasks
-nextask worker --filter gpu=a100
-```
-
-### Saving results from tasks
-
-Configure `[integrations.s3]` with an endpoint, remote bucket/prefix, and explicit
-`include` patterns. Set `S3_ACCESS_KEY` and `S3_SECRET_KEY` on the worker.
-
-```bash
-nextask enqueue --with git --with s3 './export.sh'
-nextask enqueue --with s3 --set s3.interval=0s --set 's3.include=["results/**"]' './export.sh'
-```
-
-S3 uploads selected files periodically and after command completion, including
-failure and graceful cancellation. Objects use `<remote>/<TASK_ID>/<relative-path>`;
-removing a task preserves them. See the [S3 guide](../../doc/s3.md) for all options.
-Integrations are opt-in; configuration alone never enables uploads.
-
-### Tagging and querying
-
-Tags are key=value pairs for organizing, filtering, and routing tasks.
-
-```bash
-# Add tags at enqueue time (comma-separated or repeated)
-nextask enqueue "python run.py" --tag project=myapp,env=staging
-
-# Filter by any combination
-nextask list --tag project=myapp
-nextask list --tag project=myapp --status completed
-nextask wait --tag project=myapp
-
-# Route tasks to specific workers
-nextask enqueue "python run.py" --tag gpu=a100
-nextask worker --filter gpu=a100   # only picks up matching tasks
-```
-
-### Setup
-```bash
-nextask init db                    # create database tables
-nextask config                     # show configuration
-```
-
-## Related skills
-- `nextask-setup-services` — deploy PostgreSQL and a git server for snapshots. Use whenever services need to be set up, changed, or are not working.
-- `nextask-setup-worker` — set up workers (local, remote, cloud). Use whenever a worker needs to be added or reconfigured.
-
-## Configuration
-
-Priority: CLI flags > environment > project config > user config. Within each scope, Nextask config overrides the optional shared tasktools config. Run `nextask config show --sources` to inspect effective values.
-
-Set the database connection through `NEXTASK_DB_URL` on the CLI host and workers.
-DB URL config settings and `--db-url` are rejected. Use SSH or Git credential
-helpers; never put tokens or passwords in Git remote URLs. S3 tasks require
-`S3_ACCESS_KEY` and `S3_SECRET_KEY` on the worker, with missing variables named in
-the error. Keep Nextask TOML files limited to non-secret options.
-Set `integrations.git.remote` for snapshot storage.
-
-## Key concepts
-- Tasks go through: `pending` → `running` → `completed` | `failed` | `cancelled` | `stale`
-- Workers claim tasks atomically from PostgreSQL
-- Heartbeats detect stale workers; tasks on dead workers become `stale`
-- Logs are captured in batches with stdout/stderr separation
-- Snapshots preserve exact source code state without modifying the local repo. Pushed to `<source-remote>/refs/heads/<project-dir-name>/<taskID>` (e.g., for task `fmc17eq5` in a repo named `myproject`: `refs/heads/myproject/fmc17eq5`)
-
-## Troubleshooting
-
-| Symptom | Fix |
-|---------|-----|
-| Tasks stuck `pending` | Check `nextask worker list`, ensure `--filter` tags match `--tag` |
-| Tasks go `stale` | Worker crashed, check logs and restart |
-| Worker can't reach DB | Verify URL, check firewall, set `NEXTASK_DB_URL` and test with `nextask list` from the worker host |
-| `git clone` fails in worker | Wrong source remote or token expired, verify with `git ls-remote` |
-| `nextask list` shows nothing | Check `NEXTASK_DB_URL`; use `nextask config show --sources` for redacted diagnostics |
+Read [CLI reference](https://github.com/TolgaOk/nextask/blob/main/doc/cli.md) for commands, [configuration](https://github.com/TolgaOk/nextask/blob/main/doc/configuration.md) for connection settings, and [S3 storage](https://github.com/TolgaOk/nextask/blob/main/doc/s3.md) for artifact options.
