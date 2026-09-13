@@ -52,7 +52,8 @@ Choose files to upload when [enqueueing](integrations.md).
 We highly suggest that you keep secret values in environment variables or in a secrets manager.
 The example config contains their names, e.g., `${DB_PASSWORD}`, and build the full url.
 
-You can also supply complete connection URLs in your project `.env` file or in the remote workers:
+You can also supply complete connection URLs through environment variables on your machine and remote workers.
+If you keep them in a `.env` file, load it into the environment before starting Nextask:
 
 | Environment variable | Replaces |
 |---|---|

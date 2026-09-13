@@ -1,16 +1,12 @@
 # Upgrading to 0.2.0-alpha
 
-1.
-   Back up the database and install the new version on the machine submitting tasks and on every worker.
-2.
-   Replace passwords and keys in config with `${VARIABLE}` references.
+1. Back up the database and install the new version on the machine submitting tasks and on every worker.
+2. Replace passwords and keys in config with `${VARIABLE}` references.
    Set those variables on the machines that need them.
    Every config file is checked, including global defaults.
-3.
-   Run `nextask init db`.
+3. Run `nextask init db`.
    It adds columns without removing existing tasks or logs.
-4.
-   Restart workers before submitting tasks with Git or S3.
+4. Restart workers before submitting tasks with Git or S3.
 
 See [configuration](configuration.md) for complete examples.
 S3 keys now belong in the endpoint, for example `https://${S3_ACCESS_KEY}:${S3_SECRET_KEY}@fsn1.your-objectstorage.com`.
