@@ -1,4 +1,8 @@
-# Upgrading to 0.2.0-alpha
+# Upgrading to 0.2.0
+
+If you already use `0.2.0-alpha`, this release introduces no additional schema or configuration changes.
+Upgrade the CLI and workers together.
+The migration steps and command changes below apply when upgrading from `0.1.x`.
 
 1. Back up the database and install the new version on the machine submitting tasks and on every worker.
 2. Replace passwords and keys in config with `${VARIABLE}` references.

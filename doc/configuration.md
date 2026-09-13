@@ -72,4 +72,3 @@ nextask config show --sources
 
 This shows settings and where they came from, with secrets hidden.
 Git and S3 still require `--with` on each task.
-
