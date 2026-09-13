@@ -1,61 +1,52 @@
-# `nextask`
+# nextask
 
 [![Go 1.25](https://img.shields.io/badge/go-1.25-00ADD8?logo=go&logoColor=white)](https://go.dev) [![v0.2.0-alpha](https://img.shields.io/badge/v0.2.0--alpha-orange)](https://github.com/TolgaOk/nextask/releases/tag/v0.2.0-alpha) [![macOS | Linux](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-lightgrey)](https://github.com/TolgaOk/nextask)
 
-Run a command on your machine or another and follow along from your terminal.
-An available worker picks it up while you keep working, and you can come back to its code, logs, and artifacts later.
+Run a task on a remote machine, as if it were running in your **local** terminal.
 
 <img src="doc/nextask-diagram.svg" alt="Nextask connects your machine to a PostgreSQL task queue, workers, Git, and persistent S3 artifact storage" width="100%">
 
+Under the hood, `nextask` delegates the task to an available worker, streaming the logs back to your terminal, snapshotting the code at the time of submission, and storing the task artifacts produced in the task.
+
 ## Install
 
-Install Nextask on your machine and wherever you want to run workers:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/TolgaOk/nextask/main/install | bash
 ```
 
-## Usage
+## Quick start
 
-Run a command as if it were local.
-An available worker picks it up, while `--attach` shows live output in your terminal and waits for the result:
+Once a task is enqueued, an available worker picks it up.
+If provided `--attach` flag, `nextask` will hold the connection to the DB, streaming the logs to your terminal.
 
 ```sh
-nextask enqueue 'hostname' --attach
+nextask enqueue 'python train.py' --attach
 ```
 
-You can run everything on one machine, too.
-Each worker handles one task at a time, so two workers run at most two queued tasks at once.
-Agents can add more work, and the rest waits its turn.
-
-Make experiments easier to reproduce by keeping the exact code used for each task:
+Provided the `with git` flag, `nextask` will take a snapshot of the repository (including uncommitted changes) the task call is made from and push it to the `<project>/<TASK_ID>` branch in the remote Git repository (see [config](doc/configuration.md) to set).
+If also provided the `with s3` flag, `nextask` will store the artifacts produced in the task at `<remote>/<task_id>/` within the S3 bucket (configured in your [config](doc/configuration.md)).
 
 ```sh
 nextask enqueue 'python train.py' --with git --with s3
 ```
 
-Nextask takes a snapshot of your current code, including uncommitted changes, and pushes it to the `<project>/<TASK_ID>` branch on the [remote set in your config](doc/configuration.md).
-Your local Git repository stays untouched, so you can keep editing while the worker runs that saved version.
-
-S3 provides persistent artifact storage at `<remote>/<TASK_ID>/`.
-Saved artifacts remain available after the worker is gone or the task is removed, ready to revisit or reuse in later experiments.
-
-Follow the same task from multiple terminals, or let agents watch alongside you:
+You can access the logs of a task by providing the task ID or live watch the task logs by providing the `--attach` flag.
 
 ```sh
 nextask log TASK_ID --attach
 ```
 
-Each viewer can read past logs and follow new output independently.
-Stopping a log viewer leaves the task running.
+Each `log` command is a viewer that request the logs from the DB.
+Hence, you can read past logs and follow new output independently.
 
-Connections and artifact choices come from config.
-Passwords and keys stay in environment variables.
+`nextask` is build **agentic** workflow in mind.
+Agents can `wait`, `log`, and `enqueue` tasks, all managed by the DB.
 
 ## Read more
 
-- [Connect your database, Git, and storage](doc/configuration.md)
-- [Choose Git and S3 for each task](doc/integrations.md)
-- [Follow progress and wait for results](doc/watching.md)
+- [configuration](doc/configuration.md)
+- [Git and S3](doc/integrations.md)
+- [CLI reference](doc/cli.md)
 
 Use `nextask --help` for all commands.
