@@ -4,7 +4,7 @@ import (
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
-	"os"
+	"io"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -16,30 +16,35 @@ const minTermWidth = 80
 
 // TableConfig holds configuration for rendering a table.
 type TableConfig struct {
-	Headers []string
-	Rows    [][]string
-	Count   int  // total matching rows (for summary line)
-	Offset  int  // current offset (for summary line)
-	JSON    bool // output as JSON array
-	CSV     bool // output as CSV
-	Wrap    bool // wrap long lines instead of truncating
+	EmptyMessage string // human output only; JSON and CSV keep their schemas
+	Headers      []string
+	Rows         [][]string
+	Count        int  // total matching rows (for summary line)
+	Offset       int  // current offset (for summary line)
+	JSON         bool // output as JSON array
+	CSV          bool // output as CSV
+	Wrap         bool // wrap long lines instead of truncating
 }
 
 // PrintTable renders a table according to the config.
 // For table output, it auto-detects terminal width and truncates columns to fit.
 // Callers should pre-render any styled cell content (e.g. colored status) before passing rows;
 // lipgloss table preserves ANSI codes through truncation and rendering.
-func PrintTable(tc TableConfig) error {
+func PrintTable(out commandOutput, tc TableConfig) error {
 	if tc.JSON {
-		return printJSON(tc.Headers, tc.Rows)
+		return printJSON(out.out, tc.Headers, tc.Rows)
 	}
 	if tc.CSV {
-		return printCSV(tc.Headers, tc.Rows)
+		return printCSV(out.out, tc.Headers, tc.Rows)
 	}
-	return printStyledTable(tc)
+	if len(tc.Rows) == 0 && tc.EmptyMessage != "" {
+		_, err := fmt.Fprintln(out.err, tc.EmptyMessage)
+		return err
+	}
+	return printStyledTable(out, tc)
 }
 
-func printJSON(headers []string, rows [][]string) error {
+func printJSON(out io.Writer, headers []string, rows [][]string) error {
 	keys := make([]string, len(headers))
 	for i, h := range headers {
 		keys[i] = strings.ToLower(h)
@@ -54,13 +59,13 @@ func printJSON(headers []string, rows [][]string) error {
 		}
 		objects = append(objects, obj)
 	}
-	enc := json.NewEncoder(os.Stdout)
+	enc := json.NewEncoder(out)
 	enc.SetIndent("", "  ")
 	return enc.Encode(objects)
 }
 
-func printCSV(headers []string, rows [][]string) error {
-	w := csv.NewWriter(os.Stdout)
+func printCSV(out io.Writer, headers []string, rows [][]string) error {
+	w := csv.NewWriter(out)
 	if err := w.Write(headers); err != nil {
 		return err
 	}
@@ -73,22 +78,26 @@ func printCSV(headers []string, rows [][]string) error {
 	return w.Error()
 }
 
-func getTermWidth() int {
-	w, _, err := term.GetSize(os.Stdout.Fd())
+func getTermWidth(out io.Writer) int {
+	file, ok := out.(interface{ Fd() uintptr })
+	if !ok {
+		return minTermWidth
+	}
+	w, _, err := term.GetSize(file.Fd())
 	if err != nil || w < minTermWidth {
 		return minTermWidth
 	}
 	return w
 }
 
-func printStyledTable(tc TableConfig) error {
+func printStyledTable(out commandOutput, tc TableConfig) error {
 	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("15"))
 	rowStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
 
 	t := table.New().
 		Border(lipgloss.NormalBorder()).
 		BorderStyle(lipgloss.NewStyle().Foreground(lipgloss.Color("240"))).
-		Width(getTermWidth()).
+		Width(getTermWidth(out.out)).
 		Wrap(tc.Wrap).
 		Headers(tc.Headers...).
 		Rows(tc.Rows...).
@@ -99,14 +108,17 @@ func printStyledTable(tc TableConfig) error {
 			return rowStyle
 		})
 
-	fmt.Fprintln(os.Stdout, t)
+	if _, err := fmt.Fprintln(out.out, t); err != nil {
+		return err
+	}
 
 	if tc.Count > 0 && len(tc.Rows) < tc.Count {
 		if tc.Offset > 0 {
-			fmt.Fprintf(os.Stderr, "%d-%d/%d (use --offset to page through results)\n", tc.Offset+1, tc.Offset+len(tc.Rows), tc.Count)
-		} else {
-			fmt.Fprintf(os.Stderr, "%d/%d (use --offset to page through results)\n", len(tc.Rows), tc.Count)
+			_, err := fmt.Fprintf(out.err, "%d-%d/%d (use --offset to page through results)\n", tc.Offset+1, tc.Offset+len(tc.Rows), tc.Count)
+			return err
 		}
+		_, err := fmt.Fprintf(out.err, "%d/%d (use --offset to page through results)\n", len(tc.Rows), tc.Count)
+		return err
 	}
 
 	return nil

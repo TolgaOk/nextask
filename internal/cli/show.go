@@ -1,12 +1,13 @@
 package cli
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"strings"
 	"time"
 
+	"github.com/TolgaOk/nextask/internal/config"
 	"github.com/TolgaOk/nextask/internal/db"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
@@ -38,60 +39,66 @@ func statusStyle(status db.TaskStatus) lipgloss.Style {
 	}
 }
 
-var showCmd = &cobra.Command{
-	Use:   "show TASK_ID",
-	Short: "Show task details",
-	Args:  cobra.ExactArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		if cfg.DB.URL == "" {
-			return errDBRequired()
-		}
+func newShowCommand(cfg *config.Config) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "show TASK_ID",
+		Short: "Show task details",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if cfg.DB.URL == "" {
+				return errDBRequired()
+			}
 
-		ctx := context.Background()
+			ctx := cmd.Context()
 
-		pool, err := db.Connect(ctx, cfg.DB.URL)
-		if err != nil {
-			return err
-		}
-		defer pool.Close()
+			pool, err := db.Connect(ctx, cfg.DB.URL)
+			if err != nil {
+				return err
+			}
+			defer pool.Close()
 
-		task, err := db.GetTask(ctx, pool, args[0], cfg.Worker.StaleDuration())
-		if err != nil {
-			return err
-		}
-		if task == nil {
-			return errWithHints(fmt.Sprintf("task not found: %s", args[0]),
-				"Run "+codeStyle.Render("nextask list")+" to see available tasks",
-			)
-		}
+			task, err := db.GetTask(ctx, pool, args[0], cfg.Worker.StaleDuration())
+			if err != nil {
+				return err
+			}
+			if task == nil {
+				return errWithHints(fmt.Sprintf("task not found: %s", args[0]),
+					"Run "+codeStyle.Render("nextask list")+" to see available tasks",
+				)
+			}
 
-		printTask(task)
-		return nil
-	},
+			return printTask(cmd.OutOrStdout(), task)
+		},
+	}
+
+	return cmd
 }
 
-func printTask(task *db.Task) {
-	printField(showLabelStyle, "ID", task.ID)
-	printField(showLabelStyle, "Status", statusStyle(task.Status).Render(string(task.Status)))
-	printField(showLabelStyle, "Command", task.Command)
+func printTask(out io.Writer, task *db.Task) error {
+	var buffer strings.Builder
+	formatTask(&buffer, task)
+	_, err := io.WriteString(out, buffer.String())
+	return err
+}
+
+func formatTask(out io.Writer, task *db.Task) {
+	printField(out, showLabelStyle, "ID", task.ID)
+	printField(out, showLabelStyle, "Status", statusStyle(task.Status).Render(string(task.Status)))
+	printField(out, showLabelStyle, "Command", task.Command)
 
 	if len(task.Tags) > 0 {
-		var tagParts []string
-		for k, v := range task.Tags {
-			tagParts = append(tagParts, fmt.Sprintf("%s=%s", k, v))
-		}
-		printField(showLabelStyle, "Tags", strings.Join(tagParts, ", "))
+		printField(out, showLabelStyle, "Tags", strings.Join(sortedTags(task.Tags), ", "))
 	}
 
-	printField(showLabelStyle, "Created", formatTime(task.CreatedAt))
+	printField(out, showLabelStyle, "Created", formatTime(task.CreatedAt))
 	if task.StartedAt != nil {
-		printField(showLabelStyle, "Started", formatTime(*task.StartedAt))
+		printField(out, showLabelStyle, "Started", formatTime(*task.StartedAt))
 	}
 	if task.FinishedAt != nil {
-		printField(showLabelStyle, "Finished", formatTime(*task.FinishedAt))
+		printField(out, showLabelStyle, "Finished", formatTime(*task.FinishedAt))
 		if task.StartedAt != nil {
 			duration := task.FinishedAt.Sub(*task.StartedAt)
-			printField(showLabelStyle, "Duration", formatDuration(duration))
+			printField(out, showLabelStyle, "Duration", formatDuration(duration))
 		}
 	}
 
@@ -100,33 +107,33 @@ func printTask(task *db.Task) {
 		if *task.ExitCode != 0 {
 			exitStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
 		}
-		fmt.Printf("%s  %s\n", showLabelStyle.Render("Exit Code:"), exitStyle.Render(fmt.Sprintf("%d", *task.ExitCode)))
+		fmt.Fprintf(out, "%s  %s\n", showLabelStyle.Render("Exit Code:"), exitStyle.Render(fmt.Sprintf("%d", *task.ExitCode)))
 	}
 
 	if task.WorkerID != nil || task.WorkerInfo != nil {
-		fmt.Println(showSectionStyle.Render("Worker"))
+		fmt.Fprintln(out, showSectionStyle.Render("Worker"))
 		if task.WorkerID != nil {
-			printField(showIndentLabel, "ID", *task.WorkerID)
+			printField(out, showIndentLabel, "ID", *task.WorkerID)
 		}
 		if task.WorkerInfo != nil {
-			printField(showIndentLabel, "Hostname", task.WorkerInfo.Hostname)
-			printField(showIndentLabel, "OS", task.WorkerInfo.OS)
-			printField(showIndentLabel, "PID", fmt.Sprintf("%d", task.WorkerInfo.PID))
+			printField(out, showIndentLabel, "Hostname", task.WorkerInfo.Hostname)
+			printField(out, showIndentLabel, "OS", task.WorkerInfo.OS)
+			printField(out, showIndentLabel, "PID", fmt.Sprintf("%d", task.WorkerInfo.PID))
 		}
 	}
 
-	if task.SourceType != "noop" && task.SourceType != "" {
-		fmt.Println(showSectionStyle.Render("Source"))
-		printField(showIndentLabel, "Type", task.SourceType)
-		printSourceConfig(task.SourceType, task.SourceConfig)
+	if task.SourceType != "noop" && task.SourceType != "" && task.SourceType != "command" {
+		fmt.Fprintln(out, showSectionStyle.Render("Source"))
+		printField(out, showIndentLabel, "Type", task.SourceType)
+		printSourceConfig(out, task.SourceType, task.SourceConfig)
 	}
 }
 
-func printField(labelStyle lipgloss.Style, label, value string) {
-	fmt.Printf("%s  %s\n", labelStyle.Render(label+":"), showValueStyle.Render(value))
+func printField(out io.Writer, labelStyle lipgloss.Style, label, value string) {
+	fmt.Fprintf(out, "%s  %s\n", labelStyle.Render(label+":"), showValueStyle.Render(value))
 }
 
-func printSourceConfig(sourceType string, data json.RawMessage) {
+func printSourceConfig(out io.Writer, sourceType string, data json.RawMessage) {
 	if len(data) == 0 {
 		return
 	}
@@ -139,28 +146,28 @@ func printSourceConfig(sourceType string, data json.RawMessage) {
 		}
 		if err := json.Unmarshal(data, &cfg); err == nil {
 			if cfg.Remote != "" {
-				printField(showIndentLabel, "Remote", cfg.Remote)
+				printField(out, showIndentLabel, "Remote", cfg.Remote)
 			}
 			if cfg.Ref != "" {
-				printField(showIndentLabel, "Ref", cfg.Ref)
+				printField(out, showIndentLabel, "Ref", cfg.Ref)
 			}
 			if cfg.Commit != "" {
-				printField(showIndentLabel, "Commit", cfg.Commit)
+				printField(out, showIndentLabel, "Commit", cfg.Commit)
 			}
 			return
 		}
 	}
 
-	printRawConfig(data)
+	printRawConfig(out, data)
 }
 
-func printRawConfig(data json.RawMessage) {
+func printRawConfig(out io.Writer, data json.RawMessage) {
 	var parsed map[string]any
 	if err := json.Unmarshal(data, &parsed); err != nil {
 		return
 	}
 	for k, v := range parsed {
-		printField(showIndentLabel, k, fmt.Sprintf("%v", v))
+		printField(out, showIndentLabel, k, fmt.Sprintf("%v", v))
 	}
 }
 
@@ -180,8 +187,4 @@ func formatDuration(d time.Duration) string {
 	hours := int(d.Hours())
 	mins := int(d.Minutes()) % 60
 	return fmt.Sprintf("%dh %dm", hours, mins)
-}
-
-func init() {
-	RootCmd.AddCommand(showCmd)
 }

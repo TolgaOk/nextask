@@ -3,6 +3,10 @@ package db
 import (
 	"context"
 	"errors"
+	"fmt"
+	"net"
+	"os"
+	"syscall"
 	"testing"
 	"time"
 
@@ -20,6 +24,10 @@ func TestIsTransient(t *testing.T) {
 		{"context canceled", context.Canceled, false},
 		{"context deadline", context.DeadlineExceeded, false},
 		{"generic error", errors.New("some error"), false},
+		{"misleading text", errors.New("query mentions timeout and connection refused"), false},
+		{"wrapped reset", fmt.Errorf("read: %w", &net.OpError{Op: "read", Net: "tcp", Err: syscall.ECONNRESET}), true},
+		{"wrapped cancellation", &net.OpError{Op: "read", Err: context.Canceled}, false},
+		{"permission denied", &net.OpError{Op: "dial", Err: syscall.EACCES}, false},
 
 		// PG connection errors (Class 08)
 		{"pg connection exception", &pgconn.PgError{Code: "08000"}, true},
@@ -44,11 +52,11 @@ func TestIsTransient(t *testing.T) {
 		{"pg auth failed", &pgconn.PgError{Code: "28P01"}, false},
 
 		// Network errors
-		{"connection refused", errors.New("connection refused"), true},
-		{"connection reset", errors.New("connection reset by peer"), true},
-		{"broken pipe", errors.New("broken pipe"), true},
-		{"timeout", errors.New("i/o timeout"), true},
-		{"no such host", errors.New("no such host"), true},
+		{"connection refused", syscall.ECONNREFUSED, true},
+		{"connection reset", syscall.ECONNRESET, true},
+		{"broken pipe", syscall.EPIPE, true},
+		{"timeout", os.ErrDeadlineExceeded, true},
+		{"no such host", &net.DNSError{IsNotFound: true}, true},
 	}
 
 	for _, tt := range tests {
@@ -81,7 +89,7 @@ func TestRetry_Success(t *testing.T) {
 func TestRetry_TransientThenSuccess(t *testing.T) {
 	ctx := context.Background()
 	calls := 0
-	transientErr := errors.New("connection refused")
+	transientErr := syscall.ECONNREFUSED
 
 	err := Retry(ctx, func() error {
 		calls++
@@ -120,7 +128,7 @@ func TestRetry_PermanentError(t *testing.T) {
 func TestRetry_ContextCanceled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	calls := 0
-	transientErr := errors.New("connection refused")
+	transientErr := syscall.ECONNREFUSED
 
 	go func() {
 		time.Sleep(50 * time.Millisecond)
@@ -143,7 +151,7 @@ func TestRetry_ContextCanceled(t *testing.T) {
 func TestRetry_MaxTries(t *testing.T) {
 	ctx := context.Background()
 	calls := 0
-	transientErr := errors.New("connection refused")
+	transientErr := syscall.ECONNREFUSED
 
 	err := Retry(ctx, func() error {
 		calls++
@@ -179,7 +187,7 @@ func TestRetryValue_Success(t *testing.T) {
 func TestRetryValue_TransientThenSuccess(t *testing.T) {
 	ctx := context.Background()
 	calls := 0
-	transientErr := errors.New("connection refused")
+	transientErr := syscall.ECONNREFUSED
 
 	val, err := RetryValue(ctx, func() (int, error) {
 		calls++

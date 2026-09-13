@@ -4,6 +4,7 @@ package cli
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 
 	"github.com/TolgaOk/nextask/internal/config"
@@ -11,9 +12,6 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 )
-
-var dbURL string
-var cfg *config.Config
 
 var (
 	errStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Bold(true)
@@ -52,65 +50,78 @@ func errWithHints(msg string, hints ...string) error {
 
 func errDBRequired() error {
 	return errWithHints("database URL is required",
-		"Provide "+codeStyle.Render("--db-url \"postgres://user@localhost:5432/dbname\""),
-		"Or set "+codeStyle.Render("NEXTASK_DB_URL")+" environment variable",
-		"Or set "+codeStyle.Render("db.url")+" in "+codeStyle.Render(".nextask.toml")+" (project) or global config",
+		"Set db.url with environment references or supply NEXTASK_DB_URL on the CLI host and each worker",
 	)
 }
 
-// SetVersion configures the version string displayed by --version.
-func SetVersion(v string) {
-	RootCmd.Version = v
+// NewRootCommand constructs an independent command tree. Create a fresh tree
+// for each execution; Cobra command instances themselves are not concurrent.
+func NewRootCommand(version string) *cobra.Command {
+	return newRootCommand(version, config.LoadSettings)
 }
 
-// RootCmd is the base command for the nextask CLI.
-var RootCmd = &cobra.Command{
-	Use:   "nextask",
-	Short: "Distributed task queue with source snapshotting and full log capture",
-	SilenceErrors: true,
-	SilenceUsage:  true,
-	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-		var err error
-		cfg, err = config.Load()
+func newRootCommand(version string, loadConfig func() (*config.Config, error)) *cobra.Command {
+	// Commands read this tree's configuration. Per-command overrides use copies.
+	cfg := new(config.Config)
+	load := func(cmd *cobra.Command, args []string) error {
+		loaded, err := loadConfig()
 		if err != nil {
 			return withHints(err,
-				"Check TOML syntax in your config files",
+				"Check TOML syntax and values in your config files",
+				"Shared: "+codeStyle.Render("~/.config/tasktools/config.toml or .tasktools.toml"),
 				"Global: "+codeStyle.Render("~/.config/nextask/global.toml"),
-				"Local:  "+codeStyle.Render(".nextask.toml"),
-			)
+				"Local:  "+codeStyle.Render(".nextask.toml"))
 		}
-		// Apply persistent flag
-		if dbURL != "" {
-			cfg.DB.URL = dbURL
-		}
+		*cfg = *loaded
 		return nil
-	},
+	}
+	root := &cobra.Command{
+		Use:           "nextask",
+		Short:         "Distributed task queue with optional integrations and full log capture",
+		Version:       version,
+		SilenceErrors: true,
+		SilenceUsage:  true,
+		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			if err := load(cmd, args); err != nil {
+				return err
+			}
+			return cfg.ResolveDatabase()
+		},
+	}
+	s3 := newS3Command(cfg)
+	s3.PersistentPreRunE = load
+	root.AddCommand(s3)
+	root.CompletionOptions.HiddenDefaultCmd = true
+	root.AddCommand(newEnqueueCommand(cfg), newWaitCommand(cfg), newLogsCommand(cfg),
+		newCancelCommand(cfg), newListCommand(cfg), newShowCommand(cfg), newRemoveCommand(cfg),
+		newWorkerCommand(cfg), newConfigCommand(cfg), newInitCommand(cfg), newRuntimeCommand())
+	return root
 }
 
-// Execute runs the root command.
-func Execute() {
-	if err := RootCmd.Execute(); err != nil {
+// Execute constructs and runs the CLI with the supplied build version.
+func Execute(version string) {
+	if err := NewRootCommand(version).Execute(); err != nil {
 		var ec *exitCodeError
 		if errors.As(err, &ec) {
 			os.Exit(ec.code)
 		}
-		printError(err)
+		printError(os.Stderr, err)
 		os.Exit(1)
 	}
 }
 
-func init() {
-	RootCmd.PersistentFlags().StringVar(&dbURL, "db-url", "", "PostgreSQL connection URL")
-	RootCmd.CompletionOptions.HiddenDefaultCmd = true
-}
-
-func printError(err error) {
-	fmt.Fprintln(os.Stderr, errStyle.Render("Error: ")+err.Error())
+func printError(out io.Writer, err error) error {
+	if _, writeErr := fmt.Fprintln(out, errStyle.Render("Error: ")+err.Error()); writeErr != nil {
+		return writeErr
+	}
 
 	hints := getErrorHints(err)
 	for _, hint := range hints {
-		fmt.Fprintln(os.Stderr, hintStyle.Render("  → ")+hint)
+		if _, err := fmt.Fprintln(out, hintStyle.Render("  → ")+hint); err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
 func getErrorHints(err error) []string {
@@ -123,8 +134,7 @@ func getErrorHints(err error) []string {
 	case errors.Is(err, db.ErrDBNotExist):
 		return []string{
 			"Create database: " + codeStyle.Render("createdb <dbname>"),
-			"Then: " + codeStyle.Render("nextask init db --db-url ..."),
-			"Or:   " + codeStyle.Render("nextask init db") + " (with config file)",
+			"Set NEXTASK_DB_URL, then run " + codeStyle.Render("nextask init db"),
 		}
 	case errors.Is(err, db.ErrConnRefused):
 		return []string{
@@ -136,8 +146,7 @@ func getErrorHints(err error) []string {
 		return []string{"Check your database credentials"}
 	case errors.Is(err, db.ErrNotInitialized):
 		return []string{
-			"Run: " + codeStyle.Render("nextask init db --db-url ..."),
-			"Or:  " + codeStyle.Render("nextask init db") + " (with config file)",
+			"Set NEXTASK_DB_URL, then run " + codeStyle.Render("nextask init db"),
 		}
 	}
 

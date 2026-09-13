@@ -36,7 +36,7 @@ func TestNotifier_ReceiveNotification(t *testing.T) {
 	defer pool.Close()
 	ctx := context.Background()
 
-	n, err := db.NewNotifier(ctx, notifierTestDBURL(t), db.NewBackOff(1*time.Second, 5*time.Second), []string{"test_ch1"})
+	n, err := db.NewNotifier(ctx, notifierTestDBURL(t), db.NewBackOff(1*time.Second, 5*time.Second), []string{"test_ch1"}, nil)
 	if err != nil {
 		t.Fatalf("NewNotifier() error = %v", err)
 	}
@@ -59,7 +59,7 @@ func TestNotifier_MultipleChannels(t *testing.T) {
 	defer pool.Close()
 	ctx := context.Background()
 
-	n, err := db.NewNotifier(ctx, notifierTestDBURL(t), db.NewBackOff(1*time.Second, 5*time.Second), []string{"multi_a", "multi_b"})
+	n, err := db.NewNotifier(ctx, notifierTestDBURL(t), db.NewBackOff(1*time.Second, 5*time.Second), []string{"multi_a", "multi_b"}, nil)
 	if err != nil {
 		t.Fatalf("NewNotifier() error = %v", err)
 	}
@@ -88,7 +88,7 @@ func TestNotifier_Add(t *testing.T) {
 	defer pool.Close()
 	ctx := context.Background()
 
-	n, err := db.NewNotifier(ctx, notifierTestDBURL(t), db.NewBackOff(1*time.Second, 5*time.Second), []string{"base_ch"})
+	n, err := db.NewNotifier(ctx, notifierTestDBURL(t), db.NewBackOff(1*time.Second, 5*time.Second), []string{"base_ch"}, nil)
 	if err != nil {
 		t.Fatalf("NewNotifier() error = %v", err)
 	}
@@ -115,7 +115,7 @@ func TestNotifier_AddDuplicate(t *testing.T) {
 	defer pool.Close()
 	ctx := context.Background()
 
-	n, err := db.NewNotifier(ctx, notifierTestDBURL(t), db.NewBackOff(1*time.Second, 5*time.Second), []string{"dup_ch"})
+	n, err := db.NewNotifier(ctx, notifierTestDBURL(t), db.NewBackOff(1*time.Second, 5*time.Second), []string{"dup_ch"}, nil)
 	if err != nil {
 		t.Fatalf("NewNotifier() error = %v", err)
 	}
@@ -147,7 +147,7 @@ func TestNotifier_Remove(t *testing.T) {
 	defer pool.Close()
 	ctx := context.Background()
 
-	n, err := db.NewNotifier(ctx, notifierTestDBURL(t), db.NewBackOff(1*time.Second, 5*time.Second), []string{"keep_ch", "remove_ch"})
+	n, err := db.NewNotifier(ctx, notifierTestDBURL(t), db.NewBackOff(1*time.Second, 5*time.Second), []string{"keep_ch", "remove_ch"}, nil)
 	if err != nil {
 		t.Fatalf("NewNotifier() error = %v", err)
 	}
@@ -178,7 +178,7 @@ func TestNotifier_Remove(t *testing.T) {
 func TestNotifier_Close(t *testing.T) {
 	ctx := context.Background()
 
-	n, err := db.NewNotifier(ctx, notifierTestDBURL(t), db.NewBackOff(1*time.Second, 5*time.Second), []string{"close_ch"})
+	n, err := db.NewNotifier(ctx, notifierTestDBURL(t), db.NewBackOff(1*time.Second, 5*time.Second), []string{"close_ch"}, nil)
 	if err != nil {
 		t.Fatalf("NewNotifier() error = %v", err)
 	}
@@ -199,7 +199,7 @@ func TestNotifier_Close(t *testing.T) {
 func TestNotifier_ContextCancel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 
-	n, err := db.NewNotifier(ctx, notifierTestDBURL(t), db.NewBackOff(1*time.Second, 5*time.Second), []string{"cancel_ch"})
+	n, err := db.NewNotifier(ctx, notifierTestDBURL(t), db.NewBackOff(1*time.Second, 5*time.Second), []string{"cancel_ch"}, nil)
 	if err != nil {
 		t.Fatalf("NewNotifier() error = %v", err)
 	}

@@ -5,5 +5,5 @@ import "embed"
 
 // FS provides access to embedded SQL migration files.
 //
-//go:embed *.sql
+//go:embed [0-9]*.sql
 var FS embed.FS

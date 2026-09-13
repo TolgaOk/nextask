@@ -1,201 +1,81 @@
 ---
 name: nextask-setup-worker
-description: Set up a nextask worker to execute tasks. Covers local workers, containerized workers with dependency isolation, remote servers via SSH, and cloud GPU providers (RunPod, Vast.ai). Use when the user wants to add a worker, run tasks on a GPU machine, set up a container with project dependencies, or says "add a worker" or "I want to run jobs on my server."
+description: Set up or reconfigure a Nextask worker on a local machine, remote server, or container.
 ---
 
-Related skills: `nextask` (enqueue, monitor, manage tasks), `nextask-setup-services` (deploy PostgreSQL, git server).
+Use the chosen machine and existing configuration; ask only for missing deployment details.
+Check `nextask --version` and `nextask config show --sources` before changing the setup.
 
-Set up workers that claim and execute nextask tasks. Services (PostgreSQL, git remote) must already be running. If not, use the `nextask-setup-services` skill first.
+## Guide the user
 
-**Installing nextask:** `curl -fsSL https://raw.githubusercontent.com/TolgaOk/nextask/main/install | bash`
+Prompt at each unresolved setup decision, one question at a time, with brief choices and a recommendation when useful.
+Reuse answers already given; do not repeat the whole questionnaire.
 
-For SSH to remote servers, use `ssh -o ConnectTimeout=10 user@host "command"`. Do not use `-t`/`-tt` for non-interactive commands. Do not run SSH in background.
+- Where should the worker run: this machine, an existing remote host, or a cloud instance?
+- How should project dependencies be provided: an existing environment or a container?
+- How many workers should run, and should they stay running or exit after work?
+- Where should task files be kept, and should they be removed after completion?
 
-## Agent guidance
+Ask how to supply any missing credentials; have the user set them through their environment or secret store rather than paste them into chat.
+Wait for answers before taking dependent actions; continue read-only checks meanwhile.
+Summarize the chosen setup before installing or starting anything, and confirm choices not already approved.
 
-If `AskUserQuestion` is available, use it to present choices as structured options. Otherwise, ask in plain text.
+## Prepare and start
 
-**Quick reference:**
-```
-0. Check nextask (silent install if missing)
-1. Where? → local / remote / cloud
-   cloud → 1b. Template or SSH? → template: 3, SSH: 2
-2. Deps? (local & remote) → no / container / venv
-3. Cloud container setup (registry, Dockerfile, push)
-4. Verify
-```
+Reuse the user's chosen virtual environment, container, or service manager.
+If Nextask is missing, use the linked installation instructions and check that its version supports the required integrations.
+Run `nextask list` on the worker host to verify database access before starting it.
 
-Before asking the user for DB URL or source remote, check if they already have a config:
-```bash
-cat ~/.config/nextask/global.toml 2>/dev/null
-cat .nextask.toml 2>/dev/null
-echo "NEXTASK_DB_URL=$NEXTASK_DB_URL"
-echo "NEXTASK_SOURCE_REMOTE=$NEXTASK_SOURCE_REMOTE"
-```
-Use existing values if found.
+Choose the appropriate mode:
 
-### 0. Check nextask
-
-Check `nextask --version`. If not installed, install with:
-```bash
-curl -fsSL https://raw.githubusercontent.com/TolgaOk/nextask/main/install | bash
+```sh
+nextask worker                                  # foreground
+nextask worker --daemon --workdir ~/nextask-work  # background
+nextask worker --once --rm                       # at most one task, then clean up
+nextask worker --tag gpu=a100 --exit-if-idle 5m   # only matching tasks
 ```
 
-### 1. "Where will the worker run?"
+For a virtual environment, activate it before starting the worker.
+For example, `. /opt/project/.venv/bin/activate && nextask worker` makes those dependencies available to task commands.
+For SSH, run the setup on the remote host and load its own environment before `nextask worker --daemon`.
+For containers, include Nextask and project dependencies in the image, pass credentials at startup, and mount persistent storage at the configured workdir.
+Do not bake credentials into the image.
 
-- **Local** → this machine. Continue to step 2.
-- **Remote server** → existing machine with SSH access. Continue to step 2.
-- **Cloud provider** (RunPod, Vast.ai, Lambda, etc.) → continue to step 1b.
+## Critical points
 
-### 1b. "Container template or remote access?"
+- The worker needs a reachable PostgreSQL database and the software required by task commands.
+  Start it in the intended virtual environment or container so tasks inherit that environment.
+  Git tasks also require Git and access to the snapshot remote.
+- Supply DB credentials and any referenced Git/S3 variables on the worker itself.
+  Queued tasks carry connection templates, not the submitter's secrets.
+  Nextask does not load `.env` files automatically; export variables or load them through the service manager.
+- Tasks start in fresh directories; starting a worker in a project folder does not copy that project into tasks.
+- Each worker runs one task at a time.
+  Use `worker --tag KEY=VALUE` to restrict which tasks it claims; unfiltered workers may claim any task.
+- Use a persistent `--workdir` for saved results to survive reboot, and a separate workdir per database.
+  `--rm` removes finished task directories, including local logs.
+  Restarting with the same workdir can restore saved completion records, but does not resume interrupted commands.
+- Stopping a worker interrupts its current task.
+  `--exit-if-idle` stops the worker process, not its cloud instance or billing.
 
-Only if cloud provider was chosen:
+## Verify and diagnose
 
-- **Container template** → provider runs a per-project image. Jump to step 3.
-- **Remote access** (SSH into the cloud machine) → treat as remote server. Continue to step 2.
+From the submitting machine:
 
-### 2. "Does the worker need project dependencies (Python packages, CUDA, etc.)?"
-
-For local and remote:
-
-- **Container** (recommend) → build a per-project Docker image with deps + nextask. Reproducible and isolated. Jump to step 4.
-- **Virtual env** (venv/conda) → start the worker from within the activated environment so child processes inherit it. E.g., `conda activate myproject && nextask worker`. Alternatively, bake activation into the enqueued command: `nextask enqueue "source .venv/bin/activate && python train.py"`. Jump to step 4.
-- **No deps needed** → run nextask directly without isolation. Jump to step 4.
-
-### 3. Cloud provider container setup
-
-Build a per-project image with the project's dependencies and nextask, push it to a registry, and configure as the provider's template/pod.
-
-- "Which container registry?" → Docker Hub, GHCR, or provider-specific.
-- Help build the Dockerfile, push to registry, and configure on the provider.
-
-Continue to step 4.
-
-### 4. Verify
-
-After starting the worker, run `nextask worker list` to confirm it appears as "running". Then run the end-to-end test at the bottom.
-
-## Local worker
-
-```bash
-nextask worker
+```sh
+nextask worker list --status running
+nextask enqueue 'hostname' --tag gpu=a100 --attach
 ```
 
-Foreground. Use `--daemon` to background. Use `--once` for a single task then exit.
+Use the configured worker tag in the check, or omit it for an unfiltered worker.
+An unfiltered worker could also pick up that task; use `nextask show TASK_ID` to confirm which worker ran it.
+If Git is enabled, also verify a snapshot task can restore its files.
+If S3 is enabled, produce a small selected artifact and confirm it can be fetched.
 
-**With container** (for dependency isolation):
+- Worker startup fails: check config and DB access from the actual host or container; its `localhost` is not another machine.
+- Tasks stay pending: compare task tags with the worker's `--tag` filter.
+- Commands cannot find dependencies: check the worker's environment and task directory, not the submitting machine's shell.
 
-```dockerfile
-FROM python:3.12
-RUN pip install torch numpy scipy matplotlib
-RUN curl -fsSL https://raw.githubusercontent.com/TolgaOk/nextask/main/install | bash
-```
+Report the worker ID, how it is started, and where its workdir and configuration live.
 
-```bash
-docker build -t myproject-worker -f Dockerfile.worker .
-docker run --rm \
-  -e NEXTASK_DB_URL="postgres://nextask:<password>@<host>:5432/nextask" \
-  -e NEXTASK_SOURCE_REMOTE="<remote>" \
-  myproject-worker nextask worker
-```
-
-Pass secrets as env vars. Never bake credentials into the image.
-
-**With GPU** (local NVIDIA GPU):
-```bash
-docker run --rm --gpus all \
-  -e NEXTASK_DB_URL -e NEXTASK_SOURCE_REMOTE \
-  myproject-gpu-worker nextask worker --filter gpu=true
-```
-
-**Verify:** `nextask worker list`
-
-## Remote server via SSH
-
-1. Install nextask:
-   ```bash
-   ssh user@server "curl -fsSL https://raw.githubusercontent.com/TolgaOk/nextask/main/install | bash"
-   ```
-
-2. Create config with restricted permissions:
-   ```bash
-   ssh user@server 'install -m 600 /dev/null ~/.nextask.env && cat > ~/.nextask.env << EOF
-   NEXTASK_DB_URL="postgres://nextask:<password>@<db-host>:5432/nextask"
-   NEXTASK_SOURCE_REMOTE="<remote>"
-   EOF'
-   ```
-
-3. Start worker:
-   ```bash
-   ssh user@server "set -a && source ~/.nextask.env && set +a && nextask worker --daemon"
-   ```
-
-**With container** (same as local, but run on the remote):
-```bash
-ssh user@server "docker run -d --rm \
-  -e NEXTASK_DB_URL='...' -e NEXTASK_SOURCE_REMOTE='...' \
-  myproject-worker nextask worker"
-```
-
-**Verify:** `nextask worker list`
-
-## Cloud GPU (RunPod, Vast.ai, Lambda)
-
-Build an image with the provider's base image + project deps + nextask. Pass config as env vars. Use `--filter` to route tasks and `--exit-if-idle` to stop billing when idle.
-
-Example Dockerfile for RunPod:
-```dockerfile
-FROM runpod/base:1.0.3-cuda1290-ubuntu2404
-RUN pip install torch jax flax
-RUN curl -fsSL https://raw.githubusercontent.com/TolgaOk/nextask/main/install | bash
-```
-
-Build and push to a registry:
-```bash
-docker build -t <user>/myproject-gpu:latest -f Dockerfile.gpu .
-docker push <user>/myproject-gpu:latest
-```
-
-Create a pod/template with:
-- Image: `<user>/myproject-gpu:latest`
-- Env vars: `NEXTASK_DB_URL`, `NEXTASK_SOURCE_REMOTE`
-- Start command: `nextask worker --filter gpu=a100 --exit-if-idle 5m`
-
-`--exit-if-idle 5m` exits after 5 minutes with no tasks. The pod stays running. Stop it via the provider to stop billing.
-
-Enqueue side:
-```bash
-nextask enqueue "python train.py" --snapshot --tag gpu=a100
-```
-
-For Vast.ai and Lambda, same pattern: provider base image + deps + nextask + env vars.
-
-## End-to-end test
-
-From the local machine:
-
-```bash
-# Simple task
-nextask enqueue "echo hello from nextask" --attach
-# Expected: "hello from nextask", task completes
-
-# Snapshot task (if using --snapshot)
-nextask enqueue "ls -la" --snapshot --attach
-# Expected: file listing, task completes
-
-# Cleanup
-nextask list --since 1h
-nextask remove <id>
-```
-
-If the simple task works but snapshot fails, the git remote is misconfigured.
-
-## Troubleshooting
-
-| Symptom | Fix |
-|---------|-----|
-| Container exits immediately | Missing nextask binary or bad entrypoint, test with `docker run --rm <image> nextask --version` |
-| Container can't reach DB | Host network differs from container network. Use host IP, not `localhost`. On Docker Desktop, `host.docker.internal` works |
-| SSH worker won't start | Check env file sourced correctly: `ssh user@host "set -a && source ~/.nextask.env && set +a && nextask --version"` |
-| `nextask worker` hangs on start | DB URL wrong or unreachable from worker host. Test with `nextask list --db-url "..."` |
-| Cloud template fails | Verify image is pushed and accessible: `docker pull <image>`. Check provider env vars are set |
+See [installation](https://github.com/TolgaOk/nextask#install), [configuration](https://github.com/TolgaOk/nextask/blob/main/doc/configuration.md), and [worker options](https://github.com/TolgaOk/nextask/blob/main/doc/cli.md#workers) as needed.

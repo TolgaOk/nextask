@@ -9,14 +9,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/TolgaOk/nextask/internal/db"
+	"github.com/jackc/pgx/v5"
 )
 
 // Test 8: Cancel during command execution
 func TestWorker_CancelDuringExecution(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	ctx := context.Background()
 
 	task := &db.Task{
@@ -45,8 +44,8 @@ func TestWorker_CancelDuringExecution(t *testing.T) {
 		done <- w.Run(ctx)
 	}()
 
-	// Wait for task to start running
-	time.Sleep(500 * time.Millisecond)
+	// Wait for the task to establish its cancel subscription and begin execution.
+	waitForTaskStart(t, pool, task.ID)
 
 	// Send cancel notification
 	toChannel := db.ToTaskChannel(task.ID)
@@ -84,7 +83,6 @@ func TestWorker_CancelDuringExecution(t *testing.T) {
 // Test 9: Cancel during source fetch
 func TestWorker_CancelDuringSourceFetch(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	ctx := context.Background()
 
 	// Use a git source that will take time (clone from a slow/non-existent remote)
@@ -129,7 +127,6 @@ func TestWorker_CancelDuringSourceFetch(t *testing.T) {
 // Test 10: Cancel notification after task completes (should be ignored)
 func TestWorker_CancelAfterComplete(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	ctx := context.Background()
 
 	task := &db.Task{
@@ -177,7 +174,6 @@ func TestWorker_CancelAfterComplete(t *testing.T) {
 // Test 12: Parent context cancelled (SIGINT) - should NOT mark as cancelled
 func TestWorker_ParentContextCancelled(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	ctx := context.Background()
 
 	task := &db.Task{
@@ -234,7 +230,6 @@ func TestWorker_ParentContextCancelled(t *testing.T) {
 // End-to-end test: Full cancel flow mimicking actual usage
 func TestCancel_EndToEnd(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	ctx := context.Background()
 
 	// 1. Create a long-running task (like CLI enqueue)
@@ -276,16 +271,7 @@ func TestCancel_EndToEnd(t *testing.T) {
 		t.Fatalf("task should be running, got %s", status)
 	}
 
-	// 3. Request cancel (like CLI cancel command)
-	originalStatus, err := db.RequestCancel(ctx, pool, task.ID)
-	if err != nil {
-		t.Fatalf("RequestCancel failed: %v", err)
-	}
-	if originalStatus == nil || *originalStatus != db.StatusRunning {
-		t.Fatalf("expected running status, got %v", originalStatus)
-	}
-
-	// 4. Listen for confirmation (like CLI does)
+	// 3. Subscribe first to test notification delivery; polling may cancel immediately
 	confirmConn, err := pgx.Connect(ctx, getTestDBURL(t))
 	if err != nil {
 		t.Fatalf("failed to connect for confirm: %v", err)
@@ -294,6 +280,15 @@ func TestCancel_EndToEnd(t *testing.T) {
 
 	fromChannel := db.FromTaskChannel(task.ID)
 	_, _ = confirmConn.Exec(ctx, "LISTEN "+fromChannel)
+
+	// 4. Request cancellation after subscribing to its confirmation
+	originalStatus, err := db.RequestCancel(ctx, pool, task.ID)
+	if err != nil {
+		t.Fatalf("RequestCancel failed: %v", err)
+	}
+	if originalStatus == nil || *originalStatus != db.StatusRunning {
+		t.Fatalf("expected running status, got %v", originalStatus)
+	}
 
 	// 5. Send cancel notification to worker (like CLI does)
 	toChannel := db.ToTaskChannel(task.ID)
@@ -350,7 +345,6 @@ func TestCancel_EndToEnd(t *testing.T) {
 // Test 13: Race between cancel and completion
 func TestWorker_CancelRaceWithCompletion(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	ctx := context.Background()
 
 	// Task that completes very quickly
@@ -405,7 +399,6 @@ func TestWorker_CancelRaceWithCompletion(t *testing.T) {
 // fix for orphaned child processes when using exec.CommandContext.
 func TestWorker_CancelKillsChildProcesses(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	ctx := context.Background()
 
 	// Use a unique marker to identify our sleep process
@@ -436,8 +429,8 @@ func TestWorker_CancelKillsChildProcesses(t *testing.T) {
 		done <- w.Run(ctx)
 	}()
 
-	// Wait for task to start and child process to be spawned
-	time.Sleep(500 * time.Millisecond)
+	// Wait until the worker has subscribed to cancellation and started execution.
+	waitForTaskStart(t, pool, task.ID)
 
 	// Verify the sleep process is running
 	out, _ := exec.Command("pgrep", "-f", marker).Output()
@@ -447,7 +440,9 @@ func TestWorker_CancelKillsChildProcesses(t *testing.T) {
 
 	// Send cancel notification
 	toChannel := db.ToTaskChannel(task.ID)
-	_ = db.Notify(ctx, pool, toChannel, db.TaskCancelEvent{})
+	if err := db.Notify(ctx, pool, toChannel, db.TaskCancelEvent{}); err != nil {
+		t.Fatalf("failed to send cancel: %v", err)
+	}
 
 	// Wait for worker to finish
 	start := time.Now()
@@ -484,7 +479,6 @@ func TestWorker_CancelKillsChildProcesses(t *testing.T) {
 // it gets forcefully killed with SIGKILL after WaitDelay (5 seconds).
 func TestWorker_CancelFallbackToSIGKILL(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	ctx := context.Background()
 
 	marker := fmt.Sprintf("nextask_sigkill_%d", time.Now().UnixNano())
@@ -515,8 +509,8 @@ func TestWorker_CancelFallbackToSIGKILL(t *testing.T) {
 		done <- w.Run(ctx)
 	}()
 
-	// Wait for task to start
-	time.Sleep(500 * time.Millisecond)
+	// Wait for the task to establish its cancel subscription and begin execution.
+	waitForTaskStart(t, pool, task.ID)
 
 	// Send cancel notification
 	toChannel := db.ToTaskChannel(task.ID)

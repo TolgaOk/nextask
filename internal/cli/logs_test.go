@@ -2,58 +2,20 @@ package cli
 
 import (
 	"context"
-	"os"
+	"io"
 	"testing"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/TolgaOk/nextask/internal/config"
 	"github.com/TolgaOk/nextask/internal/db"
 	"go.uber.org/goleak"
 )
 
-func getTestDBURL(t *testing.T) string {
-	url := os.Getenv("TEST_DB_URL")
-	if url == "" {
-		t.Skip("TEST_DB_URL not set, skipping database tests")
-	}
-	return url
-}
-
-func initTestConfig(t *testing.T) {
-	cfg = &config.Config{
-		DB: config.DBConfig{
-			URL: getTestDBURL(t),
-		},
-	}
-}
-
-func setupTestDB(t *testing.T) *pgxpool.Pool {
-	ctx := context.Background()
-	pool, err := db.Connect(ctx, getTestDBURL(t))
-	if err != nil {
-		t.Fatalf("failed to connect: %v", err)
-	}
-
-	_, _ = pool.Exec(ctx, "DROP TABLE IF EXISTS task_logs")
-	_, _ = pool.Exec(ctx, "DROP TABLE IF EXISTS tasks")
-	_, _ = pool.Exec(ctx, "DROP TABLE IF EXISTS workers")
-
-	if err := db.Migrate(ctx, pool); err != nil {
-		pool.Close()
-		t.Fatalf("failed to migrate: %v", err)
-	}
-
-	return pool
-}
-
 // TestLogsAttach_CompletedTask verifies that --attach with a completed task
 // returns immediately without streaming.
 func TestLogsAttach_CompletedTask(t *testing.T) {
-	defer goleak.VerifyNone(t)
+	t.Cleanup(func() { goleak.VerifyNone(t) })
 
 	pool := setupTestDB(t)
-	defer pool.Close()
 	ctx := context.Background()
 
 	// Create and complete a task
@@ -86,13 +48,12 @@ func TestLogsAttach_CompletedTask(t *testing.T) {
 // TestLogsAttach_StreamsLogs verifies that --attach streams logs from a running task
 // and exits when the task completes.
 func TestLogsAttach_StreamsLogs(t *testing.T) {
-	defer goleak.VerifyNone(t)
+	t.Cleanup(func() { goleak.VerifyNone(t) })
 
 	pool := setupTestDB(t)
-	defer pool.Close()
 	ctx := context.Background()
 
-	initTestConfig(t)
+	cfg := testConfig(t)
 
 	// Create a running task
 	task := &db.Task{
@@ -112,7 +73,7 @@ func TestLogsAttach_StreamsLogs(t *testing.T) {
 	// Run logsAndAttach in goroutine
 	done := make(chan error, 1)
 	go func() {
-		done <- logsAndAttach(ctx, pool, task.ID, 0)
+		done <- logsAndAttach(ctx, cfg, commandOutput{io.Discard, io.Discard}, pool, task.ID, 0, "")
 	}()
 
 	// Give it time to start listening
@@ -142,13 +103,12 @@ func TestLogsAttach_StreamsLogs(t *testing.T) {
 // TestLogsAttach_ContextCancel verifies that cancelling context stops streaming
 // and goroutine exits cleanly.
 func TestLogsAttach_ContextCancel(t *testing.T) {
-	defer goleak.VerifyNone(t)
+	t.Cleanup(func() { goleak.VerifyNone(t) })
 
 	pool := setupTestDB(t)
-	defer pool.Close()
 	ctx := context.Background()
 
-	initTestConfig(t)
+	cfg := testConfig(t)
 
 	// Create a running task
 	task := &db.Task{
@@ -168,7 +128,7 @@ func TestLogsAttach_ContextCancel(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		done <- logsAndAttach(cancelCtx, pool, task.ID, 0)
+		done <- logsAndAttach(cancelCtx, cfg, commandOutput{io.Discard, io.Discard}, pool, task.ID, 0, "")
 	}()
 
 	// Give it time to start listening
@@ -191,13 +151,12 @@ func TestLogsAttach_ContextCancel(t *testing.T) {
 // TestLogsAttach_RecoveryAfterConnectionLoss verifies that logsAndAttach
 // continues to work after the DB connection is terminated and recovers.
 func TestLogsAttach_RecoveryAfterConnectionLoss(t *testing.T) {
-	defer goleak.VerifyNone(t)
+	t.Cleanup(func() { goleak.VerifyNone(t) })
 
 	pool := setupTestDB(t)
-	defer pool.Close()
 	ctx := context.Background()
 
-	initTestConfig(t)
+	cfg := testConfig(t)
 
 	// Create a running task
 	task := &db.Task{
@@ -215,7 +174,7 @@ func TestLogsAttach_RecoveryAfterConnectionLoss(t *testing.T) {
 	// Start logsAndAttach
 	done := make(chan error, 1)
 	go func() {
-		done <- logsAndAttach(ctx, pool, task.ID, 0)
+		done <- logsAndAttach(ctx, cfg, commandOutput{io.Discard, io.Discard}, pool, task.ID, 0, "")
 	}()
 
 	// Wait for listener to establish
@@ -262,13 +221,12 @@ func TestLogsAttach_RecoveryAfterConnectionLoss(t *testing.T) {
 // TestLogsAttach_PollFallback verifies that polling catches task completion
 // if notification is missed (e.g., during reconnection).
 func TestLogsAttach_PollFallback(t *testing.T) {
-	defer goleak.VerifyNone(t)
+	t.Cleanup(func() { goleak.VerifyNone(t) })
 
 	pool := setupTestDB(t)
-	defer pool.Close()
 	ctx := context.Background()
 
-	initTestConfig(t)
+	cfg := testConfig(t)
 
 	// Create a running task
 	task := &db.Task{
@@ -286,7 +244,7 @@ func TestLogsAttach_PollFallback(t *testing.T) {
 	// Start logsAndAttach
 	done := make(chan error, 1)
 	go func() {
-		done <- logsAndAttach(ctx, pool, task.ID, 0)
+		done <- logsAndAttach(ctx, cfg, commandOutput{io.Discard, io.Discard}, pool, task.ID, 0, "")
 	}()
 
 	// Wait for listener

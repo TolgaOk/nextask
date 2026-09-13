@@ -1,0 +1,10 @@
+[extend]
+useDefault = true
+
+# Compose escapes a runtime environment reference with a second dollar sign.
+[[rules]]
+id = "curl-auth-user"
+[[rules.allowlists]]
+condition = "AND"
+paths = ['''^skills/nextask-setup-services/scripts/full-stack\.docker-compose\.yml$''']
+regexes = ['''^"?nextask:\$\$DB_PASSWORD"?$''']

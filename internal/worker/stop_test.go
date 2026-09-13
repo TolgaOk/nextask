@@ -5,15 +5,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/TolgaOk/nextask/internal/db"
+	"github.com/jackc/pgx/v5"
 )
 
 // TestWorker_StopWhileIdle tests that a worker responds to stop notification
 // when it's idle (not processing a task).
 func TestWorker_StopWhileIdle(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	ctx := context.Background()
 
 	w, err := New(ctx, Config{
@@ -36,7 +35,7 @@ func TestWorker_StopWhileIdle(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 
 	// Verify worker is registered
-	workers, err := db.ListWorkers(ctx, pool, nil)
+	workers, err := db.ListWorkers(ctx, pool, db.WorkerListFilter{})
 	if err != nil {
 		t.Fatalf("failed to list workers: %v", err)
 	}
@@ -68,7 +67,7 @@ func TestWorker_StopWhileIdle(t *testing.T) {
 
 	// Verify worker unregistered (status = stopped)
 	time.Sleep(100 * time.Millisecond)
-	workers, _ = db.ListWorkers(ctx, pool, nil)
+	workers, _ = db.ListWorkers(ctx, pool, db.WorkerListFilter{})
 	for _, wr := range workers {
 		if wr.ID == "stop-idle-worker" {
 			if wr.Status != db.WorkerStatusStopped {
@@ -84,7 +83,6 @@ func TestWorker_StopWhileIdle(t *testing.T) {
 // execution cancels the running task first, then exits gracefully.
 func TestWorker_StopDuringTaskExecution(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	ctx := context.Background()
 
 	// Create a long-running task
@@ -146,7 +144,7 @@ func TestWorker_StopDuringTaskExecution(t *testing.T) {
 	}
 
 	// Verify worker unregistered
-	workers, _ := db.ListWorkers(ctx, pool, nil)
+	workers, _ := db.ListWorkers(ctx, pool, db.WorkerListFilter{})
 	for _, wr := range workers {
 		if wr.ID == "stop-busy-worker" {
 			if wr.Status != db.WorkerStatusStopped {
@@ -160,7 +158,6 @@ func TestWorker_StopDuringTaskExecution(t *testing.T) {
 // TestWorker_StopEndToEnd tests the full stop flow as it would be used by CLI.
 func TestWorker_StopEndToEnd(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	ctx := context.Background()
 
 	// 1. Start a worker
@@ -184,7 +181,7 @@ func TestWorker_StopEndToEnd(t *testing.T) {
 
 	// 2. Verify worker is visible via ListWorkers (like CLI worker list)
 	status := db.WorkerStatusRunning
-	workers, _ := db.ListWorkers(ctx, pool, &status)
+	workers, _ := db.ListWorkers(ctx, pool, db.WorkerListFilter{Statuses: []db.WorkerStatus{status}})
 	var found bool
 	for _, wr := range workers {
 		if wr.ID == "e2e-stop-worker" {
@@ -237,7 +234,7 @@ func TestWorker_StopEndToEnd(t *testing.T) {
 	// 7. Verify worker is now stopped in DB
 	time.Sleep(100 * time.Millisecond)
 	stoppedStatus := db.WorkerStatusStopped
-	workers, _ = db.ListWorkers(ctx, pool, &stoppedStatus)
+	workers, _ = db.ListWorkers(ctx, pool, db.WorkerListFilter{Statuses: []db.WorkerStatus{stoppedStatus}})
 	found = false
 	var workerPID int
 	for _, wr := range workers {

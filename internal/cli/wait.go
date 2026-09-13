@@ -2,328 +2,210 @@ package cli
 
 import (
 	"context"
-	"encoding/json"
+	"errors"
 	"fmt"
-	"os"
-	"os/signal"
+	"io"
+	"sort"
 	"strings"
-	"syscall"
 	"time"
 
+	"github.com/TolgaOk/nextask/internal/config"
 	"github.com/TolgaOk/nextask/internal/db"
-	"github.com/jackc/pgx/v5"
+	"github.com/cenkalti/backoff/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/spf13/cobra"
 )
 
-var (
-	waitTags    []string
-	waitTimeout time.Duration
-	waitAny     bool
-)
-
-var waitCmd = &cobra.Command{
-	Use:   "wait TASK_ID [TASK_ID...]",
-	Short: "Block until tasks complete",
-	Args: func(cmd *cobra.Command, args []string) error {
-		if len(waitTags) > 0 && len(args) > 0 {
-			return errWithHints("cannot use both task IDs and --tag",
-				"Use either: "+codeStyle.Render("nextask wait <id1> <id2>"),
-				"Or:         "+codeStyle.Render("nextask wait --tag key=value"),
-			)
-		}
-		if len(waitTags) == 0 && len(args) == 0 {
-			return errWithHints("task ID or --tag is required",
-				"Example: "+codeStyle.Render("nextask wait <id>"),
-				"Or:      "+codeStyle.Render("nextask wait --tag key=value"),
-			)
-		}
-		return nil
-	},
-	RunE: runWait,
+type waitOptions struct {
+	tags    []string
+	timeout durationFlag
+	any     bool
 }
 
-func init() {
-	waitCmd.Flags().StringSliceVar(&waitTags, "tag", nil, "Wait for all tasks matching tag (key=value)")
-	waitCmd.Flags().DurationVar(&waitTimeout, "timeout", 0, "Exit 124 if tasks not done within duration")
-	waitCmd.Flags().BoolVar(&waitAny, "any", false, "Return when any task completes (not all)")
-	RootCmd.AddCommand(waitCmd)
+func newWaitCommand(cfg *config.Config) *cobra.Command {
+	var opts waitOptions
+	cmd := &cobra.Command{
+		Use:   "wait [TASK_ID...]",
+		Short: "Block until tasks complete",
+		Args: func(cmd *cobra.Command, args []string) error {
+			if len(opts.tags) > 0 && len(args) > 0 {
+				return errWithHints("cannot use both task IDs and --tag",
+					"Use either: "+codeStyle.Render("nextask wait <id1> <id2>"),
+					"Or:         "+codeStyle.Render("nextask wait --tag key=value"),
+				)
+			}
+			if len(opts.tags) == 0 && len(args) == 0 {
+				return errWithHints("task ID or --tag is required",
+					"Example: "+codeStyle.Render("nextask wait <id>"),
+					"Or:      "+codeStyle.Render("nextask wait --tag key=value"),
+				)
+			}
+			return nil
+		},
+		RunE: func(cmd *cobra.Command, args []string) error { return runWait(cmd, args, *cfg, opts) },
+	}
+
+	cmd.Flags().StringSliceVar(&opts.tags, "tag", nil, "Select tasks matching tag key=value (repeatable)")
+	opts.timeout.addFlag(cmd, "timeout", 0, "Exit 124 after duration; 0s disables the deadline")
+	cmd.Flags().BoolVar(&opts.any, "any", false, "Return after the first observed terminal result")
+	return cmd
 }
 
-func runWait(cmd *cobra.Command, args []string) error {
+func runWait(cmd *cobra.Command, args []string, cfg config.Config, opts waitOptions) error {
+	if opts.timeout.Duration < 0 {
+		return errWithHints("timeout must not be negative", "Use 0s to disable the deadline")
+	}
+	parsedTags, err := parseTags(opts.tags)
+	if err != nil {
+		return err
+	}
 	if cfg.DB.URL == "" {
 		return errDBRequired()
 	}
-
-	if waitTimeout < 0 {
-		return errWithHints("timeout must not be negative",
-			"Example: "+codeStyle.Render("--timeout 30s"),
-		)
-	}
-
-	ctx := context.Background()
-	if waitTimeout > 0 {
+	ctx, stop := interruptContext(cmd.Context())
+	defer stop()
+	if opts.timeout.Duration > 0 {
 		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, waitTimeout)
+		ctx, cancel = context.WithTimeout(ctx, opts.timeout.Duration)
 		defer cancel()
 	}
-	ctx = withSignalCancel(ctx)
+	remaining := make(map[string]bool)
+	for _, id := range args {
+		remaining[id] = true
+	}
+	err = runTaskWait(ctx, cfg, outputFor(cmd).err, opts, parsedTags, args, remaining)
+	if errors.Is(err, context.DeadlineExceeded) && ctx.Err() != nil {
+		return handleTimeout(cmd.ErrOrStderr(), remaining)
+	}
+	if errors.Is(err, context.Canceled) && ctx.Err() != nil {
+		return nil
+	}
+	return err
+}
 
+func runTaskWait(ctx context.Context, cfg config.Config, stderr io.Writer, opts waitOptions, parsedTags map[string]string, ids []string, remaining map[string]bool) error {
 	pool, err := db.Connect(ctx, cfg.DB.URL)
 	if err != nil {
 		return err
 	}
 	defer pool.Close()
-
-	conn, err := pgx.Connect(ctx, cfg.DB.URL)
-	if err != nil {
-		return fmt.Errorf("connection failed: %w", err)
+	channels := make([]string, 0, len(ids)+1)
+	for _, id := range ids {
+		channels = append(channels, db.FromTaskChannel(id))
 	}
-	defer conn.Close(context.Background())
-
-	if len(args) > 0 {
-		return waitByIDs(ctx, pool, conn, args)
+	if len(ids) == 0 {
+		channels = append(channels, db.ToWorkersChannel)
 	}
-	return waitByTags(ctx, pool, conn)
-}
-
-// waiter tracks task completion state across the wait lifecycle.
-type waiter struct {
-	pool      *pgxpool.Pool
-	conn      *pgx.Conn
-	remaining map[string]bool // tasks still waiting on
-	seen      map[string]bool // all task IDs encountered (prevents re-processing)
-	failCode  int
-}
-
-func newWaiter(pool *pgxpool.Pool, conn *pgx.Conn) *waiter {
-	return &waiter{
-		pool:      pool,
-		conn:      conn,
-		remaining: make(map[string]bool),
-		seen:      make(map[string]bool),
-	}
-}
-
-// listen subscribes to a task's completion channel.
-func (w *waiter) listen(ctx context.Context, taskID string) error {
-	_, err := w.conn.Exec(ctx, "LISTEN "+db.FromTaskChannel(taskID))
-	return err
-}
-
-// track adds a task ID to the wait set and subscribes to its channel.
-// Returns false if the task was already seen.
-func (w *waiter) track(ctx context.Context, taskID string) (bool, error) {
-	if w.seen[taskID] {
-		return false, nil
-	}
-	w.seen[taskID] = true
-
-	if err := w.listen(ctx, taskID); err != nil {
-		return false, fmt.Errorf("listen failed: %w", err)
-	}
-	w.remaining[taskID] = true
-	return true, nil
-}
-
-// check re-checks a tracked task's status. If terminal, it removes
-// the task from remaining and records the exit code.
-func (w *waiter) check(ctx context.Context, taskID string) error {
-	task, err := db.GetTask(ctx, w.pool, taskID, cfg.Worker.StaleDuration())
+	watch, err := newStateWatcher(ctx, cfg, stderr, channels...)
 	if err != nil {
 		return err
 	}
-	if task == nil {
-		delete(w.remaining, taskID)
-		printError(errWithHints(
-			fmt.Sprintf("task not found: %s", taskID),
-			"Run "+codeStyle.Render("nextask list")+" to see available tasks",
-		))
-		w.failCode = firstNonZero(w.failCode, 1)
-		return nil
+	defer watch.Close()
+	w := &waiter{stderr: stderr, staleThreshold: cfg.Worker.StaleDuration(), pool: pool, watch: watch, remaining: remaining, any: opts.any, seen: make(map[string]bool)}
+	for _, id := range ids {
+		w.add(id)
 	}
-	if isTerminal(task.Status) {
-		delete(w.remaining, taskID)
-		code := taskExitCode(task)
-		printWaitLine(task.ID, task.Status, code)
-		w.failCode = firstNonZero(w.failCode, code)
-	}
-	return nil
-}
-
-// trackAndCheck adds a task to the wait set then immediately verifies
-// its status. This is the core race-free pattern: LISTEN before check
-// ensures no completion event is missed.
-func (w *waiter) trackAndCheck(ctx context.Context, taskID string) error {
-	added, err := w.track(ctx, taskID)
-	if err != nil {
-		return err
-	}
-	if !added {
-		return nil
-	}
-	return w.check(ctx, taskID)
-}
-
-// done reports whether all tracked tasks have completed.
-func (w *waiter) done() bool {
-	return len(w.remaining) == 0
-}
-
-// handleCompletion processes a task status notification.
-func (w *waiter) handleCompletion(channel, payload string) {
-	id, code, ok := parseCompletionNotify(channel, payload)
-	if !ok || !w.remaining[id] {
-		return
-	}
-	delete(w.remaining, id)
-	w.failCode = firstNonZero(w.failCode, code)
-}
-
-// --- wait modes ---
-
-// waitByIDs waits for a fixed set of task IDs.
-func waitByIDs(ctx context.Context, pool *pgxpool.Pool, conn *pgx.Conn, taskIDs []string) error {
-	w := newWaiter(pool, conn)
-
-	for _, id := range taskIDs {
-		if err := w.trackAndCheck(ctx, id); err != nil {
-			return err
+	err = watch.Run(ctx, func(ctx context.Context) (bool, error) {
+		if len(ids) == 0 {
+			if err := w.discover(ctx, parsedTags); err != nil {
+				return false, err
+			}
+			if len(w.seen) == 0 {
+				return false, errWithHints("no tasks found matching tags",
+					"Check with: "+codeStyle.Render("nextask list --tag "+strings.Join(opts.tags, " --tag ")))
+			}
 		}
-		if waitAny && w.failCode != 0 {
-			return exitOrNil(w.failCode)
-		}
-	}
-
-	return waitLoop(ctx, w, nil)
-}
-
-// waitByTags waits for all tasks matching the tag filter, including
-// tasks enqueued after the wait begins.
-func waitByTags(ctx context.Context, pool *pgxpool.Pool, conn *pgx.Conn) error {
-	parsedTags, err := parseTags(waitTags)
-	if err != nil {
-		return err
-	}
-
-	w := newWaiter(pool, conn)
-
-	// Subscribe to enqueue events before querying — no race gap.
-	if _, err := conn.Exec(ctx, "LISTEN "+db.ToWorkersChannel); err != nil {
-		return fmt.Errorf("listen failed: %w", err)
-	}
-
-	// Discover initial tasks.
-	if err := discover(ctx, w, parsedTags); err != nil {
-		return err
-	}
-	if len(w.seen) == 0 {
-		return errWithHints("no tasks found matching tags",
-			"Check with: "+codeStyle.Render("nextask list --tag "+strings.Join(waitTags, " --tag ")),
-		)
-	}
-
-	// On each wake event, re-query for newly enqueued tasks.
-	onWake := func() error {
-		return discover(ctx, w, parsedTags)
-	}
-
-	return waitLoop(ctx, w, onWake)
-}
-
-// discover queries pending/running tasks by tag and tracks any new ones.
-func discover(ctx context.Context, w *waiter, tags map[string]string) error {
-	tasks, err := db.ListTasks(ctx, w.pool, db.ListFilter{
-		Tags:           tags,
-		StaleThreshold: cfg.Worker.StaleDuration(),
+		return w.check(ctx)
 	})
 	if err != nil {
 		return err
 	}
-	for _, t := range tasks {
-		if err := w.trackAndCheck(ctx, t.ID); err != nil {
-			return err
+	return exitOrNil(w.failCode)
+}
+
+// waiter owns one wait operation's task set and completion policy.
+type waiter struct {
+	stderr         io.Writer
+	staleThreshold time.Duration
+	pool           *pgxpool.Pool
+	watch          *stateWatcher
+	remaining      map[string]bool
+	seen           map[string]bool
+	order          []string
+	any            bool
+	failCode       int
+}
+
+func (w *waiter) add(id string) {
+	if !w.seen[id] {
+		w.seen[id] = true
+		w.remaining[id] = true
+		w.order = append(w.order, id)
+	}
+}
+
+func (w *waiter) discover(ctx context.Context, tags map[string]string) error {
+	tasks, err := db.ListTasks(ctx, w.pool, db.ListFilter{Tags: tags, StaleThreshold: w.staleThreshold})
+	if err != nil {
+		return err
+	}
+	var ids, channels []string
+	for _, task := range tasks {
+		if !w.seen[task.ID] {
+			ids = append(ids, task.ID)
+			channels = append(channels, db.FromTaskChannel(task.ID))
 		}
+	}
+	if err := w.watch.notifier.Add(ctx, channels...); err != nil {
+		return fmt.Errorf("listen failed: %w", err)
+	}
+	for _, id := range ids {
+		w.add(id)
 	}
 	return nil
 }
 
-// --- notification loop ---
-
-// waitLoop blocks until all tracked tasks complete. If onWake is non-nil,
-// it is called when a worker wake event arrives (new task enqueued).
-func waitLoop(ctx context.Context, w *waiter, onWake func() error) error {
-	for !w.done() {
-		notif, err := w.conn.WaitForNotification(ctx)
-		if err != nil {
-			if ctx.Err() == context.DeadlineExceeded {
-				return handleTimeout(w.remaining)
-			}
-			if ctx.Err() != nil {
-				return nil
-			}
-			return fmt.Errorf("connection lost: %w", err)
-		}
-
-		if notif.Channel == db.ToWorkersChannel {
-			if onWake != nil {
-				if err := onWake(); err != nil {
-					return err
-				}
-			}
+func (w *waiter) check(ctx context.Context) (bool, error) {
+	for _, id := range w.order {
+		if !w.remaining[id] {
 			continue
 		}
-
-		w.handleCompletion(notif.Channel, notif.Payload)
-		if waitAny && w.done() {
-			break
+		task, err := db.GetTask(ctx, w.pool, id, w.staleThreshold)
+		if err != nil {
+			return false, err
+		}
+		if task != nil && !isTerminal(task.Status) {
+			continue
+		}
+		delete(w.remaining, id)
+		code := 1
+		if task == nil {
+			err = printError(w.stderr, errWithHints(fmt.Sprintf("task not found: %s", id),
+				"Run "+codeStyle.Render("nextask list")+" to see available tasks"))
+		} else {
+			code = taskExitCode(task)
+			err = printWaitLine(w.stderr, id, task.Status, code)
+		}
+		if err != nil {
+			return false, backoff.Permanent(err)
+		}
+		w.failCode = firstNonZero(w.failCode, code)
+		if w.any {
+			return true, nil
 		}
 	}
-
-	return exitOrNil(w.failCode)
+	return len(w.remaining) == 0, nil
 }
 
-// --- parsing and output ---
-
-func parseCompletionNotify(channel, payload string) (taskID string, exitCode int, ok bool) {
-	eventType, data, err := db.ParseEvent(payload)
-	if err != nil || eventType != db.EventTypeStatus {
-		return "", 0, false
-	}
-	var status db.TaskStatusEvent
-	if err := json.Unmarshal(data, &status); err != nil {
-		return "", 0, false
-	}
-	taskID = strings.TrimPrefix(channel, "from_task_")
-	fmt.Fprintf(os.Stderr, "task %s %s (exit %d)\n", taskID, status.Status, status.ExitCode)
-	return taskID, status.ExitCode, true
-}
-
-func handleTimeout(remaining map[string]bool) error {
+func handleTimeout(stderr io.Writer, remaining map[string]bool) error {
 	ids := make([]string, 0, len(remaining))
 	for id := range remaining {
 		ids = append(ids, id)
 	}
-	fmt.Fprintf(os.Stderr, "timeout: %s still running\n", strings.Join(ids, ", "))
-	return &exitCodeError{code: 124}
+	sort.Strings(ids)
+	_, err := fmt.Fprintf(stderr, "timeout: %s still running\n", strings.Join(ids, ", "))
+	return errors.Join(&exitCodeError{code: 124}, err)
 }
-
-func withSignalCancel(ctx context.Context) context.Context {
-	ctx, cancel := context.WithCancel(ctx)
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-	go func() {
-		select {
-		case <-sigCh:
-			cancel()
-		case <-ctx.Done():
-			signal.Stop(sigCh)
-		}
-	}()
-	return ctx
-}
-
-// --- helpers ---
 
 func isTerminal(status db.TaskStatus) bool {
 	switch status {
@@ -343,12 +225,13 @@ func taskExitCode(task *db.Task) int {
 	return 0
 }
 
-func printWaitLine(id string, status db.TaskStatus, exitCode int) {
+func printWaitLine(stderr io.Writer, id string, status db.TaskStatus, exitCode int) error {
 	if status == db.StatusStale {
-		fmt.Fprintf(os.Stderr, "task %s stale (worker heartbeat expired)\n", id)
-		return
+		_, err := fmt.Fprintf(stderr, "task %s stale (worker heartbeat expired)\n", id)
+		return err
 	}
-	fmt.Fprintf(os.Stderr, "task %s %s (exit %d)\n", id, status, exitCode)
+	_, err := fmt.Fprintf(stderr, "task %s %s (exit %d)\n", id, status, exitCode)
+	return err
 }
 
 func firstNonZero(current, new int) int {
@@ -363,24 +246,4 @@ func exitOrNil(code int) error {
 		return &exitCodeError{code: code}
 	}
 	return nil
-}
-
-func parseTags(tags []string) (map[string]string, error) {
-	parsed := make(map[string]string, len(tags))
-	for _, tag := range tags {
-		parts := strings.SplitN(tag, "=", 2)
-		if len(parts) != 2 {
-			return nil, errWithHints(fmt.Sprintf("invalid tag format: %s", tag),
-				"Expected format: "+codeStyle.Render("key=value"),
-			)
-		}
-		if parts[0] == "" || parts[1] == "" {
-			return nil, errWithHints(fmt.Sprintf("invalid tag format: %s", tag),
-				"Tag key and value must not be empty",
-				"Expected format: "+codeStyle.Render("key=value"),
-			)
-		}
-		parsed[parts[0]] = parts[1]
-	}
-	return parsed, nil
 }

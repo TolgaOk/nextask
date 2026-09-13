@@ -6,94 +6,17 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/TolgaOk/nextask/internal/db"
-	"github.com/TolgaOk/nextask/internal/source"
+	"github.com/TolgaOk/nextask/internal/integrations"
 )
-
-func TestGetSource_Noop(t *testing.T) {
-	src, err := GetSource("noop")
-	if err != nil {
-		t.Fatalf("GetSource(noop) error = %v", err)
-	}
-	if src.Type() != "noop" {
-		t.Errorf("Type() = %s, want noop", src.Type())
-	}
-}
-
-func TestGetSource_Git(t *testing.T) {
-	src, err := GetSource("git")
-	if err != nil {
-		t.Fatalf("GetSource(git) error = %v", err)
-	}
-	if src.Type() != "git" {
-		t.Errorf("Type() = %s, want git", src.Type())
-	}
-}
-
-func TestGetSource_Unknown(t *testing.T) {
-	_, err := GetSource("unknown")
-	if err == nil {
-		t.Error("GetSource(unknown) expected error, got nil")
-	}
-}
-
-func TestNoopSource_Fetch(t *testing.T) {
-	tmpDir := t.TempDir()
-	taskDir := filepath.Join(tmpDir, "task1")
-
-	src := NoopSource{}
-	log := &testLogger{}
-
-	err := src.Fetch(context.Background(), nil, taskDir, log)
-	if err != nil {
-		t.Fatalf("Fetch() error = %v", err)
-	}
-
-	// Verify directory was created
-	if _, err := os.Stat(taskDir); os.IsNotExist(err) {
-		t.Error("taskDir was not created")
-	}
-}
-
-func TestGitSource_Fetch_InvalidConfig(t *testing.T) {
-	src := GitSource{}
-	log := &testLogger{}
-
-	err := src.Fetch(context.Background(), json.RawMessage(`invalid`), "/tmp/test", log)
-	if err == nil {
-		t.Error("Fetch() with invalid JSON expected error, got nil")
-	}
-}
-
-func TestGitSource_Fetch_MissingRemote(t *testing.T) {
-	src := GitSource{}
-	log := &testLogger{}
-
-	cfg := json.RawMessage(`{"ref":"refs/nextask/test"}`)
-	err := src.Fetch(context.Background(), cfg, "/tmp/test", log)
-	if err == nil {
-		t.Error("Fetch() with missing remote expected error, got nil")
-	}
-}
-
-func TestGitSource_Fetch_MissingRef(t *testing.T) {
-	src := GitSource{}
-	log := &testLogger{}
-
-	cfg := json.RawMessage(`{"remote":"origin"}`)
-	err := src.Fetch(context.Background(), cfg, "/tmp/test", log)
-	if err == nil {
-		t.Error("Fetch() with missing ref expected error, got nil")
-	}
-}
 
 // Integration tests with DB
 
 func TestExecutor_NoopSource_Integration(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	ctx := context.Background()
 
 	workdir := t.TempDir()
@@ -118,9 +41,8 @@ func TestExecutor_NoopSource_Integration(t *testing.T) {
 	}
 }
 
-func TestExecutor_GitSource_Integration(t *testing.T) {
+func TestExecutor_LegacyGitTask(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	ctx := context.Background()
 
 	// Create source repo with a file
@@ -136,18 +58,19 @@ func TestExecutor_GitSource_Integration(t *testing.T) {
 	bareRepo := t.TempDir()
 	exec.Command("git", "init", "--bare", bareRepo).Run()
 
-	result, err := source.CreateSnapshot(sourceRepo, "test123")
-	if err != nil {
-		t.Fatalf("CreateSnapshot() error = %v", err)
+	ref := "refs/heads/project/test123"
+	if out, err := exec.Command("git", "-C", sourceRepo, "push", bareRepo, "HEAD:"+ref).CombinedOutput(); err != nil {
+		t.Fatalf("push: %v: %s", err, out)
 	}
-	if err := source.PushSnapshot(sourceRepo, bareRepo, result); err != nil {
-		t.Fatalf("PushSnapshot() error = %v", err)
+	head, err := exec.Command("git", "-C", sourceRepo, "rev-parse", "HEAD").Output()
+	if err != nil {
+		t.Fatal(err)
 	}
 
-	sourceConfig, _ := json.Marshal(GitSourceConfig{
+	sourceConfig, _ := json.Marshal(integrations.GitSnapshot{
 		Remote: bareRepo,
-		Ref:    result.Ref,
-		Commit: result.Commit,
+		Ref:    ref,
+		Commit: strings.TrimSpace(string(head)),
 	})
 	task := &db.Task{
 		ID:           "git001",
@@ -178,7 +101,6 @@ func TestExecutor_GitSource_Integration(t *testing.T) {
 
 func TestExecutor_UnknownSourceType_Integration(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	ctx := context.Background()
 
 	task := &db.Task{

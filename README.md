@@ -1,68 +1,52 @@
-# `nextask`
+# nextask
 
-[![Go 1.25](https://img.shields.io/badge/go-1.25-00ADD8?logo=go&logoColor=white)](https://go.dev) [![v0.1.1](https://img.shields.io/badge/v0.1.1-green)](https://github.com/TolgaOk/nextask) [![macOS | Linux](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-lightgrey)](https://github.com/TolgaOk/nextask)
+[![Go 1.25](https://img.shields.io/badge/go-1.25-00ADD8?logo=go&logoColor=white)](https://go.dev) [![v0.2.0](https://img.shields.io/badge/v0.2.0-blue)](https://github.com/TolgaOk/nextask/releases/tag/v0.2.0) [![macOS | Linux](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-lightgrey)](https://github.com/TolgaOk/nextask)
 
-Manage your runs from your local machine. `nextask` is a **distributed** task queue with live log streaming and Git-based source snapshotting for full **reproducibility**.
+Run a task on a remote machine, as if it were running in your **local** terminal.
+
+<img src="doc/nextask-diagram.svg" alt="Nextask connects your machine to a PostgreSQL task queue, workers, Git, and persistent S3 artifact storage" width="100%">
+
+Under the hood, `nextask` delegates the task to an available worker, streaming the logs back to your terminal, snapshotting the code at the time of submission, and storing the task artifacts produced in the task.
 
 ## Install
+
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/TolgaOk/nextask/main/install | bash
 ```
 
-## Usage
+## Quick start
 
-Enqueue tasks, start workers to process them, monitor their output and status, and organize them with tags.
-
-The example below shows the local CLI in the left pane and a worker running on a remote machine in the right pane.
-
-<img src="doc/demo.gif" alt="nextask demo" width="100%">
-
-See `nextask <command> --help` for all options and `nextask --help` for all commands.
-
-## Agent-ready
-
-`nextask` is agent-ready by design. Install the [skills](skills/) to let agents set up services, deploy workers, and manage tasks:
+Once a task is enqueued, an available worker picks it up.
+If provided `--attach` flag, `nextask` will hold the connection to the DB, streaming the logs to your terminal.
 
 ```sh
-npx skills add https://github.com/TolgaOk/nextask/skills
+nextask enqueue 'python train.py' --attach
 ```
 
-**Parallel monitoring.** Monitor logs, check task statuses, and track results without interrupting the agent's workflow.
+Provided the `with git` flag, `nextask` will take a snapshot of the repository (including uncommitted changes) the task call is made from and push it to the `<project>/<TASK_ID>` branch in the remote Git repository (see [config](doc/configuration.md) to set).
+If also provided the `with s3` flag, `nextask` will store the artifacts produced in the task at `<remote>/<task_id>/` within the S3 bucket (configured in your [config](doc/configuration.md)).
 
-**Resource management.** Tasks are serialized through a queue, so agents can enqueue many tasks without overloading workers.
-
-## How it works
-
-`nextask` has three main components: the **CLI**, the persistent **database and Git remote**, and the potentially distributed **workers**.
-
-<img src="doc/nextask_architecture.svg" alt="nextask architecture" width="80%">
-
-## Configuration
-
-Config files:
-
-```
-~/.config/nextask/global.toml            # global defaults
-.nextask.toml                            # per-project
+```sh
+nextask enqueue 'python train.py' --with git --with s3
 ```
 
-> **Priority:** CLI flags > environment variables > `.nextask.toml` > `global.toml`.
+You can access the logs of a task by providing the task ID or live watch the task logs by providing the `--attach` flag.
 
-Example config:
-
-```toml
-[db]
-url = "postgres://user@localhost:5432/nextask"   # or NEXTASK_DB_URL
-
-[source]
-remote = "~/.nextask/source.git"                 # bare repository used as the Git remote
-
-[worker]
-workdir = "/tmp/nextask"                         # or NEXTASK_WORKER_WORKDIR
-heartbeat_interval = "1m"                        # worker heartbeat frequency
-stale_threshold = 3                              # missed heartbeats before marking a worker stale
-log_flush_lines = 100                            # flush after this many lines
-log_flush_interval = "500ms"                     # maximum time between flushes
-log_buffer_size = 10000                          # log-line channel capacity
+```sh
+nextask log TASK_ID --attach
 ```
+
+Each `log` command is a viewer that request the logs from the DB.
+Hence, you can read past logs and follow new output independently.
+
+`nextask` is build **agentic** workflow in mind.
+Agents can `wait`, `log`, and `enqueue` tasks, all managed by the DB.
+
+## Read more
+
+- [configuration](doc/configuration.md)
+- [Git and S3](doc/integrations.md)
+- [CLI reference](doc/cli.md)
+
+Use `nextask --help` for all commands.

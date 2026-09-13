@@ -7,165 +7,136 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/TolgaOk/nextask/internal/db"
+	"github.com/TolgaOk/nextask/internal/integrations"
+	"github.com/TolgaOk/nextask/internal/taskexec"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// Executor handles task execution including source fetching and command running.
+// Executor runs task commands and captures their output.
 type Executor struct {
+	Stderr           io.Writer
 	Pool             *pgxpool.Pool
+	DBURL            string
 	Workdir          string
 	LogFlushLines    int
 	LogFlushInterval time.Duration
 	LogBufferSize    int
+	RemoveWorkdir    bool
 }
 
-// ExitResult contains information about how a command exited.
-type ExitResult struct {
-	Code   int
-	Signal os.Signal
-	Err    error
+// ExitResult is shared with integration runtimes.
+type ExitResult = taskexec.Result
+
+type taskExecution struct {
+	result    *ExitResult
+	directory string // Set only when this execution created the directory.
 }
 
-func (r *ExitResult) String() string {
-	if r.Signal != nil {
-		return fmt.Sprintf("signal: %s", r.Signal)
-	}
-	return fmt.Sprintf("exit code: %d", r.Code)
-}
-
-// Execute runs a task and returns the exit result.
+// Execute runs a task and applies standalone executor cleanup.
+// Workers use execute so they can journal the result before removing any files.
 func (e *Executor) Execute(ctx context.Context, task *db.Task) *ExitResult {
-	taskDir := filepath.Join(e.Workdir, task.ID)
-	dbLog := NewDBLogger(e.Pool, task.ID)
+	result, directory := e.execute(ctx, task)
+	e.cleanup(directory)
+	return result
+}
 
-	src, err := GetSource(task.SourceType)
-	if err != nil {
-		dbLog.Log(ctx, "nextask", fmt.Sprintf("[error] unable to instantiate source '%s': %v", task.SourceType, err))
-		return &ExitResult{Code: 1, Err: err}
+func (e *Executor) cleanup(directory string) {
+	if e.RemoveWorkdir && directory != "" {
+		if err := os.RemoveAll(directory); err != nil {
+			fmt.Fprintf(e.errorWriter(), "cleanup failed: %v\n", err)
+		}
 	}
-	if err := src.Fetch(ctx, task.SourceConfig, taskDir, dbLog); err != nil {
-		dbLog.Log(ctx, "nextask", fmt.Sprintf("[error] source fetch failed: %v", err))
-		return &ExitResult{Code: 1, Err: err}
+}
+
+// execute returns the outcome and the directory owned by this execution.
+func (e *Executor) execute(ctx context.Context, task *db.Task) (result *ExitResult, directory string) {
+	taskDir := filepath.Join(e.Workdir, task.ID)
+	dbLog := NewDBLogger(e.Pool, task.ID, e.errorWriter())
+
+	if err := db.ValidateTaskID(task.ID); err != nil {
+		return &ExitResult{Code: 1, Err: err}, directory
 	}
+	command := task.Command
+	if task.ExecutionCommand != nil {
+		command = *task.ExecutionCommand
+	} else {
+		var err error
+		command, err = integrations.LegacyCommand(task.SourceType, task.SourceConfig, task.Command)
+		if err != nil {
+			dbLog.Log(ctx, "nextask", fmt.Sprintf("[error] prepare legacy task: %v", err))
+			return &ExitResult{Code: 1, Err: err}, directory
+		}
+	}
+	if err := e.createTaskDir(taskDir); err != nil {
+		dbLog.Log(ctx, "nextask", fmt.Sprintf("[error] %v", err))
+		return &ExitResult{Code: 1, Err: err}, directory
+	}
+	directory = taskDir
 
 	// Create task logger with file output now that taskDir exists
 	log, err := NewTaskLogger(e.Pool, task.ID, taskDir, LogConfig{
+		Stderr:        e.errorWriter(),
 		FlushLines:    e.LogFlushLines,
 		FlushInterval: e.LogFlushInterval,
 		BufferSize:    e.LogBufferSize,
 	})
 	if err != nil {
 		dbLog.Log(ctx, "nextask", fmt.Sprintf("[error] create task logger: %v", err))
-		return &ExitResult{Code: 1, Err: err}
+		return &ExitResult{Code: 1, Err: err}, directory
 	}
-	defer log.Close()
+	defer func() {
+		if err := log.Close(); err != nil {
+			result.Err = errors.Join(result.Err, fmt.Errorf("capture task logs: %w", err))
+			if result.Code == 0 {
+				result.Code = 1
+			}
+		}
+	}()
 
 	log.Log(ctx, "nextask", fmt.Sprintf("[info] running: %s", task.Command))
-	return e.runCommand(ctx, task, taskDir, log)
+	executable := *task
+	executable.Command = command
+	return e.runCommand(ctx, &executable, taskDir, log), directory
+}
+
+func (e *Executor) createTaskDir(taskDir string) error {
+	if err := os.MkdirAll(e.Workdir, 0755); err != nil {
+		return fmt.Errorf("create worker directory: %w", err)
+	}
+	if err := os.Mkdir(taskDir, 0755); errors.Is(err, os.ErrExist) {
+		return fmt.Errorf("task directory already exists: %s; move it aside or use a new task ID", taskDir)
+	} else if err != nil {
+		return fmt.Errorf("create task directory: %w", err)
+	}
+	return nil
 }
 
 func (e *Executor) runCommand(ctx context.Context, task *db.Task, taskDir string, log Logger) *ExitResult {
-	cmd := exec.CommandContext(ctx, "sh", "-c", task.Command)
-	cmd.Dir = taskDir
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-
-	processDone := make(chan struct{})
-
-	cmd.Cancel = func() error {
-		if cmd.Process == nil {
-			return os.ErrProcessDone
-		}
-
-		pgid, err := syscall.Getpgid(cmd.Process.Pid)
-		if err != nil {
-			if errors.Is(err, syscall.ESRCH) {
-				return os.ErrProcessDone
-			}
-			return err
-		}
-
-		if err := syscall.Kill(-pgid, syscall.SIGINT); err != nil {
-			if errors.Is(err, syscall.ESRCH) {
-				return os.ErrProcessDone
-			}
-			return err
-		}
-
-		go func() {
-			timer := time.NewTimer(5 * time.Second)
-			defer timer.Stop()
-			select {
-			case <-timer.C:
-				_ = syscall.Kill(-pgid, syscall.SIGKILL)
-			case <-processDone:
-			}
-		}()
-
-		return nil
-	}
-	cmd.WaitDelay = 10 * time.Second
-
-	stdout, err := cmd.StdoutPipe()
+	executable, err := os.Executable()
 	if err != nil {
 		return &ExitResult{Code: 1, Err: err}
 	}
-	stderr, err := cmd.StderrPipe()
-	if err != nil {
-		return &ExitResult{Code: 1, Err: err}
-	}
-
-	if err := cmd.Start(); err != nil {
-		return &ExitResult{Code: 1, Err: err}
-	}
-
+	stdout, outWriter := io.Pipe()
+	stderr, errWriter := io.Pipe()
 	var wg sync.WaitGroup
 	wg.Add(2)
-
-	go func() {
-		defer wg.Done()
-		scanLines(ctx, stdout, "stdout", log)
-	}()
-
-	go func() {
-		defer wg.Done()
-		scanLines(ctx, stderr, "stderr", log)
-	}()
-
+	go func() { defer wg.Done(); defer stdout.Close(); scanLines(ctx, stdout, "stdout", log) }()
+	go func() { defer wg.Done(); defer stderr.Close(); scanLines(ctx, stderr, "stderr", log) }()
+	result := taskexec.Run(ctx, taskexec.Command{
+		Text: task.Command, Dir: taskDir,
+		Env:    append(os.Environ(), "NEXTASK_TASK_ID="+task.ID, "NEXTASK_DB_URL="+e.DBURL, "NEXTASK_EXECUTABLE="+executable),
+		Stdout: outWriter, Stderr: errWriter,
+		CleanupTimeout: time.Duration(task.CleanupTimeoutMS) * time.Millisecond,
+	})
+	outWriter.Close()
+	errWriter.Close()
 	wg.Wait()
-
-	err = cmd.Wait()
-	close(processDone)
-
-	if errors.Is(err, exec.ErrWaitDelay) {
-		log.Log(ctx, "nextask", "[warn] pipes forced closed after WaitDelay (orphaned child?)")
-		if cmd.ProcessState != nil && cmd.ProcessState.ExitCode() == 0 {
-			return &ExitResult{Code: 0, Err: err}
-		}
-		if cmd.ProcessState != nil {
-			return &ExitResult{Code: cmd.ProcessState.ExitCode(), Err: err}
-		}
-		return &ExitResult{Code: 1, Err: err}
-	}
-
-	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			if status, ok := exitErr.Sys().(syscall.WaitStatus); ok && status.Signaled() {
-				sig := status.Signal()
-				return &ExitResult{Code: -int(sig), Signal: sig}
-			}
-			return &ExitResult{Code: exitErr.ExitCode()}
-		}
-		return &ExitResult{Code: 1, Err: err}
-	}
-
-	return &ExitResult{Code: 0}
+	return result
 }
 
 const maxLineSize = 1024 * 1024 // 1MB
@@ -202,4 +173,11 @@ func scanLines(ctx context.Context, r io.Reader, stream string, log Logger) {
 			return
 		}
 	}
+}
+
+func (e *Executor) errorWriter() io.Writer {
+	if e.Stderr != nil {
+		return e.Stderr
+	}
+	return os.Stderr
 }

@@ -9,7 +9,6 @@ import (
 
 func TestDBLogger_LogsStdout(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	ctx := context.Background()
 
 	task := &db.Task{
@@ -39,7 +38,6 @@ func TestDBLogger_LogsStdout(t *testing.T) {
 
 func TestDBLogger_LogsStderr(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	ctx := context.Background()
 
 	task := &db.Task{
@@ -69,7 +67,6 @@ func TestDBLogger_LogsStderr(t *testing.T) {
 
 func TestDBLogger_LogsBothStreams(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	ctx := context.Background()
 
 	task := &db.Task{
@@ -98,7 +95,6 @@ func TestDBLogger_LogsBothStreams(t *testing.T) {
 
 func TestDBLogger_LogsErrorOnSourceFailure(t *testing.T) {
 	pool := setupTestDB(t)
-	defer pool.Close()
 	ctx := context.Background()
 
 	task := &db.Task{
@@ -119,4 +115,3 @@ func TestDBLogger_LogsErrorOnSourceFailure(t *testing.T) {
 		t.Error("error log not captured for source failure")
 	}
 }
-

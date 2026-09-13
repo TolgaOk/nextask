@@ -18,15 +18,35 @@ jobs:
         with:
           go-version-file: go.mod
 
+      - name: Verify version
+        run: |
+          release_version="${GITHUB_REF_NAME#v}"
+          binary_version="$(go run ./cmd/nextask --version)"
+          if [ "$binary_version" != "nextask version $release_version" ]; then
+            echo "Version mismatch: tag $GITHUB_REF_NAME, binary $binary_version" >&2
+            exit 1
+          fi
+
       - name: Build binaries
         run: |
           for pair in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64; do
-            GOOS=${pair%/*} GOARCH=${pair#*/} go build -o nextask ./cmd/nextask
+            CGO_ENABLED=0 GOOS=${pair%/*} GOARCH=${pair#*/} go build -trimpath -o nextask ./cmd/nextask
             tar czf "nextask_${pair%/*}_${pair#*/}.tar.gz" nextask
             rm nextask
           done
 
       - name: Create release
-        run: gh release create "${{ github.ref_name }}" nextask_*.tar.gz --generate-notes
+        run: |
+          release_flags=(--verify-tag)
+          if [[ "$GITHUB_REF_NAME" == *-* ]]; then
+            release_flags+=(--prerelease --latest=false)
+          fi
+          release_notes="doc/releases/${GITHUB_REF_NAME#v}.md"
+          if [[ -f "$release_notes" ]]; then
+            release_flags+=(--notes-file "$release_notes")
+          else
+            release_flags+=(--generate-notes)
+          fi
+          gh release create "$GITHUB_REF_NAME" nextask_*.tar.gz "${release_flags[@]}"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

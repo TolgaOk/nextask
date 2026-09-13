@@ -34,7 +34,7 @@ func findListenerPID(ctx context.Context, pool *pgxpool.Pool, channel string) (i
 // === Listener Recovery Tests ===
 
 func TestListener_ReconnectAfterBackendTerminate(t *testing.T) {
-	defer goleak.VerifyNone(t)
+	t.Cleanup(func() { goleak.VerifyNone(t) })
 
 	ctx := context.Background()
 	dbURL := getTestDBURL(t)
@@ -93,7 +93,7 @@ func TestListener_ReconnectAfterBackendTerminate(t *testing.T) {
 }
 
 func TestListener_ReconnectMultipleTerminations(t *testing.T) {
-	defer goleak.VerifyNone(t)
+	t.Cleanup(func() { goleak.VerifyNone(t) })
 
 	ctx := context.Background()
 	dbURL := getTestDBURL(t)
@@ -152,7 +152,7 @@ func TestListener_ReconnectMultipleTerminations(t *testing.T) {
 }
 
 func TestListener_ContinuesAfterBriefOutage(t *testing.T) {
-	defer goleak.VerifyNone(t)
+	t.Cleanup(func() { goleak.VerifyNone(t) })
 
 	ctx := context.Background()
 	dbURL := getTestDBURL(t)
@@ -211,7 +211,7 @@ func TestListener_ContinuesAfterBriefOutage(t *testing.T) {
 }
 
 func TestListener_CloseDuringReconnect(t *testing.T) {
-	defer goleak.VerifyNone(t)
+	t.Cleanup(func() { goleak.VerifyNone(t) })
 
 	dbURL := getTestDBURL(t)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -258,13 +258,12 @@ func TestListener_CloseDuringReconnect(t *testing.T) {
 // === Retry with Real DB Operations ===
 
 func TestRetry_CompleteTaskAfterPoolRecovery(t *testing.T) {
-	defer goleak.VerifyNone(t)
+	t.Cleanup(func() { goleak.VerifyNone(t) })
 
 	ctx := context.Background()
 	dbURL := getTestDBURL(t)
 
 	pool := setupTestDB(t)
-	defer pool.Close()
 
 	// Create and claim task
 	task := &Task{ID: "retry_complete", Command: "test", Status: StatusPending, Tags: map[string]string{}}
@@ -312,13 +311,12 @@ func TestRetry_CompleteTaskAfterPoolRecovery(t *testing.T) {
 }
 
 func TestRetry_HeartbeatRecovery(t *testing.T) {
-	defer goleak.VerifyNone(t)
+	t.Cleanup(func() { goleak.VerifyNone(t) })
 
 	ctx := context.Background()
 	dbURL := getTestDBURL(t)
 
 	pool := setupTestDB(t)
-	defer pool.Close()
 
 	// Register worker
 	if err := RegisterWorker(ctx, pool, "hb_retry", 1234, "testhost", "/tmp"); err != nil {
@@ -326,7 +324,7 @@ func TestRetry_HeartbeatRecovery(t *testing.T) {
 	}
 
 	// Get initial heartbeat
-	workers, _ := ListWorkers(ctx, pool, nil)
+	workers, _ := ListWorkers(ctx, pool, WorkerListFilter{})
 	if len(workers) == 0 {
 		t.Fatal("worker not found")
 	}
@@ -359,20 +357,19 @@ func TestRetry_HeartbeatRecovery(t *testing.T) {
 	}
 
 	// Verify heartbeat was updated
-	workers, _ = ListWorkers(ctx, pool, nil)
+	workers, _ = ListWorkers(ctx, pool, WorkerListFilter{})
 	if !workers[0].LastHeartbeat.After(initialHeartbeat) {
 		t.Error("heartbeat was not updated after recovery")
 	}
 }
 
 func TestRetry_ClaimTaskRecovery(t *testing.T) {
-	defer goleak.VerifyNone(t)
+	t.Cleanup(func() { goleak.VerifyNone(t) })
 
 	ctx := context.Background()
 	dbURL := getTestDBURL(t)
 
 	pool := setupTestDB(t)
-	defer pool.Close()
 
 	// Create task
 	task := &Task{ID: "claim_retry", Command: "test", Status: StatusPending, Tags: map[string]string{}}
@@ -416,13 +413,12 @@ func TestRetry_ClaimTaskRecovery(t *testing.T) {
 // === Pool Recovery Tests ===
 
 func TestPool_RecoverFromMassTermination(t *testing.T) {
-	defer goleak.VerifyNone(t)
+	t.Cleanup(func() { goleak.VerifyNone(t) })
 
 	ctx := context.Background()
 	dbURL := getTestDBURL(t)
 
 	pool := setupTestDB(t)
-	defer pool.Close()
 
 	// Control pool
 	controlPool, err := pgxpool.New(ctx, dbURL)
