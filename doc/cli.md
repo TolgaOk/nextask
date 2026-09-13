@@ -1,6 +1,7 @@
 # CLI reference
 
-Add `--help` to any command for all options. Connection settings are covered in [configuration](configuration.md).
+Add `--help` to any command for all options.
+Connection settings are covered in [configuration](configuration.md).
 
 ## Tasks
 
@@ -15,7 +16,8 @@ nextask cancel TASK_ID --timeout 30s                        # cancel and wait fo
 nextask remove TASK_ID                                      # delete the task and its logs
 ```
 
-Quote the command passed to `enqueue`. Git and S3 require `--with`; their settings come from config.
+Quote the command passed to `enqueue`.
+Git and S3 require `--with`; their settings come from config.
 Removing a task keeps its Git snapshot and stored artifacts.
 
 ## Logs and waiting
@@ -30,10 +32,14 @@ nextask wait task-a --timeout 30s       # stop waiting after 30 seconds
 ```
 
 - `wait` waits for all selected tasks and returns the first failure code it sees.
-- `--any` returns the first finished task's code, including tasks already finished. Other tasks keep running.
-- Waiting by tag includes matching tasks added while waiting. It ends when all selected tasks finish, or one with `--any`.
-- A timeout returns `124`. Missing tasks and workers that stop reporting also cause an error.
-- `log --attach` shows output without returning the task's exit code. `enqueue --attach` returns that code.
+- `--any` returns the first finished task's code, including tasks already finished.
+  Other tasks keep running.
+- Waiting by tag includes matching tasks added while waiting.
+  It ends when all selected tasks finish, or one with `--any`.
+- A timeout returns `124`.
+  Missing tasks and workers that stop reporting also cause an error.
+- `log --attach` shows output without returning the task's exit code.
+  `enqueue --attach` returns that code.
 - Multiple terminals or agents can follow the same task independently.
 
 ## Workers
@@ -47,12 +53,15 @@ nextask worker list --status running --limit 5  # list active workers
 nextask worker stop WORKER_ID --timeout 30s     # stop and wait for confirmation
 ```
 
-Each worker runs one task at a time. Stopping a worker also interrupts its current task.
-Use `--workdir DIR` to choose where task files are kept. `--rm` removes a task's directory after it finishes.
+Each worker runs one task at a time.
+Stopping a worker also interrupts its current task.
+Use `--workdir DIR` to choose where task files are kept.
+`--rm` removes a task's directory after it finishes.
 
 Both `list` commands support `--limit` (default 50), `--offset`, `--since`, `--status`, and either `--json` or `--csv`.
 Task statuses are `pending`, `running`, `completed`, `failed`, `cancelled`, and `stale`.
-Worker statuses are `running`, `stopped`, and `stale`. `stale` means the worker has stopped reporting.
+Worker statuses are `running`, `stopped`, and `stale`.
+`stale` means the worker has stopped reporting.
 
 ## Artifacts
 
@@ -62,7 +71,8 @@ nextask s3 fetch TASK_ID --to ./artifacts --dry-run  # preview without downloadi
 ```
 
 Fetch uses the configured artifact storage and needs no DB connection.
-`--to` is required; add `--overwrite` to replace existing files. Repeat `--include` and `--exclude` to choose files; exclusions win.
+`--to` is required; add `--overwrite` to replace existing files.
+Repeat `--include` and `--exclude` to choose files; exclusions win.
 See [S3 storage](s3.md) for storage settings and limits.
 
 ## Configuration and help
